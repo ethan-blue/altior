@@ -1,0 +1,10 @@
+[
+  "{\"jsonrpc\":\"2.0\",\"id\":2,\"result\":{\"sessionId\":\"beta-session-1\"}}",
+  "{\"jsonrpc\":\"2.0\",\"method\":\"session/update\",\"params\":{\"sessionId\":\"beta-session-1\",\"update\":{\"sessionUpdate\":\"user_message_chunk\",\"content\":{\"type\":\"text\",\"text\":\"Reply with the single word: pong\"}}}}",
+  "{\"jsonrpc\":\"2.0\",\"method\":\"session/update\",\"params\":{\"sessionId\":\"beta-session-1\",\"update\":{\"sessionUpdate\":\"agent_thought_chunk\",\"content\":{\"type\":\"text\",\"text\":\"deciding\"}}}}",
+  "{\"jsonrpc\":\"2.0\",\"method\":\"session/update\",\"params\":{\"sessionId\":\"beta-session-1\",\"update\":{\"sessionUpdate\":\"usage_update\",\"used\":42,\"size\":2000}}}",
+  "{\"jsonrpc\":\"2.0\",\"method\":\"session/update\",\"params\":{\"sessionId\":\"beta-session-1\",\"update\":{\"sessionUpdate\":\"agent_message_chunk\",\"content\":{\"type\":\"text\",\"text\":\"No\"},\"messageId\":\"m1\"}}}",
+  "{\"jsonrpc\":\"2.0\",\"method\":\"session/update\",\"params\":{\"sessionId\":\"beta-session-1\",\"update\":{\"sessionUpdate\":\"agent_message_chunk\",\"content\":{\"type\":\"text\",\"text\":\".\"},\"messageId\":\"m1\"}}}",
+  "{\"jsonrpc\":\"2.0\",\"id\":3,\"result\":{\"stopReason\":\"refusal\"}}",
+  "{\"jsonrpc\":\"2.0\",\"method\":\"_custom/extension\",\"params\":{\"note\":\"agents may send extension methods\"}}"
+]

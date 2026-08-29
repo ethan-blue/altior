@@ -1,0 +1,57 @@
+[
+  {
+    "body": {
+      "diagnostic": "{\"sessionId\":\"alpha-session-1\"}",
+      "kind": "acp.session.created"
+    },
+    "wire_kind": "response"
+  },
+  {
+    "body": {
+      "kind": "message.delta",
+      "text": "Hel"
+    },
+    "wire_kind": "session/update:agent_message_chunk"
+  },
+  {
+    "body": {
+      "kind": "message.delta",
+      "text": "lo"
+    },
+    "wire_kind": "session/update:agent_message_chunk"
+  },
+  {
+    "body": {
+      "diagnostic": "{\"status\":\"pending\",\"toolCallId\":\"tc_alpha_1\"}",
+      "kind": "acp.tool"
+    },
+    "wire_kind": "session/update:tool_call"
+  },
+  {
+    "body": {
+      "diagnostic": "{\"requestId\":\"alpha-perm-1\",\"toolCallId\":\"tc_alpha_1\"}",
+      "kind": "acp.permission.requested"
+    },
+    "wire_kind": "session/request_permission"
+  },
+  {
+    "body": {
+      "diagnostic": "{\"status\":\"completed\",\"toolCallId\":\"tc_alpha_1\"}",
+      "kind": "acp.tool"
+    },
+    "wire_kind": "session/update:tool_call_update"
+  },
+  {
+    "body": {
+      "kind": "message.delta",
+      "text": " done"
+    },
+    "wire_kind": "session/update:agent_message_chunk"
+  },
+  {
+    "body": {
+      "kind": "turn.completed"
+    },
+    "wire_kind": "response"
+  }
+]

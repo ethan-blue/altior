@@ -1,0 +1,58 @@
+[
+  {
+    "body": {
+      "diagnostic": "{\"sessionId\":\"beta-session-1\"}",
+      "kind": "acp.session.created"
+    },
+    "wire_kind": "response"
+  },
+  {
+    "body": {
+      "diagnostic": "{\"text\":\"Reply with the single word: pong\"}",
+      "kind": "acp.user_message"
+    },
+    "wire_kind": "session/update:user_message_chunk"
+  },
+  {
+    "body": {
+      "diagnostic": "{\"content\":{\"text\":\"deciding\",\"type\":\"text\"}}",
+      "kind": "acp.agent_thought"
+    },
+    "wire_kind": "session/update:agent_thought_chunk"
+  },
+  {
+    "body": {
+      "diagnostic": "{\"sessionUpdate\":\"usage_update\",\"size\":2000,\"used\":42}",
+      "kind": "acp.update.usage_update"
+    },
+    "wire_kind": "session/update:usage_update"
+  },
+  {
+    "body": {
+      "kind": "message.delta",
+      "text": "No"
+    },
+    "wire_kind": "session/update:agent_message_chunk"
+  },
+  {
+    "body": {
+      "kind": "message.delta",
+      "text": "."
+    },
+    "wire_kind": "session/update:agent_message_chunk"
+  },
+  {
+    "body": {
+      "diagnostic": "{\"diagnostic\":\"turn stopped: refusal\"}",
+      "kind": "acp.turn.failed"
+    },
+    "wire_kind": "response"
+  },
+  {
+    "body": {
+      "diagnostic": "{\"method\":\"_custom/extension\"}",
+      "kind": "acp.notification.unmapped"
+    },
+    "wire_kind": "notification:_custom/extension"
+  }
+]

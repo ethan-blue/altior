@@ -1,5 +1,6 @@
 [workspace]
 members = [
+  "crates/altior-acp",
   "crates/altior-core",
   "crates/altior-domain",
   "crates/altior-ipc",

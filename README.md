@@ -21,9 +21,14 @@ crate with bounded length-prefixed frames, per-launch capability tokens,
 pure session machines (shared per-launch event log, sequence/catch-up with
 retained-window replay or explicit gaps, epoch change on Core restart), and
 `altior-core` with the spawn-or-attach supervisor, turn ownership that
-survives UI reload, and two-sided duplicate-command prevention. The OS
-transport (tokio named pipes / Unix domain sockets) is a named later slice.
-Next is the P0 technical spike work described in
+survives UI reload, and two-sided duplicate-command prevention. P0.3 adds
+the narrow ACP v1 adapter (`altior-acp`, ADR 0007): capability-only
+negotiation, unknown-event-preserving mapping onto the protocol contracts,
+prompt delivery classified onto the frozen `DeliveryState` vocabulary, a
+pure process lifecycle machine, and an opt-in real-agent smoke harness
+behind `ALTIOR_ACP_SMOKE_AGENTS`. The OS transport (tokio named pipes /
+Unix domain sockets) is a named later slice. Next is the P0 technical
+spike work described in
 [Work Packages](docs/WORK_PACKAGES.md).
 
 ## Design anchors

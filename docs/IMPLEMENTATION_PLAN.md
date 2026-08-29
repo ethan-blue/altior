@@ -103,12 +103,45 @@ Evidence:
 - map create, prompt, delta, tool, permission, cancel, resume, and failure events
 - classify delivery as absent, confirmed, rejected, or indeterminate
 
+Status: implemented in full (ADR 0007). The `altior-acp` crate is a
+replaceable adapter beside the contracts (same dependency boundary as
+`altior-ipc`, asserted by the dependency-boundary test): newline-delimited
+JSON-RPC 2.0 over a subprocess's stdin/stdout with a 1 MiB line cap,
+negotiation on capabilities only (the agent's protocol version is recorded
+as opaque data, never a feature gate), a mapping table from the modeled ACP
+v1 subset onto protocol event bodies with everything unknown preserved
+verbatim under `acp.*` provider kinds, prompt delivery classified onto the
+frozen `DeliveryState` vocabulary (crash and idle timeout are always
+Indeterminate, never Absent; only Absent/Rejected may resend), and a pure
+lifecycle machine for cancel, crash, idle timeout, and cleanup with no
+timers. The smoke host is opt-in via `ALTIOR_ACP_SMOKE_AGENTS` (two
+`;;`-separated agent command lines, watchdog-killed at 120 s); default
+gates never spawn processes, touch the network, or depend on credentials.
+Running it against two real agents is an explicit operator action with
+per-machine credentials, so the in-repo evidence is the fixture-pinned
+normalizer plus the deterministic machine tests.
+
 Evidence:
 
 - normalized trace fixtures for two agents
+  (`crates/altior-acp/tests/traces.rs`, fixtures regenerated only by the
+  `#[ignore]`d regeneration test, same pattern as dto-export)
 - unknown event and malformed frame tests
+  (`crates/altior-acp/tests/unknown_and_malformed.rs`: unknown kinds
+  preserve; bad JSON, wrong envelope, missing discriminator, oversized and
+  non-UTF-8 lines fail with typed errors)
 - process crash, idle timeout, cancellation, and cleanup tests
-- real-agent smoke report kept free of user transcript and secrets
+  (`crates/altior-acp/tests/lifecycle.rs`: crash is Indeterminate and
+  collapses straight to reap; cancel answers permissions then waits for the
+  settled turn; idle kills without waiting; settled cleanup kills and reaps)
+- dependency-boundary test extended to `altior-acp`
+  (`crates/altior-core/tests/dependency_boundaries.rs`)
+- opt-in smoke harness (`crates/altior-acp/tests/smoke.rs`) proves the
+  initialize → session/new → prompt → normalize → confirm-delivery →
+  kill-and-reap flow end to end; it skips with a message when the env var
+  is unset, and the real-agent run stays an operator action with its own
+  credentials — the harness never logs transcript content, only counts and
+  delivery classification
 
 ### P0.4 Desktop interaction spike
 
