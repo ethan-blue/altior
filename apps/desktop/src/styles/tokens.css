@@ -1,0 +1,69 @@
+/*
+ * Semantic design tokens (`docs/UI_ARCHITECTURE.md`).
+ *
+ * Feature and component styles must reference these names; they must not
+ * introduce raw colors, shadows, radii, or spacing values.
+ */
+:root {
+  /* color */
+  --color-canvas: #f6f7f9;
+  --color-surface: #ffffff;
+  --color-elevated: #ffffff;
+  --color-border: #d4d7dc;
+  --color-text: #1c1f24;
+  --color-muted: #5b616b;
+  --color-accent: #2f5fd7;
+  --color-danger: #b3362b;
+  --color-warning: #946200;
+  --color-success: #2e7d43;
+  --color-selection: #dbe4fb;
+  --color-focus: #2f5fd7;
+
+  /* spacing */
+  --spacing-2: 2px;
+  --spacing-4: 4px;
+  --spacing-6: 6px;
+  --spacing-8: 8px;
+  --spacing-12: 12px;
+  --spacing-16: 16px;
+  --spacing-24: 24px;
+  --spacing-32: 32px;
+
+  /* typography */
+  --font-ui: "Segoe UI", system-ui, -apple-system, sans-serif;
+  --font-body: "Segoe UI", system-ui, -apple-system, sans-serif;
+  --font-code: "Cascadia Code", ui-monospace, "Consolas", monospace;
+  --font-size-ui: 13px;
+  --font-size-body: 14px;
+  --font-size-code: 12px;
+  --line-height-compact: 1.25;
+  --line-height-normal: 1.5;
+
+  /* geometry */
+  --control-height: 28px;
+  --row-height: 24px;
+  --pane-min-width: 280px;
+  --pane-max-width: 480px;
+  --border-radius: 4px;
+  --divider-width: 1px;
+  --focus-ring: 2px;
+
+  /* elevation: menu, dialog, tooltip only */
+  --elevation-menu: 0 2px 8px rgba(28, 31, 36, 0.14);
+  --elevation-dialog: 0 8px 24px rgba(28, 31, 36, 0.2);
+  --elevation-tooltip: 0 1px 4px rgba(28, 31, 36, 0.18);
+
+  /* motion */
+  --motion-fast: 120ms;
+  --motion-normal: 200ms;
+  --motion-slow: 320ms;
+  --easing-standard: cubic-bezier(0.2, 0, 0, 1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --motion-fast: 0ms;
+    --motion-normal: 0ms;
+    --motion-slow: 0ms;
+  }
+}

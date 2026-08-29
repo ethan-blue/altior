@@ -1,0 +1,141 @@
+/* Fixture shell layout. Every visual value comes from tokens.css. */
+.shell {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+  background: var(--color-canvas);
+}
+
+.header {
+  display: flex;
+  align-items: baseline;
+  gap: var(--spacing-12);
+  padding: var(--spacing-12) var(--spacing-16);
+  background: var(--color-surface);
+  border-bottom: var(--divider-width) solid var(--color-border);
+}
+
+.title {
+  margin: 0;
+  font-family: var(--font-ui);
+  font-size: var(--font-size-ui);
+  line-height: var(--line-height-compact);
+}
+
+.subtitle {
+  margin: 0;
+  color: var(--color-muted);
+  font-family: var(--font-ui);
+  font-size: var(--font-size-ui);
+  line-height: var(--line-height-compact);
+}
+
+.statusBar {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-16);
+  min-height: var(--control-height);
+  padding: var(--spacing-4) var(--spacing-16);
+  background: var(--color-surface);
+  border-bottom: var(--divider-width) solid var(--color-border);
+  font-family: var(--font-ui);
+  font-size: var(--font-size-ui);
+  color: var(--color-muted);
+}
+
+.pending {
+  color: var(--color-muted);
+}
+
+.capabilities {
+  display: flex;
+  gap: var(--spacing-8);
+}
+
+.capability {
+  font-family: var(--font-code);
+  font-size: var(--font-size-code);
+  color: var(--color-text);
+  background: var(--color-selection);
+  border-radius: var(--border-radius);
+  padding: var(--spacing-2) var(--spacing-6);
+}
+
+.timeline {
+  flex: 1;
+  padding: var(--spacing-16);
+  overflow-y: auto;
+}
+
+.eventRow {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-8);
+  min-height: var(--row-height);
+  padding: var(--spacing-2) 0;
+  border-bottom: var(--divider-width) solid var(--color-border);
+  font-family: var(--font-code);
+  font-size: var(--font-size-code);
+}
+
+.sequence {
+  color: var(--color-muted);
+  min-width: var(--spacing-32);
+}
+
+.eventKind {
+  color: var(--color-text);
+}
+
+.diagnostic {
+  color: var(--color-muted);
+  background: var(--color-surface);
+  border: var(--divider-width) solid var(--color-border);
+  border-radius: var(--border-radius);
+  padding: var(--spacing-2) var(--spacing-6);
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.composer {
+  display: flex;
+  gap: var(--spacing-8);
+  padding: var(--spacing-12) var(--spacing-16);
+  background: var(--color-surface);
+  border-top: var(--divider-width) solid var(--color-border);
+}
+
+.composerInput {
+  flex: 1;
+  height: var(--control-height);
+  padding: var(--spacing-4) var(--spacing-8);
+  font-family: var(--font-body);
+  font-size: var(--font-size-body);
+  color: var(--color-text);
+  background: var(--color-canvas);
+  border: var(--divider-width) solid var(--color-border);
+  border-radius: var(--border-radius);
+}
+
+.composerInput:focus-visible {
+  outline: var(--focus-ring) solid var(--color-focus);
+}
+
+.composerSend {
+  height: var(--control-height);
+  padding: var(--spacing-4) var(--spacing-12);
+  font-family: var(--font-ui);
+  font-size: var(--font-size-ui);
+  color: var(--color-surface);
+  background: var(--color-accent);
+  border: none;
+  border-radius: var(--border-radius);
+}
+
+.composerSend:focus-visible {
+  outline: var(--focus-ring) solid var(--color-focus);
+}
+
+.composerSend:disabled {
+  background: var(--color-border);
+}

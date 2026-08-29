@@ -1,0 +1,19 @@
+[package]
+name = "altior-protocol"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+altior-domain = { path = "../altior-domain" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+ts-rs = { version = "12.0.1", features = ["no-serde-warnings"], optional = true }
+
+[features]
+# Export the TypeScript DTO bindings for the Desktop client (ADR 0005).
+dto-export = ["dep:ts-rs"]
+
+[lints]
+workspace = true

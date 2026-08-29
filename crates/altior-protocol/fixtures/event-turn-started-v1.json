@@ -1,0 +1,1 @@
+{"protocol_version":1,"event_id":"evt_fixture000000006","operation_id":"op_fixture000000005","thread_id":"thr_fixture000000001","turn_id":"trn_fixture000000002","sequence":1,"occurred_at":1700000000001,"body":{"kind":"turn.started"}}

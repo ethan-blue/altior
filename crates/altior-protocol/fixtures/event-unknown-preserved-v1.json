@@ -1,0 +1,1 @@
+{"protocol_version":1,"event_id":"evt_fixture000000008","operation_id":null,"thread_id":null,"turn_id":null,"sequence":2,"occurred_at":1700000000003,"body":{"diagnostic":"{\"kind\":\"usage.stats.snapshot\",\"window\":\"1h\",\"input_tokens\":1024}","kind":"usage.stats.snapshot"}}
