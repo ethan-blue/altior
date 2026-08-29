@@ -52,6 +52,27 @@ pub enum KnownEvent {
     #[serde(rename = "turn.completed")]
     #[cfg_attr(feature = "dto-export", ts(rename = "turn.completed"))]
     TurnCompleted,
+    /// The subscriber's catch-up range is no longer retained; Desktop must
+    /// request a snapshot (`stream.gap`, ADR 0006).
+    #[serde(rename = "stream.gap")]
+    #[cfg_attr(feature = "dto-export", ts(rename = "stream.gap"))]
+    StreamGap {
+        /// The first sequence the subscriber is missing.
+        #[cfg_attr(feature = "dto-export", ts(type = "number"))]
+        from: Sequence,
+    },
+    /// A catch-up replay finished; live delivery follows (`stream.replayed`,
+    /// ADR 0006).
+    #[serde(rename = "stream.replayed")]
+    #[cfg_attr(feature = "dto-export", ts(rename = "stream.replayed"))]
+    StreamReplayed {
+        /// The first replayed sequence.
+        #[cfg_attr(feature = "dto-export", ts(type = "number"))]
+        from: Sequence,
+        /// The last replayed sequence.
+        #[cfg_attr(feature = "dto-export", ts(type = "number"))]
+        through: Sequence,
+    },
 }
 
 /// The body of an event envelope: a known normalized event or a safely
@@ -63,7 +84,7 @@ pub enum KnownEvent {
     ts(
         export,
         export_to = "../../../apps/desktop/src/ipc/dto/",
-        type = r#"{ kind: "turn.started" } | { kind: "message.delta"; text: string } | { kind: "turn.completed" } | { kind: string; diagnostic: string }"#
+        type = r#"{ kind: "turn.started" } | { kind: "message.delta"; text: string } | { kind: "turn.completed" } | { kind: "stream.gap"; from: number } | { kind: "stream.replayed"; from: number; through: number } | { kind: string; diagnostic: string }"#
     )
 )]
 pub enum EventBody {
@@ -86,6 +107,8 @@ impl EventBody {
             Self::Known(KnownEvent::TurnStarted) => "turn.started",
             Self::Known(KnownEvent::MessageDelta { .. }) => "message.delta",
             Self::Known(KnownEvent::TurnCompleted) => "turn.completed",
+            Self::Known(KnownEvent::StreamGap { .. }) => "stream.gap",
+            Self::Known(KnownEvent::StreamReplayed { .. }) => "stream.replayed",
             Self::Unknown { provider_kind, .. } => provider_kind,
         }
     }
@@ -135,7 +158,7 @@ impl<'de> Deserialize<'de> for EventBody {
         match kind {
             "turn.started" => Ok(Self::Known(KnownEvent::TurnStarted)),
             "turn.completed" => Ok(Self::Known(KnownEvent::TurnCompleted)),
-            "message.delta" => {
+            "message.delta" | "stream.gap" | "stream.replayed" => {
                 let event: KnownEvent = serde_json::from_value(raw).map_err(D::Error::custom)?;
                 Ok(Self::Known(event))
             }
@@ -178,8 +201,7 @@ impl<'de> Deserialize<'de> for EventBody {
 }
 
 /// A 1-based position of an event within its ordered stream.
-#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
-#[serde(transparent)]
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 #[cfg_attr(
     feature = "dto-export",
     derive(ts_rs::TS),
@@ -190,6 +212,22 @@ impl<'de> Deserialize<'de> for EventBody {
     )
 )]
 pub struct Sequence(u64);
+
+// Custom serde keeps the wire form a plain number while enforcing the
+// 1-based invariant at the decode boundary: a wire `0` is rejected instead
+// of silently constructing an invalid sequence.
+impl Serialize for Sequence {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        self.0.serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for Sequence {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let raw = u64::deserialize(deserializer)?;
+        Self::try_new(raw).map_err(D::Error::custom)
+    }
+}
 
 impl Sequence {
     /// The first sequence number of a stream.
@@ -350,6 +388,47 @@ mod tests {
             Sequence::try_new(u64::MAX).unwrap().next(),
             Err(ProtocolError::SequenceOverflow { at: u64::MAX })
         ));
+    }
+
+    #[test]
+    fn sequence_decoding_rejects_zero_and_roundtrips_numbers() {
+        let valid: Sequence = serde_json::from_value(serde_json::json!(7)).unwrap();
+        assert_eq!(valid.as_u64(), 7);
+        assert_eq!(serde_json::to_value(valid).unwrap(), serde_json::json!(7));
+        assert!(serde_json::from_value::<Sequence>(serde_json::json!(0)).is_err());
+    }
+
+    #[test]
+    fn stream_control_events_roundtrip() {
+        let gap = EventEnvelope {
+            protocol_version: ProtocolVersion::V1,
+            event_id: "evt_fixture000000010".parse().unwrap(),
+            operation_id: None,
+            thread_id: None,
+            turn_id: None,
+            sequence: Sequence::try_new(10).unwrap(),
+            occurred_at: UnixMillis::from_millis(1_700_000_000_006),
+            body: EventBody::Known(KnownEvent::StreamGap {
+                from: Sequence::try_new(3).unwrap(),
+            }),
+        };
+        let json = gap.to_json().unwrap();
+        assert!(json.contains(r#""kind":"stream.gap""#));
+        assert_eq!(EventEnvelope::from_json(&json).unwrap(), gap);
+
+        let replayed = EventEnvelope {
+            event_id: "evt_fixture000000011".parse().unwrap(),
+            sequence: Sequence::try_new(10).unwrap(),
+            occurred_at: UnixMillis::from_millis(1_700_000_000_007),
+            body: EventBody::Known(KnownEvent::StreamReplayed {
+                from: Sequence::try_new(6).unwrap(),
+                through: Sequence::try_new(9).unwrap(),
+            }),
+            ..gap
+        };
+        let json = replayed.to_json().unwrap();
+        assert!(json.contains(r#""kind":"stream.replayed""#));
+        assert_eq!(EventEnvelope::from_json(&json).unwrap(), replayed);
     }
 
     #[test]

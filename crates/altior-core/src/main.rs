@@ -1,7 +1,9 @@
 //! Altior Core composition root.
 //!
-//! P0.1 wires only the handshake contract; process supervision, IPC
-//! transport, and the agent runtime arrive in later work packages.
+//! P0.2 links the supervision, ownership, and IPC contract layers; the OS
+//! transport (tokio named pipes / Unix domain sockets, ADR 0006) and the
+//! agent runtime arrive in later work packages. The binary remains a thin
+//! banner until the transport slice lands.
 
 use std::str::FromStr;
 

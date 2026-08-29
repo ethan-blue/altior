@@ -12,6 +12,7 @@ use std::collections::BTreeSet;
 
 use serde::{Deserialize, Serialize};
 
+use crate::auth::LaunchToken;
 use crate::capability::{CapabilityId, CapabilitySet, CapabilitySupport};
 use crate::error::ProtocolError;
 use crate::version::{ProductVersion, ProtocolVersion, ProtocolVersionRange};
@@ -30,6 +31,12 @@ pub struct DesktopHello {
     pub desktop_version: ProductVersion,
     /// Capabilities this Desktop build explicitly declares.
     pub capabilities: CapabilitySet,
+    /// The per-launch capability token proving this connection may drive
+    /// Core (`docs/SECURITY.md`, ADR 0006). Validation belongs to the IPC
+    /// session layer, which authenticates before negotiating; `negotiate()`
+    /// itself stays pure version/capability math.
+    #[cfg_attr(feature = "dto-export", ts(type = "string"))]
+    pub launch_token: LaunchToken,
 }
 
 /// Core's handshake reply.
@@ -127,6 +134,7 @@ mod tests {
             supported_versions: range(min, max),
             desktop_version: ProductVersion::new(0, 1, 0),
             capabilities: CapabilitySet::new(),
+            launch_token: "0f1e2d3c4b5a69788796a5b4c3d2e1f0".parse().unwrap(),
         }
     }
 

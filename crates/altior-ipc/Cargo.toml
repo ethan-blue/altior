@@ -1,5 +1,5 @@
 [package]
-name = "altior-core"
+name = "altior-ipc"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -7,17 +7,9 @@ rust-version.workspace = true
 
 [dependencies]
 altior-domain = { path = "../altior-domain" }
-altior-ipc = { path = "../altior-ipc" }
 altior-protocol = { path = "../altior-protocol" }
-
-[lib]
-name = "altior_core"
-path = "src/lib.rs"
-
-[[bin]]
-name = "altior-core"
-path = "src/main.rs"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 
 [lints]
 workspace = true
-

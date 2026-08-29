@@ -24,6 +24,7 @@ fn hello(
             supported_versions: supported,
             desktop_version: "0.2.0".parse().unwrap(),
             capabilities: capabilities.clone(),
+            launch_token: "0f1e2d3c4b5a69788796a5b4c3d2e1f0".parse().unwrap(),
         },
         CoreHello {
             supported_versions: supported,

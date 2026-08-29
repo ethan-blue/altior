@@ -1,0 +1,1 @@
+{"protocol_version":1,"event_id":"evt_fixture000000011","operation_id":null,"thread_id":null,"turn_id":null,"sequence":10,"occurred_at":1700000000007,"body":{"kind":"stream.replayed","from":6,"through":9}}

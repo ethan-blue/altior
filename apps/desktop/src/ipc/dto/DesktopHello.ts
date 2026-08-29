@@ -18,4 +18,11 @@ desktop_version: ProductVersion,
 /**
  * Capabilities this Desktop build explicitly declares.
  */
-capabilities: CapabilitySet, };
+capabilities: CapabilitySet, 
+/**
+ * The per-launch capability token proving this connection may drive
+ * Core (`docs/SECURITY.md`, ADR 0006). Validation belongs to the IPC
+ * session layer, which authenticates before negotiating; `negotiate()`
+ * itself stays pure version/capability math.
+ */
+launch_token: string, };

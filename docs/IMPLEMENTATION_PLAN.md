@@ -42,8 +42,8 @@ errors, deterministic JSON fixtures including old/new handshake
 compatibility vectors, TypeScript DTOs generated from the Rust contracts
 (ts-rs behind the `dto-export` feature), a Desktop fixture shell running
 on the in-memory transport with Rust-owned fixtures, and a
-dependency-boundary test. Sequence/catch-up delivery semantics and the
-production IPC transport remain P0.2 work.
+dependency-boundary test. The production OS transport remained P0.2
+work.
 
 Evidence:
 
@@ -62,11 +62,38 @@ Evidence:
 - separate Desktop reload/window close from Core turn ownership
 - add sequence/catch-up semantics for event subscriptions
 
+Status: implemented in full (ADR 0006). The `altior-ipc` crate owns local
+sockets (Windows named pipe / Unix domain socket endpoints derived from
+the user name), 4-byte length-prefixed bounded JSON frames, per-launch
+hex capability tokens, and the pure session machines: a Core-side
+`EventLog` with monotonic sequences and bounded retention, per-connection
+`ServerSession`s sharing one log per launch (reload is a new connection
+over the same log), and a Desktop-side `ClientSession` with epoch
+tracking (resume vs restart), `event_id` deduplication, and a
+`CommandLedger` refusing duplicate `OperationId` issues. `altior-core`
+adds the spawn-or-attach `Supervisor` state machine (probe, spawn,
+attach, bounded-escalation reconnect — timers deliberately excluded so
+tests drive it deterministically), turn ownership (Desktop lifecycle
+events are provably inert for running turns), and the operation registry
+for receiving-side dedup. The OS transport (tokio named pipes / UDS) is
+deliberately a named later slice; every machine here is transport-free
+and exercised in-process.
+
 Evidence:
 
 - UI reload does not stop a synthetic active turn
+  (`crates/altior-core/tests/p02_evidence.rs`)
 - Core restart exposes recovery state without duplicate commands
+  (`crates/altior-core/tests/p02_evidence.rs`,
+  `crates/altior-ipc/tests/session_recovery.rs`)
 - wrong protocol version and stale socket/pipe fail clearly
+  (`crates/altior-core/tests/p02_evidence.rs`, typed
+  `NoCommonProtocolVersion` / stale-endpoint classification)
+- retained-window replay with `stream.replayed` boundary, `stream.gap`
+  for evicted ranges, and epoch change on `CoreInstanceId` mismatch
+  (`crates/altior-ipc/tests/session_recovery.rs`)
+- dependency-boundary test extended to `altior-ipc`
+  (`crates/altior-core/tests/dependency_boundaries.rs`)
 
 ### P0.3 ACP v1 spike
 

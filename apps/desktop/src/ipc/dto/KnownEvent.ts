@@ -11,4 +11,16 @@ export type KnownEvent = { "kind": "turn.started" } | { "kind": "message.delta",
 /**
  * The bounded delta text.
  */
-text: string, } | { "kind": "turn.completed" };
+text: string, } | { "kind": "turn.completed" } | { "kind": "stream.gap", 
+/**
+ * The first sequence the subscriber is missing.
+ */
+from: number, } | { "kind": "stream.replayed", 
+/**
+ * The first replayed sequence.
+ */
+from: number, 
+/**
+ * The last replayed sequence.
+ */
+through: number, };

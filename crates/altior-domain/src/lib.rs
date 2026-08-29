@@ -4,7 +4,8 @@ pub mod id;
 pub mod time;
 
 pub use id::{
-    AgentProfileId, EventId, HarnessBindingId, IdParseError, OperationId, ThreadId, TurnId,
+    AgentProfileId, CoreInstanceId, EventId, HarnessBindingId, IdParseError, OperationId, ThreadId,
+    TurnId,
 };
 pub use time::{LogicalTick, TimeError, UnixMillis};
 

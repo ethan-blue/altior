@@ -7,9 +7,9 @@
 //! accidental wire-format drift fails this suite.
 
 use altior_protocol::{
-    CapabilitySet, CommandEnvelope, CoreHello, DesktopHello, EnvelopeLimits, EventBody,
-    EventEnvelope, ProductVersion, ProtocolVersion, ProtocolVersionRange, SnapshotEnvelope,
-    negotiate,
+    CapabilitySet, CommandEnvelope, CoreGreeting, CoreHello, DesktopHello, EnvelopeLimits,
+    EventBody, EventEnvelope, KnownEvent, ProductVersion, ProtocolVersion, ProtocolVersionRange,
+    Sequence, SnapshotEnvelope, negotiate,
 };
 
 const DESKTOP_HELLO: &str = include_str!("../fixtures/handshake-desktop-hello-v1.json");
@@ -20,8 +20,12 @@ const COMPAT_DESKTOP_NEWER: &str =
 const COMPAT_CORE_NEWER: &str = include_str!("../fixtures/handshake-compat-core-newer-v1.json");
 const COMMAND_PING: &str = include_str!("../fixtures/command-ping-v1.json");
 const COMMAND_CANCEL: &str = include_str!("../fixtures/command-cancel-v1.json");
+const COMMAND_SUBSCRIBE: &str = include_str!("../fixtures/command-subscribe-v1.json");
 const SNAPSHOT_THREAD: &str = include_str!("../fixtures/snapshot-thread-v1.json");
+const GREETING_CORE: &str = include_str!("../fixtures/greeting-core-v1.json");
 const EVENT_TURN_STARTED: &str = include_str!("../fixtures/event-turn-started-v1.json");
+const EVENT_STREAM_GAP: &str = include_str!("../fixtures/event-stream-gap-v1.json");
+const EVENT_STREAM_REPLAYED: &str = include_str!("../fixtures/event-stream-replayed-v1.json");
 const EVENT_UNKNOWN_FUTURE: &str = include_str!("../fixtures/event-unknown-future-v1.json");
 const EVENT_UNKNOWN_PRESERVED: &str = include_str!("../fixtures/event-unknown-preserved-v1.json");
 
@@ -64,6 +68,28 @@ fn fixture_known_event_envelope_roundtrips_and_validates() {
 }
 
 #[test]
+fn fixture_stream_control_events_roundtrip_and_validate() {
+    let gap = EventEnvelope::from_json(EVENT_STREAM_GAP).unwrap();
+    gap.validate(&EnvelopeLimits::default()).unwrap();
+    assert!(matches!(
+        gap.body,
+        EventBody::Known(KnownEvent::StreamGap { ref from }) if from.as_u64() == 3
+    ));
+    assert_eq!(gap.to_json().unwrap(), EVENT_STREAM_GAP.trim());
+
+    let replayed = EventEnvelope::from_json(EVENT_STREAM_REPLAYED).unwrap();
+    replayed.validate(&EnvelopeLimits::default()).unwrap();
+    assert!(matches!(
+        replayed.body,
+        EventBody::Known(KnownEvent::StreamReplayed {
+            ref from,
+            ref through
+        }) if from.as_u64() == 6 && through.as_u64() == 9
+    ));
+    assert_eq!(replayed.to_json().unwrap(), EVENT_STREAM_REPLAYED.trim());
+}
+
+#[test]
 fn fixture_cancel_command_roundtrips_and_targets_its_operation() {
     let envelope = CommandEnvelope::from_json(COMMAND_CANCEL).unwrap();
     envelope.validate(&EnvelopeLimits::default()).unwrap();
@@ -72,6 +98,28 @@ fn fixture_cancel_command_roundtrips_and_targets_its_operation() {
         "op_fixture000000005"
     );
     assert_eq!(envelope.to_json().unwrap(), COMMAND_CANCEL.trim());
+}
+
+#[test]
+fn fixture_subscribe_command_roundtrips_and_carries_its_catch_up_point() {
+    let envelope = CommandEnvelope::from_json(COMMAND_SUBSCRIBE).unwrap();
+    envelope.validate(&EnvelopeLimits::default()).unwrap();
+    assert_eq!(
+        envelope.subscribe_since().unwrap(),
+        Some(Some(Sequence::try_new(5).unwrap()))
+    );
+    assert_eq!(envelope.to_json().unwrap(), COMMAND_SUBSCRIBE.trim());
+}
+
+#[test]
+fn fixture_greeting_roundtrips_and_validates() {
+    let greeting = CoreGreeting::from_json(GREETING_CORE).unwrap();
+    greeting.validate().unwrap();
+    assert_eq!(greeting.instance_id.as_str(), "cor_fixture000000009");
+    let retained = greeting.retained.expect("fixture retains a window");
+    assert_eq!(retained.from.as_u64(), 4);
+    assert_eq!(retained.through.as_u64(), 9);
+    assert_eq!(greeting.to_json().unwrap(), GREETING_CORE.trim());
 }
 
 #[test]
@@ -112,6 +160,7 @@ fn old_and_new_handshake_versions_interoperate_at_the_common_version() {
         supported_versions: v1_only_range,
         desktop_version: ProductVersion::new(0, 1, 0),
         capabilities: CapabilitySet::new(),
+        launch_token: "0f1e2d3c4b5a69788796a5b4c3d2e1f0".parse().unwrap(),
     };
     let newer_core: CoreHello = serde_json::from_str(COMPAT_CORE_NEWER).unwrap();
     assert_eq!(

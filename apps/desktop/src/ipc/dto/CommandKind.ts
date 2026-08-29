@@ -3,4 +3,4 @@
 /**
  * The command kinds defined by protocol version 1.
  */
-export type CommandKind = "ping" | "request_snapshot" | "cancel";
+export type CommandKind = "ping" | "request_snapshot" | "cancel" | "subscribe";

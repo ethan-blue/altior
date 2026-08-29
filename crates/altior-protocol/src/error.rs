@@ -72,6 +72,25 @@ pub enum ProtocolError {
         /// The maximum sequence value that overflowed.
         at: u64,
     },
+    /// A launch token containing a character outside lowercase hex.
+    InvalidLaunchTokenCharacter {
+        /// The offending character.
+        character: char,
+        /// The byte offset of `character` within the token.
+        position: usize,
+    },
+    /// A launch token outside its length bounds (32 to 128 hex chars).
+    LaunchTokenLength {
+        /// The token length that was found.
+        length: usize,
+    },
+    /// A retained-event window whose start follows its end.
+    InvalidRetainedWindow {
+        /// The rejected inclusive start.
+        from: u64,
+        /// The rejected inclusive end.
+        through: u64,
+    },
     /// An encoded payload larger than the negotiated limit.
     PayloadTooLarge {
         /// The encoded payload size in bytes.
@@ -128,6 +147,20 @@ impl fmt::Display for ProtocolError {
             Self::MalformedEventKind { kind } => write!(f, "malformed event kind {kind:?}"),
             Self::ZeroSequence => write!(f, "sequence numbers start at 1"),
             Self::SequenceOverflow { at } => write!(f, "sequence overflow at {at}"),
+            Self::InvalidLaunchTokenCharacter {
+                character,
+                position,
+            } => write!(
+                f,
+                "launch token has invalid character {character:?} at byte {position}"
+            ),
+            Self::LaunchTokenLength { length } => write!(
+                f,
+                "launch token has {length} chars, expected 32 to 128 hex chars"
+            ),
+            Self::InvalidRetainedWindow { from, through } => {
+                write!(f, "retained window starts at {from} but ends at {through}")
+            }
             Self::PayloadTooLarge {
                 size_bytes,
                 limit_bytes,

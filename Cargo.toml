@@ -2,6 +2,7 @@
 members = [
   "crates/altior-core",
   "crates/altior-domain",
+  "crates/altior-ipc",
   "crates/altior-protocol",
 ]
 resolver = "3"

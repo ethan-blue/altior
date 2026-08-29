@@ -16,6 +16,13 @@ negotiation, versioned command/event/snapshot envelopes with bounded
 payloads and unknown-event preservation, and deterministic protocol
 fixtures (ADR 0004). `apps/desktop` runs the fixture shell on an in-memory
 transport with TypeScript DTOs generated from the Rust contracts (ADR 0005).
+P0.2 adds Core supervision and local IPC (ADR 0006): the `altior-ipc`
+crate with bounded length-prefixed frames, per-launch capability tokens,
+pure session machines (shared per-launch event log, sequence/catch-up with
+retained-window replay or explicit gaps, epoch change on Core restart), and
+`altior-core` with the spawn-or-attach supervisor, turn ownership that
+survives UI reload, and two-sided duplicate-command prevention. The OS
+transport (tokio named pipes / Unix domain sockets) is a named later slice.
 Next is the P0 technical spike work described in
 [Work Packages](docs/WORK_PACKAGES.md).
 

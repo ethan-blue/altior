@@ -39,6 +39,9 @@ pub enum CommandKind {
     RequestSnapshot,
     /// Cooperatively cancel the operation named in the payload.
     Cancel,
+    /// Subscribe to the event stream, optionally catching up from a prior
+    /// sequence (ADR 0006).
+    Subscribe,
 }
 
 impl CommandKind {
@@ -49,6 +52,7 @@ impl CommandKind {
             Self::Ping => "ping",
             Self::RequestSnapshot => "request_snapshot",
             Self::Cancel => "cancel",
+            Self::Subscribe => "subscribe",
         }
     }
 }
@@ -67,6 +71,7 @@ impl FromStr for CommandKind {
             "ping" => Ok(Self::Ping),
             "request_snapshot" => Ok(Self::RequestSnapshot),
             "cancel" => Ok(Self::Cancel),
+            "subscribe" => Ok(Self::Subscribe),
             other => Err(ProtocolError::UnsupportedCommandKind {
                 kind: other.to_owned(),
             }),
@@ -178,6 +183,70 @@ impl CommandEnvelope {
         Ok(Some(parsed))
     }
 
+    /// Builds an event-stream subscription command (ADR 0006).
+    ///
+    /// `since` selects the catch-up mode: `None` starts at the next event
+    /// Core emits ("from now"); `Some(last_seen)` asks Core to replay every
+    /// event after that sequence. The mode rides in the payload as
+    /// `{"since": null}` or `{"since": <number>}`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ProtocolError::PayloadTooLarge`] when the payload exceeds
+    /// `limits.payload_bytes`.
+    pub fn subscribe(
+        since: Option<crate::event::Sequence>,
+        operation_id: OperationId,
+        issued_at: UnixMillis,
+        limits: &EnvelopeLimits,
+    ) -> Result<Self, ProtocolError> {
+        let payload = BoundedPayload::new(
+            json!({ "since": since.map(crate::event::Sequence::as_u64) }),
+            limits.payload_bytes,
+        )?;
+        Ok(Self {
+            protocol_version: ProtocolVersion::V1,
+            operation_id,
+            kind: CommandKind::Subscribe,
+            payload: Some(payload),
+            issued_at,
+        })
+    }
+
+    /// Returns the subscription catch-up point of a `subscribe` command.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ProtocolError::MalformedEnvelope`] when the command is a
+    /// `subscribe` whose payload is missing, carries a non-numeric or
+    /// zero `since`, or is otherwise malformed. Non-subscribe commands
+    /// return `Ok(None)`; a `{"since": null}` payload returns
+    /// `Ok(Some(None))` meaning "from now".
+    pub fn subscribe_since(&self) -> Result<Option<Option<crate::event::Sequence>>, ProtocolError> {
+        if self.kind != CommandKind::Subscribe {
+            return Ok(None);
+        }
+        let malformed = |message: &'static str| ProtocolError::MalformedEnvelope {
+            source: serde_json::Error::custom(message),
+        };
+        let payload = self
+            .payload
+            .as_ref()
+            .ok_or_else(|| malformed("subscribe command without payload"))?;
+        let Some(since) = payload.value().get("since") else {
+            return Err(malformed("subscribe payload without since"));
+        };
+        if since.is_null() {
+            return Ok(Some(None));
+        }
+        let raw = since
+            .as_u64()
+            .ok_or_else(|| malformed("subscribe since is not a sequence number"))?;
+        let sequence = crate::event::Sequence::try_new(raw)
+            .map_err(|_| malformed("subscribe since is not a sequence number"))?;
+        Ok(Some(Some(sequence)))
+    }
+
     /// Validates the envelope against `limits` and the locally supported
     /// protocol versions.
     ///
@@ -228,6 +297,77 @@ mod tests {
         let json = envelope.to_json().unwrap();
         let decoded = CommandEnvelope::from_json(&json).unwrap();
         assert_eq!(decoded, envelope);
+    }
+
+    #[test]
+    fn subscribe_commands_carry_their_catch_up_mode() {
+        // "From now": a null since.
+        let from_now = CommandEnvelope::subscribe(
+            None,
+            "op_fixture000000012".parse().unwrap(),
+            UnixMillis::from_millis(1_700_000_000_005),
+            &EnvelopeLimits::default(),
+        )
+        .unwrap();
+        from_now.validate(&EnvelopeLimits::default()).unwrap();
+        assert_eq!(from_now.subscribe_since().unwrap(), Some(None));
+        assert!(from_now.to_json().unwrap().contains(r#""since":null"#));
+
+        // Catch-up from a prior sequence.
+        let catch_up = CommandEnvelope::subscribe(
+            Some(crate::event::Sequence::try_new(5).unwrap()),
+            "op_fixture000000012".parse().unwrap(),
+            UnixMillis::from_millis(1_700_000_000_005),
+            &EnvelopeLimits::default(),
+        )
+        .unwrap();
+        assert_eq!(
+            catch_up.subscribe_since().unwrap(),
+            Some(Some(crate::event::Sequence::try_new(5).unwrap()))
+        );
+        assert!(catch_up.to_json().unwrap().contains(r#""since":5"#));
+
+        let json = catch_up.to_json().unwrap();
+        let decoded = CommandEnvelope::from_json(&json).unwrap();
+        assert_eq!(decoded, catch_up);
+    }
+
+    #[test]
+    fn malformed_subscribe_payloads_fail_explicitly() {
+        let no_payload = CommandEnvelope {
+            protocol_version: ProtocolVersion::V1,
+            operation_id: "op_fixture000000012".parse().unwrap(),
+            kind: CommandKind::Subscribe,
+            payload: None,
+            issued_at: UnixMillis::from_millis(0),
+        };
+        assert!(matches!(
+            no_payload.subscribe_since(),
+            Err(ProtocolError::MalformedEnvelope { .. })
+        ));
+
+        let zero_since = CommandEnvelope {
+            payload: Some(
+                BoundedPayload::new(
+                    serde_json::json!({"since": 0}),
+                    EnvelopeLimits::default().payload_bytes,
+                )
+                .unwrap(),
+            ),
+            ..no_payload.clone()
+        };
+        assert!(matches!(
+            zero_since.subscribe_since(),
+            Err(ProtocolError::MalformedEnvelope { .. })
+        ));
+
+        // Non-subscribe commands never expose a catch-up point.
+        let ping = CommandEnvelope {
+            kind: CommandKind::Ping,
+            payload: None,
+            ..no_payload
+        };
+        assert_eq!(ping.subscribe_since().unwrap(), None);
     }
 
     #[test]

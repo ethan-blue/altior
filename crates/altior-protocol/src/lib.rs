@@ -10,20 +10,24 @@
 //! TypeScript bindings for the Desktop client (ADR 0005), keeping Rust the
 //! single schema source.
 
+pub mod auth;
 pub mod bounded;
 pub mod capability;
 pub mod command;
 pub mod error;
 pub mod event;
+pub mod greeting;
 pub mod handshake;
 pub mod snapshot;
 pub mod version;
 
+pub use auth::LaunchToken;
 pub use bounded::{BoundedPayload, BoundedText, DiagnosticText, EnvelopeLimits, MessageText};
 pub use capability::{CapabilityId, CapabilitySet, CapabilitySupport};
 pub use command::{CommandEnvelope, CommandKind};
 pub use error::ProtocolError;
 pub use event::{EventBody, EventEnvelope, KnownEvent, Sequence};
+pub use greeting::{CoreGreeting, RetainedWindow};
 pub use handshake::{CoreHello, DesktopHello, NegotiatedHandshake, negotiate};
 pub use snapshot::SnapshotEnvelope;
 pub use version::{

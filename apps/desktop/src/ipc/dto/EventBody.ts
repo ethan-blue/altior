@@ -4,4 +4,4 @@
  * The body of an event envelope: a known normalized event or a safely
  * preserved unknown future event.
  */
-export type EventBody = { kind: "turn.started" } | { kind: "message.delta"; text: string } | { kind: "turn.completed" } | { kind: string; diagnostic: string };
+export type EventBody = { kind: "turn.started" } | { kind: "message.delta"; text: string } | { kind: "turn.completed" } | { kind: "stream.gap"; from: number } | { kind: "stream.replayed"; from: number; through: number } | { kind: string; diagnostic: string };

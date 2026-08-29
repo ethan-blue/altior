@@ -1,0 +1,1 @@
+{"protocol_version":1,"event_id":"evt_fixture000000010","operation_id":null,"thread_id":null,"turn_id":null,"sequence":10,"occurred_at":1700000000006,"body":{"kind":"stream.gap","from":3}}

@@ -210,6 +210,13 @@ define_id!(
     EventId,
     "evt_"
 );
+define_id!(
+    /// Identity of one Core process launch (ADR 0006). Event sequences are
+    /// meaningful only within a single instance; a different instance id
+    /// marks a restarted Core with a fresh sequence space.
+    CoreInstanceId,
+    "cor_"
+);
 
 #[cfg(test)]
 mod tests {
@@ -245,6 +252,12 @@ mod tests {
                 .unwrap()
                 .to_string(),
             "evt_fixture000000006"
+        );
+        assert_eq!(
+            CoreInstanceId::from_str("cor_fixture000000009")
+                .unwrap()
+                .to_string(),
+            "cor_fixture000000009"
         );
     }
 
