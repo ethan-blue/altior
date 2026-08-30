@@ -207,6 +207,70 @@ These spikes select later-phase foundations but do not expand the P1 UI:
 - standard cryptographic library and encrypted two-device envelope spike
 - relay transport and compaction model
 
+Status: hardened runnable spikes complete (ADR 0009–0012), not production
+sync or persistence completion.
+Four spike crates live outside the contract core, each pinned by the
+dependency-boundary test. `altior-storage` (ADR 0009) proves the
+durable-ownership rule: forward-only `user_version` migrations that
+refuse newer schemas, an append-only journal guarded by
+update/delete triggers, payload-checked idempotent `event_id` appends,
+bounded unsigned journal reads, thread projections with independent
+journal and fold-version recovery markers, and a single-transaction
+rebuild proven equal to the incremental fold — including self-healing
+reopens after stale and missing markers. `altior-crdt` (ADR 0010)
+implements the `SyncDocumentEngine` port twice (Loro 1.13.9,
+Automerge 0.11.0) and races them under deterministic adversarial
+schedules: concurrent same-offset inserts, delete/insert races, merge
+idempotence and order independence, star topologies under a seeded
+LCG, and stale-fork catch-up — all converging on both engines. The
+measured bake-off (fixed 1000-op script, including Altior framing):
+automerge 10150 bytes vs loro 14804 bytes with identical views. Decision:
+Automerge for P1 (smaller state, mature delta-sync protocol), Loro
+retained as the always-raced second engine; the discovered
+container-creation race is neutralized by typed schema-first
+`with_schema`; internal namespaces are encoded, and malformed/cross-engine
+state imports are bounded typed failures. `altior-crypto` (ADR 0011) builds the two-device
+envelope from standard primitives (X25519 static-static ECDH,
+HKDF-SHA256, ChaCha20-Poly1305): direction-separated keys, counter
+nonces, fully bound associated data, a 64-delivery sliding replay window, and Ed25519
+pairing transcripts — with zero RNG in the library (deterministic
+seeds) and tamper/replay/substitution all proven as typed failures.
+`altior-relay` (ADR 0012) is the content-agnostic queue machine with
+zero runtime dependencies: sealed-sender push, cursored repeatable
+fetch, idempotent push, byte/depth quotas as visible backpressure,
+strict-boundary logical-tick retention, future-cursor rejection, and compaction that preserves fetch
+equivalence past the checkpoint while a behind-cursor receiver gets
+an explicit Compacted page (the resync trigger). The integration
+test runs the whole spike stack: an encrypted envelope crosses the
+relay unread, re-delivery is absorbed by the replay window, and
+offline receivers past retention are told to resync.
+
+Evidence:
+
+- storage: 13 tests including trigger-enforced immutability
+  through a raw second connection, duplicate-append idempotence,
+  rebuild-equals-incremental-fold, and reopen self-healing for
+  missing/stale markers and stale fold-version recovery
+  (`crates/altior-storage/tests/journal.rs`)
+- CRDT: 10 adversarial/schema/import scenarios plus the deterministic
+  metrics test, both engines passing every invariant
+  (`crates/altior-crdt/tests/adversarial.rs`, `bakeoff_metrics.rs`)
+- crypto: 16 envelope/replay tests plus 5 pairing-transcript tests —
+  round trips, tamper rejection, direction binding, replay windows
+  at and past the 64-delivery edge, substitution and rename
+  rejection (`crates/altior-crypto/tests/`)
+- relay: 12 queue-semantics tests plus 2 end-to-end two-device
+  composition with `altior-crypto`
+  (`crates/altior-relay/tests/relay.rs`, `two_device_flow.rs`)
+- boundaries: 9/9 dependency-manifest assertions including the four
+  spike crates (`crates/altior-core/tests/dependency_boundaries.rs`)
+
+Explicitly deferred to P1/P3: crash-safe send-counter persistence,
+X25519 contributory/all-zero-shared-secret checks, a forward-secret
+ratchet, authenticated durable acknowledgements, and per-device cursors
+for multi-device fan-out. The P0.5 in-memory sessions and relay are
+reference machines/test doubles, not deployable sync infrastructure.
+
 Exit: ADRs select IPC, process model, storage, CRDT, crypto, and UI dependencies;
 ACP and Desktop contracts have executable fixtures.
 

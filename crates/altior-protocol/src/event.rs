@@ -345,13 +345,13 @@ impl EventEnvelope {
                 supported: SUPPORTED_PROTOCOL_VERSIONS,
             });
         }
-        if let EventBody::Unknown { diagnostic, .. } = &self.body {
-            if diagnostic.len() > limits.diagnostic_bytes {
-                return Err(ProtocolError::TextTooLarge {
-                    size_bytes: diagnostic.len(),
-                    limit_bytes: limits.diagnostic_bytes,
-                });
-            }
+        if let EventBody::Unknown { diagnostic, .. } = &self.body
+            && diagnostic.len() > limits.diagnostic_bytes
+        {
+            return Err(ProtocolError::TextTooLarge {
+                size_bytes: diagnostic.len(),
+                limit_bytes: limits.diagnostic_bytes,
+            });
         }
         Ok(())
     }

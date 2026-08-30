@@ -2,9 +2,13 @@
 members = [
   "crates/altior-acp",
   "crates/altior-core",
+  "crates/altior-crdt",
+  "crates/altior-crypto",
   "crates/altior-domain",
   "crates/altior-ipc",
   "crates/altior-protocol",
+  "crates/altior-relay",
+  "crates/altior-storage",
 ]
 resolver = "3"
 
@@ -12,7 +16,7 @@ resolver = "3"
 version = "0.1.0"
 edition = "2024"
 license = "Apache-2.0"
-rust-version = "1.85"
+rust-version = "1.90"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

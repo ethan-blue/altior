@@ -5,14 +5,21 @@
 //! `altior-protocol` adds only serialization, `altior-ipc` adds only
 //! contracts and JSON (ADR 0006), `altior-acp` is a replaceable harness
 //! adapter beside the contracts (ADR 0007), and `altior-core` composes
-//! the contract layers. The manifests are embedded at compile time, so
-//! the test is deterministic and never reads the working tree at runtime.
+//! the contract layers. The P0.5 spike crates sit outside the contract
+//! core: `altior-storage` (ADR 0009), `altior-crdt` (ADR 0010),
+//! `altior-crypto` (ADR 0011), and the zero-dependency `altior-relay`
+//! (ADR 0012). The manifests are embedded at compile time, so the test
+//! is deterministic and never reads the working tree at runtime.
 
 const DOMAIN_MANIFEST: &str = include_str!("../../altior-domain/Cargo.toml");
 const PROTOCOL_MANIFEST: &str = include_str!("../../altior-protocol/Cargo.toml");
 const IPC_MANIFEST: &str = include_str!("../../altior-ipc/Cargo.toml");
 const ACP_MANIFEST: &str = include_str!("../../altior-acp/Cargo.toml");
 const CORE_MANIFEST: &str = include_str!("../Cargo.toml");
+const STORAGE_MANIFEST: &str = include_str!("../../altior-storage/Cargo.toml");
+const CRDT_MANIFEST: &str = include_str!("../../altior-crdt/Cargo.toml");
+const CRYPTO_MANIFEST: &str = include_str!("../../altior-crypto/Cargo.toml");
+const RELAY_MANIFEST: &str = include_str!("../../altior-relay/Cargo.toml");
 
 /// Returns the dependency names declared in the `[dependencies]` section.
 fn dependency_names(manifest: &str) -> Vec<String> {
@@ -24,12 +31,11 @@ fn dependency_names(manifest: &str) -> Vec<String> {
             in_dependencies = line == "[dependencies]";
             continue;
         }
-        if in_dependencies {
-            if let Some(name) = line.split(['=', ' ']).next() {
-                if !name.is_empty() {
-                    names.push(name.to_owned());
-                }
-            }
+        if in_dependencies
+            && let Some(name) = line.split(['=', ' ']).next()
+            && !name.is_empty()
+        {
+            names.push(name.to_owned());
         }
     }
     names
@@ -119,5 +125,56 @@ fn core_depends_only_on_domain_ipc_and_protocol() {
         ["altior-domain", "altior-ipc", "altior-protocol"],
         "altior-core composes the contract layers; the ACP adapter wires \
          in behind the harness port in P1, not as a core dependency"
+    );
+}
+
+#[test]
+fn storage_depends_only_on_domain_protocol_and_rusqlite() {
+    // ADR 0009: the persistence spike lives outside the contract
+    // crates; SQLite is vendored via rusqlite's bundled feature.
+    assert_eq!(
+        dependency_names(STORAGE_MANIFEST),
+        ["altior-domain", "altior-protocol", "rusqlite"],
+        "altior-storage adds only the storage engine (ADR 0009)"
+    );
+}
+
+#[test]
+fn crdt_depends_only_on_the_two_raced_engines() {
+    // ADR 0010: the bake-off crate implements the port twice and must
+    // stay engine-only — no serialization, no contracts.
+    assert_eq!(
+        dependency_names(CRDT_MANIFEST),
+        ["automerge", "loro"],
+        "altior-crdt races exactly two engines behind the port (ADR 0010)"
+    );
+}
+
+#[test]
+fn crypto_depends_only_on_rustcrypto_and_dalek() {
+    // ADR 0011: standard primitives only, all from the RustCrypto and
+    // dalek lineages, no bespoke crypto.
+    assert_eq!(
+        dependency_names(CRYPTO_MANIFEST),
+        [
+            "chacha20poly1305",
+            "ed25519-dalek",
+            "hkdf",
+            "sha2",
+            "x25519-dalek",
+            "zeroize"
+        ],
+        "altior-crypto is standard-library primitives (ADR 0011)"
+    );
+}
+
+#[test]
+fn relay_declares_no_runtime_dependencies() {
+    // ADR 0012: the relay is a pure state machine — bytes, counters,
+    // and a HashMap. Even altior-crypto is dev-only, for the
+    // end-to-end integration test.
+    assert!(
+        dependency_names(RELAY_MANIFEST).is_empty(),
+        "altior-relay must stay dependency-free (ADR 0012)"
     );
 }

@@ -1,0 +1,16 @@
+[package]
+name = "altior-relay"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+# Deliberately empty: the relay is a pure in-memory state machine.
+# Content-agnostic means no codecs, no clock, no network — callers
+# drive it with bytes and logical ticks.
+
+[dev-dependencies]
+altior-crypto = { path = "../altior-crypto" }
+
+[lints]
+workspace = true

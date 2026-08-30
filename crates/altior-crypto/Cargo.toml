@@ -1,0 +1,17 @@
+[package]
+name = "altior-crypto"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+chacha20poly1305 = "0.10"
+ed25519-dalek = { version = "2", features = ["zeroize"] }
+hkdf = "0.12"
+sha2 = "0.10"
+x25519-dalek = { version = "2", features = ["static_secrets", "zeroize"] }
+zeroize = "1"
+
+[lints]
+workspace = true

@@ -32,8 +32,19 @@ timeline (100,000 rows, prepend-stable history, per-row streaming
 updates, scroll restoration), keyboard navigation with inline approval,
 and a Tauri v2 shell outside the Rust workspace with pinned capability
 minimums. The OS transport (tokio named pipes /
-Unix domain sockets) is a named later slice. Next is the P0 technical
-spike work described in
+Unix domain sockets) is a named later slice. P0.5 hardens four runnable
+foundation spikes (ADR 0009-0012): the SQLite journal-to-projection
+store with forward-only migrations and self-healing rebuilds, the
+Loro/Automerge `SyncDocumentEngine` bake-off (Automerge selected,
+typed schema and framed/bounded imports, both engines raced in CI), the standard-primitives two-device
+crypto envelope (direction-separated X25519/HKDF keys +
+ChaCha20-Poly1305 with replay
+windows and signed pairing transcripts), and the zero-dependency
+content-agnostic relay with validated cursored fetch and checkpoint
+compaction. These remain pre-production reference implementations:
+counter persistence, contributory checks, ratcheting, durable relay
+storage/acks, and per-device cursors are deferred to P1/P3. Next is the P1 ACP
+desktop-continuity work described in
 [Work Packages](docs/WORK_PACKAGES.md).
 
 ## Design anchors
