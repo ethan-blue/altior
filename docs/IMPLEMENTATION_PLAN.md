@@ -151,12 +151,52 @@ Evidence:
 - prove keyboard navigation and an inline approval flow
 - establish visual baselines on the pinned Windows environment
 
+Status: implemented in full (ADR 0008). `apps/desktop` runs the
+five-region workbench shell (activity rail, threads pane, timeline
+workbench, inspector, status bar) on token-only CSS with a dark-theme
+override, narrow-viewport drawer behavior, and keyboard-operable
+resizing clamped to token ranges. The timeline virtualizes with a
+zero-dependency engine: a prefix-sum height index with window plus
+overscan, prepend shift, and scroll-anchor restore. jsdom has no
+layout, so component tests inject viewport height and measured heights
+while the pure math is proven separately at 100,000 rows. Streaming is
+coalesced through a row-scoped store: each row subscribes via
+`useSyncExternalStore`, so a delta rerenders only its own row, never
+the mounted timeline. Permission requests render inline with a
+provisional UI decision (protocol v1 has no permission-answer command;
+the P1 runtime owns the real answer), and unknown events stay
+preserved, inspectable rows. The Tauri v2 shell is a separate crate
+outside the Rust workspace (empty `[workspace]`, so repo gates stay
+hermetic) and its capability minimums — one main window, no global
+API, strict CSP, `core:default` only — are pinned by tests. Playwright
+baselines are captured on demand via `npm run baselines` and are
+operator-reviewed evidence, not image-diff gates; the visual regression
+audit is P5.
+
 Evidence:
 
-- 100,000 synthetic rows remain interactive
-- a streamed long response does not rerender the complete timeline
-- light/dark/narrow/error/approval screenshots reviewed
-- Tauri main window has only the declared minimum capabilities
+- window math and store invariants at 100,000 rows
+  (`apps/desktop/src/features/timeline/virtualWindow.test.ts` and
+  `timelineStore.test.ts`: window bounds and clamping, prepend shift,
+  anchor restore, per-row subscription, cached snapshots)
+- 100,000-row interactivity in the DOM — window ≤ 60 mounted rows,
+  roving keyboard navigation, focus surviving Home/End row recycling
+  (`apps/desktop/src/app/p04Evidence.test.tsx`)
+- a streamed delta mutates only its own row (a MutationObserver over
+  the scroller proves every mutation lands inside the streamed row's
+  subtree; every other mounted row keeps byte-identical text)
+- prepend-stable history and scroll restoration (prepending older
+  history shifts scrollTop by exactly the prepended block height while
+  the anchor stays first-visible; reopening a thread restores the
+  remembered anchor)
+- inline approval and keyboard decisions (approve/deny buttons plus
+  `y`/`d` from the focused row, aria-live announcement, provisional
+  decision chip)
+- Tauri capability minimums pinned statically
+  (`apps/desktop/src/platform/tauri/tauriConfig.test.ts`)
+- light/dark/narrow/error/approval baselines captured in real Chromium
+  via `npm run baselines` (`apps/desktop/scripts/baselines.mjs`,
+  screenshots in `apps/desktop/baselines/`)
 
 ### P0.5 Storage, CRDT, crypto, and relay spikes
 

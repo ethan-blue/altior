@@ -1,0 +1,19 @@
+[package]
+name = "altior-desktop-shell"
+version = "0.1.0"
+edition = "2021"
+description = "Thin Tauri shell for the Altior Desktop workbench (ADR 0008)."
+publish = false
+
+# Deliberately outside the Rust workspace (ADR 0008 §6): repository gates
+# stay hermetic and fast; the packaged app is a separately built artifact.
+[workspace]
+
+[dependencies]
+tauri = { version = "2", default-features = false, features = ["wry"] }
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[lints.rust]
+unsafe_code = "forbid"

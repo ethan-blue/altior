@@ -42,11 +42,20 @@
   /* geometry */
   --control-height: 28px;
   --row-height: 24px;
-  --pane-min-width: 280px;
-  --pane-max-width: 480px;
   --border-radius: 4px;
   --divider-width: 1px;
   --focus-ring: 2px;
+  --nav-width: 256px;
+  --nav-width-min: 208px;
+  --nav-width-max: 420px;
+  --inspector-width: 360px;
+  --inspector-width-min: 280px;
+  --inspector-width-max: 640px;
+
+  /* stacking order for the three elevated surfaces */
+  --z-menu: 20;
+  --z-overlay: 30;
+  --z-dialog: 40;
 
   /* elevation: menu, dialog, tooltip only */
   --elevation-menu: 0 2px 8px rgba(28, 31, 36, 0.14);
@@ -58,6 +67,29 @@
   --motion-normal: 200ms;
   --motion-slow: 320ms;
   --easing-standard: cubic-bezier(0.2, 0, 0, 1);
+}
+
+/*
+ * Dark theme: the same semantic names, overridden on the shell root.
+ * Status color keeps a paired label/icon in components (never color
+ * alone).
+ */
+[data-theme="dark"] {
+  --color-canvas: #14161a;
+  --color-surface: #1b1e24;
+  --color-elevated: #22262d;
+  --color-border: #333841;
+  --color-text: #e4e7ec;
+  --color-muted: #9aa1ac;
+  --color-accent: #7ba0f0;
+  --color-danger: #e2766c;
+  --color-warning: #d8a53f;
+  --color-success: #6fbf8a;
+  --color-selection: #26314a;
+  --color-focus: #7ba0f0;
+  --elevation-menu: 0 2px 8px rgba(0, 0, 0, 0.5);
+  --elevation-dialog: 0 8px 24px rgba(0, 0, 0, 0.6);
+  --elevation-tooltip: 0 1px 4px rgba(0, 0, 0, 0.55);
 }
 
 @media (prefers-reduced-motion: reduce) {

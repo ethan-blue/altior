@@ -26,7 +26,12 @@ the narrow ACP v1 adapter (`altior-acp`, ADR 0007): capability-only
 negotiation, unknown-event-preserving mapping onto the protocol contracts,
 prompt delivery classified onto the frozen `DeliveryState` vocabulary, a
 pure process lifecycle machine, and an opt-in real-agent smoke harness
-behind `ALTIOR_ACP_SMOKE_AGENTS`. The OS transport (tokio named pipes /
+behind `ALTIOR_ACP_SMOKE_AGENTS`. P0.4 adds the Desktop workbench spike
+(ADR 0008): the five-region shell with a zero-dependency virtualized
+timeline (100,000 rows, prepend-stable history, per-row streaming
+updates, scroll restoration), keyboard navigation with inline approval,
+and a Tauri v2 shell outside the Rust workspace with pinned capability
+minimums. The OS transport (tokio named pipes /
 Unix domain sockets) is a named later slice. Next is the P0 technical
 spike work described in
 [Work Packages](docs/WORK_PACKAGES.md).

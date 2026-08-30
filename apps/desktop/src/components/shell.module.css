@@ -1,0 +1,284 @@
+/* Workbench shell regions (docs/UI_ARCHITECTURE.md, ADR 0008 §2). */
+
+.rail {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-4);
+  padding: var(--spacing-8);
+  border-right: var(--divider-width) solid var(--color-border);
+  background: var(--color-surface);
+}
+
+.railItem {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-8);
+  height: var(--control-height);
+  padding: 0 var(--spacing-8);
+  border: none;
+  border-radius: var(--border-radius);
+  background: transparent;
+  color: var(--color-muted);
+  font: var(--font-size-ui) / var(--line-height-compact) var(--font-ui);
+  cursor: pointer;
+}
+
+.railItem:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.railActive {
+  background: var(--color-selection);
+  color: var(--color-text);
+}
+
+.railLabel {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.threadsPane {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-8);
+  padding: var(--spacing-8);
+  border-right: var(--divider-width) solid var(--color-border);
+  background: var(--color-surface);
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.search {
+  height: var(--control-height);
+  padding: 0 var(--spacing-8);
+  border: var(--divider-width) solid var(--color-border);
+  border-radius: var(--border-radius);
+  background: var(--color-canvas);
+  color: var(--color-text);
+  font: var(--font-size-ui) / var(--line-height-compact) var(--font-ui);
+}
+
+.threadSection {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-2);
+}
+
+.sectionTitle {
+  margin: 0;
+  font: var(--font-size-ui) / var(--line-height-compact) var(--font-ui);
+  color: var(--color-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.threadRow {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: var(--spacing-8);
+  align-items: center;
+  min-height: var(--control-height);
+  padding: var(--spacing-4) var(--spacing-8);
+  border: none;
+  border-radius: var(--border-radius);
+  background: transparent;
+  color: var(--color-text);
+  font: var(--font-size-ui) / var(--line-height-compact) var(--font-ui);
+  text-align: left;
+  cursor: pointer;
+}
+
+.threadRow:hover {
+  background: var(--color-selection);
+}
+
+.threadSelected {
+  background: var(--color-selection);
+  outline: var(--focus-ring) solid var(--color-focus);
+  outline-offset: calc(-1 * var(--focus-ring));
+}
+
+.threadTitle {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.threadStatus {
+  color: var(--color-muted);
+}
+
+.statusGlyph {
+  width: 1em;
+  text-align: center;
+}
+
+.statusGlyph[data-status="running"] {
+  color: var(--color-warning);
+}
+
+.statusGlyph[data-status="waiting-for-permission"] {
+  color: var(--color-accent);
+}
+
+.statusGlyph[data-status="failed"] {
+  color: var(--color-danger);
+}
+
+.statusGlyph[data-status="completed"] {
+  color: var(--color-success);
+}
+
+.navResize,
+.resizeHandle {
+  width: var(--spacing-4);
+  cursor: col-resize;
+  background: var(--color-border);
+}
+
+.navResize:focus-visible,
+.resizeHandle:focus-visible {
+  outline: var(--focus-ring) solid var(--color-focus);
+  outline-offset: calc(-1 * var(--focus-ring));
+}
+
+.threadHeader {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-12);
+  padding: var(--spacing-8) var(--spacing-16);
+  border-bottom: var(--divider-width) solid var(--color-border);
+  background: var(--color-surface);
+}
+
+.threadTitleMain {
+  margin: 0;
+  font: var(--font-size-body) / var(--line-height-compact) var(--font-ui);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.threadAgent {
+  color: var(--color-muted);
+  font: var(--font-size-ui) / var(--line-height-compact) var(--font-ui);
+}
+
+.headerControls {
+  margin-left: auto;
+  display: flex;
+  gap: var(--spacing-8);
+}
+
+.headerControls button,
+.permissionControls button,
+.send,
+.inspectorHeader button,
+.newActivity {
+  height: var(--control-height);
+  padding: 0 var(--spacing-12);
+  border: var(--divider-width) solid var(--color-border);
+  border-radius: var(--border-radius);
+  background: var(--color-elevated);
+  color: var(--color-text);
+  font: var(--font-size-ui) / var(--line-height-compact) var(--font-ui);
+  cursor: pointer;
+}
+
+.send:disabled,
+.composerInput:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.composer {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: var(--spacing-8);
+  align-items: end;
+  padding: var(--spacing-8) var(--spacing-16);
+  border-top: var(--divider-width) solid var(--color-border);
+  background: var(--color-surface);
+}
+
+.composerInput {
+  min-height: 60px;
+  resize: vertical;
+  padding: var(--spacing-8);
+  border: var(--divider-width) solid var(--color-border);
+  border-radius: var(--border-radius);
+  background: var(--color-canvas);
+  color: var(--color-text);
+  font: var(--font-size-body) / var(--line-height-normal) var(--font-body);
+}
+
+.inspector {
+  position: relative;
+  display: flex;
+  min-height: 0;
+  border-left: var(--divider-width) solid var(--color-border);
+  background: var(--color-surface);
+}
+
+.resizeHandle {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+}
+
+.inspectorBody {
+  flex: 1;
+  min-width: 0;
+  overflow-y: auto;
+  padding: var(--spacing-12) var(--spacing-12) var(--spacing-12) var(--spacing-16);
+}
+
+.inspectorHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--spacing-8);
+}
+
+.inspectorEmpty {
+  color: var(--color-muted);
+  font: var(--font-size-ui) / var(--line-height-normal) var(--font-ui);
+}
+
+.inspectorFields {
+  display: grid;
+  grid-template-columns: minmax(88px, auto) 1fr;
+  gap: var(--spacing-4) var(--spacing-12);
+  margin: 0;
+  font: var(--font-size-ui) / var(--line-height-normal) var(--font-ui);
+}
+
+.inspectorFields dt {
+  color: var(--color-muted);
+}
+
+.inspectorFields dd {
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.mono {
+  font-family: var(--font-code);
+  font-size: var(--font-size-code);
+}
+
+.statusBar {
+  grid-column: 1 / -1;
+  display: flex;
+  gap: var(--spacing-24);
+  padding: var(--spacing-4) var(--spacing-12);
+  border-top: var(--divider-width) solid var(--color-border);
+  background: var(--color-surface);
+  color: var(--color-muted);
+  font: var(--font-size-ui) / var(--line-height-compact) var(--font-ui);
+}
+

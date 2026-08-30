@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "The declared minimum for the P0.4 shell: core defaults only. Any addition requires an ADR update (ADR 0008 §6).",
+  "windows": ["main"],
+  "permissions": ["core:default"]
+}

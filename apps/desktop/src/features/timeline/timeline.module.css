@@ -1,0 +1,197 @@
+/* Timeline styling: token-driven only (docs/UI_ARCHITECTURE.md). */
+
+.timelineShell {
+  position: relative;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  background: var(--color-canvas);
+}
+
+.scroller {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  min-height: 0;
+}
+
+.spacer {
+  position: relative;
+}
+
+.slot {
+  position: absolute;
+  left: var(--spacing-12);
+  right: var(--spacing-12);
+  overflow: hidden;
+}
+
+/* Rows are compact disclosure sections, not chat bubbles. */
+.row {
+  display: grid;
+  grid-template-columns: 72px 1fr;
+  gap: var(--spacing-8);
+  align-items: start;
+  padding: var(--spacing-4) var(--spacing-8);
+  border-bottom: var(--divider-width) solid var(--color-border);
+  min-height: 100%;
+  box-sizing: border-box;
+  font: var(--font-size-body) / var(--line-height-normal) var(--font-body);
+  color: var(--color-text);
+  cursor: default;
+}
+
+.row.focused {
+  outline: var(--focus-ring) solid var(--color-focus);
+  outline-offset: calc(-1 * var(--focus-ring));
+  background: var(--color-selection);
+}
+
+.kindLabel {
+  font: var(--font-size-ui) / var(--line-height-compact) var(--font-ui);
+  color: var(--color-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding-top: var(--spacing-2);
+}
+
+.body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-4);
+  min-width: 0;
+}
+
+.text {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.caret {
+  color: var(--color-accent);
+  margin-left: var(--spacing-2);
+}
+
+.row[data-row-kind="user-message"] .text {
+  color: var(--color-text);
+}
+
+.row[data-row-kind="assistant-message"] .text {
+  color: var(--color-text);
+}
+
+.row[data-row-kind="tool"] {
+  font-family: var(--font-code);
+  font-size: var(--font-size-code);
+  color: var(--color-muted);
+}
+
+.row[data-row-kind="error"] {
+  border-left: var(--divider-width) solid var(--color-danger);
+  padding-left: var(--spacing-8);
+}
+
+.row[data-row-kind="error"] .text {
+  color: var(--color-danger);
+}
+
+.row[data-row-kind="unknown"] {
+  font-family: var(--font-code);
+  font-size: var(--font-size-code);
+  color: var(--color-muted);
+  border-left: var(--divider-width) dotted var(--color-border);
+  padding-left: var(--spacing-8);
+}
+
+.toolStatus {
+  font: var(--font-size-ui) / var(--line-height-compact) var(--font-ui);
+}
+
+.toolStatus.running {
+  color: var(--color-warning);
+}
+
+.toolStatus.completed {
+  color: var(--color-success);
+}
+
+.toolStatus.failed {
+  color: var(--color-danger);
+}
+
+.permissionAsk,
+.permissionDecided {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--spacing-8);
+  align-items: center;
+}
+
+.permissionAsk {
+  border: var(--divider-width) solid var(--color-accent);
+  padding: var(--spacing-8);
+  border-radius: var(--border-radius);
+  justify-content: space-between;
+}
+
+.permissionAction {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-2);
+  min-width: 0;
+}
+
+.mono {
+  font-family: var(--font-code);
+  font-size: var(--font-size-code);
+  overflow-wrap: anywhere;
+}
+
+.scope {
+  color: var(--color-muted);
+  font-size: var(--font-size-ui);
+}
+
+.permissionControls {
+  display: flex;
+  gap: var(--spacing-8);
+}
+
+.decisionChip {
+  font: var(--font-size-ui) / var(--line-height-compact) var(--font-ui);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.decisionChip.approved {
+  color: var(--color-success);
+}
+
+.decisionChip.denied {
+  color: var(--color-danger);
+}
+
+.newActivity {
+  position: absolute;
+  bottom: var(--spacing-12);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: var(--z-menu);
+  background: var(--color-elevated);
+  border: var(--divider-width) solid var(--color-accent);
+  color: var(--color-accent);
+  padding: var(--spacing-4) var(--spacing-12);
+  font: var(--font-size-ui) / var(--line-height-compact) var(--font-ui);
+  border-radius: var(--border-radius);
+  cursor: pointer;
+}
+
+.visuallyHidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
