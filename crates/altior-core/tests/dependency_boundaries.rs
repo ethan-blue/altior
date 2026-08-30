@@ -43,12 +43,12 @@ fn dependency_names(manifest: &str) -> Vec<String> {
 
 #[test]
 fn domain_declares_no_platform_dependencies() {
-    // serde is the only allowed dependency: a serialization library with
-    // no platform coupling, recorded in ADR 0004. Anything else must be a
-    // reviewable change to this boundary.
+    // Serialization-only dependencies preserve the platform-neutral boundary.
+    // serde_json validates bounded durable domain payloads without coupling the
+    // domain crate to SQLite, ACP, or runtime infrastructure.
     assert_eq!(
         dependency_names(DOMAIN_MANIFEST),
-        ["serde"],
+        ["serde", "serde_json"],
         "altior-domain must stay platform-neutral"
     );
     for forbidden in ["tauri", "sqlite", "rusqlite", "acp", "tokio"] {
@@ -129,13 +129,14 @@ fn core_depends_only_on_domain_ipc_and_protocol() {
 }
 
 #[test]
-fn storage_depends_only_on_domain_protocol_and_rusqlite() {
-    // ADR 0009: the persistence spike lives outside the contract
-    // crates; SQLite is vendored via rusqlite's bundled feature.
+fn storage_depends_only_on_domain_protocol_rusqlite_and_json() {
+    // ADR 0009, ADR 0013: the persistence layer lives outside the
+    // contract crates; SQLite is vendored via rusqlite's bundled
+    // feature. serde_json is needed for domain event payload extraction.
     assert_eq!(
         dependency_names(STORAGE_MANIFEST),
-        ["altior-domain", "altior-protocol", "rusqlite"],
-        "altior-storage adds only the storage engine (ADR 0009)"
+        ["altior-domain", "altior-protocol", "rusqlite", "serde_json"],
+        "altior-storage adds only the storage engine and JSON (ADR 0009, ADR 0013)"
     );
 }
 

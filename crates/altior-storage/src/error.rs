@@ -38,7 +38,12 @@ pub enum StorageError {
         /// The maximum accepted row count.
         max: u32,
     },
-    /// An event id already exists with different encoded content.
+    /// A domain durable row or append input violates the typed event contract.
+    InvalidDomainEvent {
+        /// The rejected invariant.
+        detail: String,
+    },
+    /// An event id already exists with different durable tuple content.
     EventIdCollision {
         /// The conflicting event id.
         event_id: String,
@@ -73,6 +78,48 @@ pub enum StorageError {
         /// What the projection rebuild observed.
         detail: String,
     },
+    /// An agent profile already exists with the given ID.
+    AgentProfileAlreadyExists {
+        /// The conflicting agent profile ID.
+        agent_profile_id: String,
+    },
+    /// The specified agent profile was not found.
+    AgentProfileNotFound {
+        /// The missing agent profile ID.
+        agent_profile_id: String,
+    },
+    /// A harness binding already exists with the given ID.
+    HarnessBindingAlreadyExists {
+        /// The conflicting harness binding ID.
+        harness_binding_id: String,
+    },
+    /// The specified harness binding was not found.
+    HarnessBindingNotFound {
+        /// The missing harness binding ID.
+        harness_binding_id: String,
+    },
+    /// A project reference already exists with the given ID.
+    ProjectRefAlreadyExists {
+        /// The conflicting project ID.
+        project_id: String,
+    },
+    /// The specified project reference was not found.
+    ProjectRefNotFound {
+        /// The missing project ID.
+        project_id: String,
+    },
+    /// A project reference cannot be deleted because it is still referenced by threads.
+    ProjectReferencedByThreads {
+        /// The project ID in use.
+        project_id: String,
+        /// How many threads reference this project.
+        thread_count: usize,
+    },
+    /// An entity row contains invalid data that violates domain invariants.
+    InvalidEntityData {
+        /// The rejected detail.
+        detail: String,
+    },
     /// A SQLite failure not classified above.
     Sqlite {
         /// The operation context, e.g. `"append_event"`.
@@ -102,6 +149,7 @@ impl fmt::Display for StorageError {
             Self::JournalLimitOutOfRange { value, max } => {
                 write!(f, "journal page limit {value} exceeds the maximum {max}")
             }
+            Self::InvalidDomainEvent { detail } => write!(f, "invalid domain event: {detail}"),
             Self::EventIdCollision {
                 event_id,
                 existing_seq,
@@ -122,6 +170,36 @@ impl fmt::Display for StorageError {
             Self::RebuildInvariant { detail } => {
                 write!(f, "projection rebuild invariant violated: {detail}")
             }
+            Self::AgentProfileAlreadyExists { agent_profile_id } => {
+                write!(f, "agent profile {agent_profile_id} already exists")
+            }
+            Self::AgentProfileNotFound { agent_profile_id } => {
+                write!(f, "agent profile {agent_profile_id} not found")
+            }
+            Self::HarnessBindingAlreadyExists { harness_binding_id } => {
+                write!(f, "harness binding {harness_binding_id} already exists")
+            }
+            Self::HarnessBindingNotFound { harness_binding_id } => {
+                write!(f, "harness binding {harness_binding_id} not found")
+            }
+            Self::ProjectRefAlreadyExists { project_id } => {
+                write!(f, "project reference {project_id} already exists")
+            }
+            Self::ProjectRefNotFound { project_id } => {
+                write!(f, "project reference {project_id} not found")
+            }
+            Self::ProjectReferencedByThreads {
+                project_id,
+                thread_count,
+            } => {
+                write!(
+                    f,
+                    "cannot delete project reference {project_id}: referenced by {thread_count} thread(s)"
+                )
+            }
+            Self::InvalidEntityData { detail } => {
+                write!(f, "invalid entity data in database: {detail}")
+            }
             Self::Sqlite { context, .. } => write!(f, "SQLite failure during {context}"),
         }
     }
@@ -134,11 +212,20 @@ impl std::error::Error for StorageError {
             Self::EncodeFailed { source, .. } | Self::DecodeFailed { source, .. } => Some(source),
             Self::PayloadTooLarge { .. }
             | Self::JournalLimitOutOfRange { .. }
+            | Self::InvalidDomainEvent { .. }
             | Self::EventIdCollision { .. }
             | Self::SchemaTooNew { .. }
             | Self::PayloadNotUtf8 { .. }
             | Self::JournalImmutable { .. }
-            | Self::RebuildInvariant { .. } => None,
+            | Self::RebuildInvariant { .. }
+            | Self::AgentProfileAlreadyExists { .. }
+            | Self::AgentProfileNotFound { .. }
+            | Self::HarnessBindingAlreadyExists { .. }
+            | Self::HarnessBindingNotFound { .. }
+            | Self::ProjectRefAlreadyExists { .. }
+            | Self::ProjectRefNotFound { .. }
+            | Self::ProjectReferencedByThreads { .. }
+            | Self::InvalidEntityData { .. } => None,
         }
     }
 }
@@ -148,7 +235,9 @@ impl StorageError {
     /// as a typed variant.
     pub(crate) fn from_sqlite(context: &'static str, error: rusqlite::Error) -> Self {
         let detail = error.to_string();
-        if detail.contains("journal is append-only") {
+        if detail.contains("journal is append-only")
+            || detail.contains("domain journal is append-only")
+        {
             Self::JournalImmutable { detail }
         } else {
             Self::Sqlite {

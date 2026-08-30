@@ -1,11 +1,23 @@
 //! Stable, infrastructure-independent Altior domain contracts.
 
+pub mod entity;
 pub mod id;
 pub mod time;
 
+pub use entity::{
+    AGENT_PROFILE_LIST_LIMIT_MAX, AcpHarnessBinding, AgentProfile, AgentProfileCursor,
+    AgentProfileListLimit, BoundedLabel, BoundedPath, DisplayName, DomainEvent, DomainEventKind,
+    EntityError, EventPayload, HARNESS_BINDING_LIST_LIMIT_MAX, HISTORY_LIMIT_MAX,
+    HarnessBindingCursor, HarnessBindingListLimit, HistoryLimit, PERMISSION_LIST_LIMIT_MAX,
+    PROJECT_REF_LIST_LIMIT_MAX, Permission, PermissionCursor, PermissionDecision,
+    PermissionDescription, PermissionKind, PermissionListLimit, ProjectRef, ProjectRefCursor,
+    ProjectRefListLimit, SearchQuery, THREAD_LIST_LIMIT_MAX, TURN_LIST_LIMIT_MAX, Thread,
+    ThreadCursor, ThreadListLimit, ThreadState, ThreadTitle, Turn, TurnCursor, TurnListLimit,
+    TurnState,
+};
 pub use id::{
-    AgentProfileId, CoreInstanceId, EventId, HarnessBindingId, IdParseError, OperationId, ThreadId,
-    TurnId,
+    AgentProfileId, CoreInstanceId, EventId, HarnessBindingId, IdParseError, OperationId,
+    ProjectId, ThreadId, TurnId,
 };
 pub use time::{LogicalTick, TimeError, UnixMillis};
 
@@ -28,12 +40,64 @@ pub enum HarnessKind {
     Native,
 }
 
+impl HarnessKind {
+    /// Returns the canonical string identifier.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Acp => "acp",
+            Self::Terminal => "terminal",
+            Self::Native => "native",
+        }
+    }
+
+    /// Parses a harness kind from a string slice.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`EntityError::InvalidHarnessKind`] if `s` is not recognized.
+    pub fn try_from_str(s: &str) -> Result<Self, EntityError> {
+        match s {
+            "acp" => Ok(Self::Acp),
+            "terminal" => Ok(Self::Terminal),
+            "native" => Ok(Self::Native),
+            _ => Err(EntityError::InvalidHarnessKind),
+        }
+    }
+}
+
 /// Long-term memory behavior selected for a thread.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum MemoryMode {
     Off,
     Session,
     LongTerm,
+}
+
+impl MemoryMode {
+    /// Returns the canonical string identifier.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Off => "off",
+            Self::Session => "session",
+            Self::LongTerm => "long_term",
+        }
+    }
+
+    /// Parses a memory mode from a string slice.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`EntityError::InvalidMemoryMode`] if `s` is not recognized.
+    pub fn try_from_str(s: &str) -> Result<Self, EntityError> {
+        match s {
+            "off" => Ok(Self::Off),
+            "session" => Ok(Self::Session),
+            "long_term" => Ok(Self::LongTerm),
+            _ => Err(EntityError::InvalidMemoryMode),
+        }
+    }
 }
 
 /// Classification of one prompt delivery against its harness boundary.

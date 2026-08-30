@@ -115,6 +115,7 @@ dependencies = [
  "altior-domain",
  "altior-protocol",
  "rusqlite",
+ "serde_json",
  "tempfile",
 ]
 

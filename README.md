@@ -38,14 +38,43 @@ store with forward-only migrations and self-healing rebuilds, the
 Loro/Automerge `SyncDocumentEngine` bake-off (Automerge selected,
 typed schema and framed/bounded imports, both engines raced in CI), the standard-primitives two-device
 crypto envelope (direction-separated X25519/HKDF keys +
-ChaCha20-Poly1305 with replay
-windows and signed pairing transcripts), and the zero-dependency
-content-agnostic relay with validated cursored fetch and checkpoint
-compaction. These remain pre-production reference implementations:
-counter persistence, contributory checks, ratcheting, durable relay
-storage/acks, and per-device cursors are deferred to P1/P3. Next is the P1 ACP
-desktop-continuity work described in
-[Work Packages](docs/WORK_PACKAGES.md).
+ChaCha20-Poly1305 with replay windows and signed pairing transcripts),
+and the zero-dependency content-agnostic relay with validated cursored
+fetch and checkpoint compaction. These remain pre-production reference
+implementations: counter persistence, contributory checks, ratcheting,
+durable relay storage/acks, and per-device cursors are deferred to P1/P3.
+P1.1 adds the domain and persistence layer (ADR 0013): `altior-domain`
+defines the 8 core domain entity classes (`AgentProfile`, `AcpHarnessBinding`,
+`Thread` [Open/Pinned/Archived], `Turn` [Active/Completed/Cancelled/Failed with
+`DeliveryState`], `Permission` [Pending/Approved/Denied], `ProjectRef`,
+`DomainEvent`, and `DomainEventKind`), kind-prefixed identifier newtypes
+(`AgentProfileId`, `HarnessBindingId`, `ThreadId`, `TurnId`, `OperationId`,
+`EventId`, `CoreInstanceId`, `ProjectId`), bounded value objects (`DisplayName`,
+`ThreadTitle`, `SearchQuery`, `BoundedLabel`, `BoundedPath`, `PermissionDescription`,
+`EventPayload`), validated query limits (`ThreadListLimit`, `HistoryLimit`,
+`TurnListLimit`, `AgentProfileListLimit`, `HarnessBindingListLimit`,
+`ProjectRefListLimit`, `PermissionListLimit`), and stable composite cursors for
+deterministic pagination (`ThreadCursor`, `AgentProfileCursor`,
+`HarnessBindingCursor`, `ProjectRefCursor`, `PermissionCursor`, `TurnCursor`).
+`altior-storage` evolves the persistence seam with forward-only
+v1->v2->v3 migrations: dual journal authority (`domain_journal` is the sole
+durable authority for domain entities and rebuildable projections, decoupled
+from the transport-level protocol replay log), append-only SQLite triggers,
+complete 7-field durable tuple collision fail-closed semantics across
+`(event_id, thread_id, turn_id, operation_id, kind, payload, occurred_at)`,
+`operation_id` reconstruction, in-transaction typed payload and domain lifecycle
+validation (with `Other` custom kind global vs thread-scoped semantics),
+device-local atomic `IMMEDIATE` CRUD authority for agent profiles, harness
+bindings (with agent FK validation), and project references (with safe `IMMEDIATE`
+deletion refusing referenced projects, immutable field protections, and journal
+replay decoupled from local profile/project pre-existence), bounded turn and
+permission queries with compound indexes, safe literal FTS5 title search with
+title clearing and official `rank='integrity-check', 1` consistency checks, and a
+deterministic business projection digest (excluding FTS private shadow tables)
+that self-heals via single-transaction rebuild on reopen. P1.1 delivers a complete,
+usable persistence slice; P1.2 ACP runtime (subprocess trees, boundary adapter
+checkpoints, OS secret resolution, and live IPC integration) is the next milestone
+and has not yet been implemented.
 
 ## Design anchors
 

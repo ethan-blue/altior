@@ -217,6 +217,11 @@ define_id!(
     CoreInstanceId,
     "cor_"
 );
+define_id!(
+    /// Identity of a device-local project reference (P1.1).
+    ProjectId,
+    "prj_"
+);
 
 #[cfg(test)]
 mod tests {
@@ -258,6 +263,12 @@ mod tests {
                 .unwrap()
                 .to_string(),
             "cor_fixture000000009"
+        );
+        assert_eq!(
+            ProjectId::from_str("prj_fixture000000010")
+                .unwrap()
+                .to_string(),
+            "prj_fixture000000010"
         );
     }
 

@@ -284,6 +284,62 @@ ACP and Desktop contracts have executable fixtures.
 - add migrations, recovery markers, and projection rebuild
 - implement bounded thread list, history, and search queries
 
+Status: implemented in full (ADR 0013). `altior-domain` defines the 8 pure
+domain entity types (`AgentProfile`, `AcpHarnessBinding`, `Thread` [Open/Pinned/Archived],
+`Turn` [Active/Completed/Cancelled/Failed with `DeliveryState`], `Permission`
+[Pending/Approved/Denied], `ProjectRef`, `DomainEvent`, `EventPayload`), kind-prefixed
+identifier newtypes (`AgentProfileId`, `HarnessBindingId`, `ThreadId`, `TurnId`,
+`OperationId`, `EventId`, `CoreInstanceId`, `ProjectId`), validated bounded value
+objects (`DisplayName`, `ThreadTitle` [including empty `UNTITLED`], `SearchQuery`,
+`BoundedLabel`, `BoundedPath`, `PermissionDescription`), validated unsigned query
+limits (`ThreadListLimit`, `HistoryLimit`, `TurnListLimit`, `AgentProfileListLimit`,
+`HarnessBindingListLimit`, `ProjectRefListLimit`, `PermissionListLimit`), and stable
+composite cursors (`ThreadCursor`, `AgentProfileCursor`, `HarnessBindingCursor`,
+`ProjectRefCursor`, `PermissionCursor`, `TurnCursor`). `altior-storage` implements
+the persistence seam with forward-only v1→v2→v3 migrations: `domain_journal` is the
+sole durable authority for domain events and rebuildable projections (decoupled from
+the IPC protocol replay log), guarded by append-only database triggers and a 1 MiB
+payload cap. Domain event append enforces 7-field durable tuple collision checks
+`(event_id, thread_id, turn_id, operation_id, kind, payload, occurred_at)` with
+byte-identical idempotency and `operation_id` preservation during replay. In-transaction
+domain validation enforces thread and turn state machines, turn exclusivity, pending
+permission decisions, and custom `Other` kind scoping (global without thread/turn,
+or thread-scoped). Device-local metadata (`AgentProfile`, `AcpHarnessBinding`, `ProjectRef`)
+is managed via atomic `IMMEDIATE` CRUD transactions with same-content idempotency,
+typed conflict errors, immutable `created_at` protections, and `ProjectRef` deletion
+rejection if referenced by threads in projection, while domain journal replay is
+fully decoupled from local profile/project pre-existence. Full-text search over thread
+titles uses SQLite FTS5 with literal-phrase query escaping (`fts5_quoted_literal`),
+title-clearing support, and official consistency validation
+(`INSERT INTO thread_search(thread_search, rank) VALUES('integrity-check', 1)`).
+Projection self-healing is backed by a deterministic length-prefixed, type-tagged
+FNV-1a 64-bit digest over business projections (`thread`, `turn`, `permission` —
+strictly excluding FTS shadow tables), preflight FTS rebuild before table clear to
+prevent trigger failures, and automatic single-transaction replay and verification
+on reopen. P1.2 ACP runtime (subprocess trees, boundary adapter checkpoints, OS
+secret resolution, and live IPC integration) is the next milestone and has not yet
+been implemented.
+
+Evidence:
+
+- 67 domain integration tests (`crates/altior-storage/tests/domain.rs`) covering
+  schema v1→v2→v3 migration and journal preservation, domain event append and
+  idempotency, 7-field durable tuple collisions, lifecycle state transitions and
+  terminal turn validation, permission request/decision flow, thread title update
+  and clear across rebuild and reopen, `Other` kind global and thread scoping,
+  device-local CRUD operations with immutable field and FK/reference protections,
+  safe `ProjectRef` deletion rejection, bounded cursor-based pagination across
+  threads, turns, history, permissions, and CRUD entities, literal FTS5 search
+  safety with special characters, official FTS integrity check rank=1 validation,
+  and self-healing on reopen against missing/stale markers, stale fold versions,
+  and corrupted projection digests.
+- 13 protocol journal tests (`crates/altior-storage/tests/journal.rs`) validating
+  v1 protocol envelope round-trips, append-only trigger enforcement via raw
+  connections, duplicate append idempotency, envelope collision detection,
+  rebuild equivalence, and reopen self-healing.
+- Cargo default gate and `--all-features` pass cleanly with zero warnings.
+- Desktop 39 test suite and strict TypeScript check pass cleanly.
+
 ### P1.2 ACP runtime
 
 - implement launch configuration and OS-secret references

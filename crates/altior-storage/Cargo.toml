@@ -9,10 +9,13 @@ rust-version.workspace = true
 altior-domain = { path = "../altior-domain" }
 altior-protocol = { path = "../altior-protocol" }
 rusqlite = { version = "0.37", features = ["bundled"] }
+serde_json = "1"
 
 [dev-dependencies]
 altior-domain = { path = "../altior-domain" }
+altior-protocol = { path = "../altior-protocol" }
 rusqlite = { version = "0.37", features = ["bundled"] }
+serde_json = "1"
 tempfile = "3"
 
 [lints]
