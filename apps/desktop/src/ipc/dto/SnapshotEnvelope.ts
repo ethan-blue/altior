@@ -3,26 +3,26 @@ import type { ProtocolVersion } from "./ProtocolVersion";
 
 /**
  * A versioned, bounded snapshot reply. No transport is attached;
- * encoding is a plain JSON contract so any P0.2 transport can carry it.
+ * encoding is a plain JSON contract so any local IPC transport can carry it.
  */
-export type SnapshotEnvelope = { 
+export type SnapshotEnvelope = {
 /**
  * The protocol version negotiated for this connection.
  */
-protocol_version: ProtocolVersion, 
+protocol_version: ProtocolVersion,
 /**
  * The operation that requested this snapshot.
  */
-operation_id: string, 
+operation_id: string,
 /**
  * The thread the snapshot covers, when scoped to one.
  */
-thread_id: string | null, 
+thread_id: string | null,
 /**
  * Emitter's view of when this snapshot was assembled. Fixtures use
  * constants.
  */
-as_of: number, 
+as_of: number,
 /**
  * The bounded snapshot payload.
  */

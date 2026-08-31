@@ -398,6 +398,71 @@ Evidence:
 - Agents and Settings surfaces needed to manage ACP
 - minimal Projects surface for associating an approved local path
 
+Status: implemented in full (ADR 0015). `altior-protocol` expands and exports
+the complete P1.3 protocol contracts: 12 command kinds (`create_thread`,
+`open_thread`, `list_threads`, `search_threads`, `get_history`, `start_turn`,
+`cancel_turn`, `respond_permission`, `configure_agent`, `test_harness_binding`,
+`runtime_status`, `diagnostics`), 12 versioned DTOs (`ThreadDto`, `TurnDto`,
+`PermissionDto`, `AgentProfileDto`, `HarnessBindingDto`, `ThreadCursorDto`,
+`TurnCursorDto`, `ThreadSummaryDto`, `ThreadSnapshotDto`, `ThreadListResponseDto`,
+`ThreadHistoryResponseDto`, `RuntimeDiagnosticsDto`), snapshots, and stream events
+(`TurnStarted`, `MessageDelta`, `ToolCallStarted`, `ToolCallFinished`,
+`PermissionRequested`, `PermissionDecided`, `TurnCompleted`, `TurnCancelled`,
+`TurnFailed`, `StreamReplayed`, `StreamReady`, `StreamGap`, `RawUnknown`).
+`altior-ipc` delivers the physical OS-level transport: Windows Named Pipes
+(`\\.\pipe\altior-ipc-...`, max 256 bytes) and Unix Domain Sockets (`.sock`, max
+104 bytes), atomic discovery file (`discovery.json`) publishing with Unix 0600
+permissions / Windows per-user ACLs and stale discovery detection, 32-byte hex
+`LaunchToken` handshake authentication, 256 KiB hard frame bounds (`MAX_FRAME_BYTES`)
+with zero unbounded reads, slow handshake timeout (5s), concurrent session cap
+(32 sessions), and redact-by-default `Debug` formatters guaranteeing zero plaintext
+token/secret leakage. `altior-core` delivers the `CoreApplication` coordinator
+(dispatching domain CRUD, FTS5 title search, and turn supervision), the `Daemon`
+server loop (handling OS IPC connections, auth verification, and command routing),
+and the `EventPump` (broadcasting live turn streams to all connected client sessions
+with monotonic sequence numbers, retained replay windows, and complete UI disconnect
+resilience). `apps/desktop/src-tauri` implements `altior_desktop_shell` with
+`SpawnOrAttach` logic discovering or spawning the Core daemon, bridging Tauri IPC
+commands, and ensuring child survival across UI drops. `apps/desktop` defaults to
+`TauriCoreTransport` (falling back to `InMemoryTransport` in dev/browser), and
+`applicationStore` coordinates real agent profiles, threads (list/create/search/open),
+active turns, streaming message deltas, inline permission prompts/decisions,
+turn cancellation, and diagnostics. P1.3 delivers a fully integrated Desktop MVP
+feeding P1.4.
+
+Evidence:
+
+- 21 application integration tests (`crates/altior-core/tests/p13_application.rs`)
+  covering command dispatching, thread CRUD, FTS5 search, start turn, turn cancellation,
+  permission approval/denial routing, duplicate operation prevention, UI disconnect
+  resilience, and diagnostics.
+- 1 local IPC end-to-end test (`crates/altior-core/tests/p13_local_ipc.rs`)
+  verifying end-to-end local IPC server bind, discovery publication, client connection,
+  handshake authentication, command dispatch, and event streaming.
+- 1 daemon process lifecycle test (`crates/altior-core/tests/p13_daemon_process.rs`)
+  verifying real OS daemon subprocess execution, discovery file lifecycle, sequential
+  client runs, and clean shutdown.
+- 9 IPC transport tests (`crates/altior-ipc/tests/transport.rs`)
+  verifying Windows named pipe / Unix domain socket bind/connect, oversized frame rejection,
+  path length limits (104/105 bytes), bad token rejection, discovery file lifecycle,
+  and zero-plaintext Debug redaction.
+- 3 DTO export tests (`crates/altior-protocol/tests/dto_export.rs`)
+  verifying deterministic TypeScript DTO export, idempotency, and boolean type mappings.
+- 7 Tauri backend tests (`apps/desktop/src-tauri`)
+  verifying `SpawnOrAttach`, child process survival across UI state drops, reconnect cursor
+  continuity, command/event mapping with deduplication, stale discovery cleanup, and bad
+  auth rejection.
+- 69 Desktop Vitest tests across 9 test files (`apps/desktop`)
+  verifying application store state transitions, timeline virtualization, Tauri transport,
+  in-memory transport, and UI components.
+- Strict TypeScript typecheck (`tsc --noEmit`) and production build (`vite build`)
+  pass with zero errors.
+- Cargo workspace tests pass cleanly across all crates.
+
+Explicitly deferred to P1.4/P5: real third-party dual-ACP agent installation journeys,
+signed OS installers/packaging (MSIX), OS secret manager integration (DPAPI/Keychain),
+and Windows Job Object hierarchy. P1.4 Acceptance Journey is the next milestone.
+
 ### P1.4 Acceptance journey
 
 1. Install or start on a clean Windows profile.

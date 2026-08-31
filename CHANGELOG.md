@@ -5,6 +5,21 @@ All notable changes to the Altior project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+#### P1.3 Desktop MVP & Core Local IPC (ADR 0015)
+- **Protocol P1.3 contracts & TypeScript DTOs (`altior-protocol`)**: 12 command kinds (`create_thread`, `open_thread`, `list_threads`, `search_threads`, `get_history`, `start_turn`, `cancel_turn`, `respond_permission`, `configure_agent`, `test_harness_binding`, `runtime_status`, `diagnostics`), 12 DTOs (`ThreadDto`, `TurnDto`, `PermissionDto`, `AgentProfileDto`, `HarnessBindingDto`, `ThreadCursorDto`, `TurnCursorDto`, `ThreadSummaryDto`, `ThreadSnapshotDto`, `ThreadListResponseDto`, `ThreadHistoryResponseDto`, `RuntimeDiagnosticsDto`), snapshots, and stream events (`TurnStarted`, `MessageDelta`, `ToolCallStarted`, `ToolCallFinished`, `PermissionRequested`, `PermissionDecided`, `TurnCompleted`, `TurnCancelled`, `TurnFailed`, `StreamReplayed`, `StreamReady`, `StreamGap`, `RawUnknown`). All TypeScript DTO bindings are exported and deterministically formatted via ts-rs.
+- **Physical OS local IPC transport (`altior-ipc`)**: Implements Windows Named Pipes (`\\.\pipe\altior-ipc-...`, ≤ 256 bytes) and Unix Domain Sockets (`.sock`, ≤ 104 bytes) with `LocalListener` and `LocalStream` abstractions. Enforces 256 KiB frame bounds (`MAX_FRAME_BYTES`) with zero unbounded reads, 5-second slow handshake timeouts (`DEFAULT_HANDSHAKE_TIMEOUT`), and 32 concurrent session limits.
+- **Atomic discovery file publishing & token auth**: Core atomically writes `discovery.json` (tempfile write + rename) with restricted permissions (mode `0600`/`0700` on Unix, default ACLs on Windows). Authenticates client connections against a 32-byte hex `LaunchToken` during `DesktopHello` before accepting commands. Detects and cleans up stale discovery files on attach failure.
+- **Debug redaction boundary**: `EndpointDiscovery`, `LaunchToken`, `LaunchCredentials`, `CoreDaemonConfig`, and `SecretRef` implement custom `Debug` formatters outputting `[REDACTED]`, ensuring tokens and secret references never leak into logs or console outputs.
+- **CoreApplication coordinator & Daemon server (`altior-core`)**: `CoreApplication` dispatches domain transactions, FTS5 title search, and ACP turn supervision. `Daemon` runs the persistent server loop, manages per-connection sessions, authenticates clients, and routes commands with control-priority handling.
+- **EventPump & multi-connection replay log**: Broadcasts live turn streams to all active connected UI sessions with monotonic sequence tracking. Supports client reconnections via `subscribe` cursor, replaying retained events in `stream.replayed`, signaling `stream.ready`, or emitting `stream.gap` for evicted ranges. Background turns continue uninterrupted across UI reloads.
+- **Two-sided duplicate operation prevention**: Receiving-side deduplication via Core `OperationRegistry` and sending-side deduplication via Desktop `CommandLedger`.
+- **Tauri SpawnOrAttach bridge (`apps/desktop/src-tauri`)**: `altior_desktop_shell` discovers running Core daemons via discovery files or spawns the `altior-core` daemon child process. Ensures child process survival across UI drops (`ui_state_drop_does_not_kill_child`) and exposes Tauri IPC commands (`send_command`, `poll_events`, `get_connection_status`).
+- **Desktop workbench & ApplicationStore (`apps/desktop`)**: Production desktop shell defaulting to `TauriCoreTransport` (falling back to `InMemoryTransport` in dev/browser). `applicationStore` coordinates real agent onboarding/testing, thread listing/creation/FTS5 search/opening, active turns, streaming message deltas, inline permission decisions/prompts, turn cancellation, and diagnostics.
+
 ## [0.0.1] - 2026-08-31
 
 ### Added

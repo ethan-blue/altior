@@ -5,38 +5,38 @@ import type { Sequence } from "./Sequence";
 
 /**
  * A versioned event envelope. No transport is attached; encoding is a
- * plain JSON contract so any P0.2 transport can carry it.
+ * plain JSON contract so any local IPC transport can carry it.
  */
-export type EventEnvelope = { 
+export type EventEnvelope = {
 /**
  * The protocol version negotiated for this connection.
  */
-protocol_version: ProtocolVersion, 
+protocol_version: ProtocolVersion,
 /**
  * Identity of this event.
  */
-event_id: string, 
+event_id: string,
 /**
  * The operation this event belongs to, when scoped to one.
  */
-operation_id: string | null, 
+operation_id: string | null,
 /**
  * The thread this event belongs to, when scoped to one.
  */
-thread_id: string | null, 
+thread_id: string | null,
 /**
  * The turn this event belongs to, when scoped to one.
  */
-turn_id: string | null, 
+turn_id: string | null,
 /**
  * The 1-based position of this event within its ordered stream.
  */
-sequence: Sequence, 
+sequence: Sequence,
 /**
  * When the event occurred. Supplied by the emitting side; fixtures
  * use constants.
  */
-occurred_at: number, 
+occurred_at: number,
 /**
  * The event discriminator and payload.
  */

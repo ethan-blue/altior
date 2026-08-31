@@ -1,0 +1,1 @@
+{"protocol_version":1,"operation_id":"op_fixture000000026","kind":"test_harness_binding","payload":{"args":["--acp"],"env_keys":["PATH"],"harness_binding_id":"hsb_fixture000000004","label":"Local ACP Agent","program":"C:\\Agents\\acp-agent.exe","secret_refs":["sec_ref_openai_01"]},"issued_at":1700000000026}

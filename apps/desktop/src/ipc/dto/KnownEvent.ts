@@ -2,24 +2,80 @@
 
 /**
  * The known normalized event kinds defined by protocol version 1.
- *
- * This is the smallest sample of the documented normalized stream needed
- * by envelope fixtures; the full taxonomy lands with the P1 domain
- * runtime.
  */
-export type KnownEvent = { "kind": "turn.started" } | { "kind": "message.delta", 
+export type KnownEvent = { "kind": "turn.started" } | { "kind": "message.delta",
 /**
  * The bounded delta text.
  */
-text: string, } | { "kind": "turn.completed" } | { "kind": "stream.gap", 
+text: string, } | { "kind": "permission.requested",
+/**
+ * Kind of permission: `"execute"`, `"read"`, `"write"`, or `"network"`.
+ */
+permission_kind: string,
+/**
+ * Bounded description of the requested action.
+ */
+description: string, } | { "kind": "permission.decided",
+/**
+ * Decision: `"approved"` or `"denied"`.
+ */
+decision: string, } | { "kind": "turn.completed" } | { "kind": "turn.failed",
+/**
+ * Bounded failure diagnostic/reason.
+ */
+reason: string,
+/**
+ * Delivery classification: `"absent"`, `"confirmed"`, `"rejected"`, or `"indeterminate"`.
+ */
+delivery_state: string, } | { "kind": "turn.cancelled",
+/**
+ * Optional bounded reason for cancellation.
+ */
+reason?: string | null, } | { "kind": "runtime.status",
+/**
+ * Status string: `"ready"`, `"busy"`, `"degraded"`, `"shutting_down"`.
+ */
+status: string,
+/**
+ * Number of active threads in memory.
+ */
+active_threads: number,
+/**
+ * Optional redacted diagnostic text.
+ */
+diagnostics?: string | null, } | { "kind": "command.result",
+/**
+ * Operation ID this result satisfies.
+ */
+operation_id: string,
+/**
+ * Whether the operation completed successfully.
+ */
+success: boolean,
+/**
+ * Optional bounded result payload.
+ */
+data?: unknown, } | { "kind": "command.error",
+/**
+ * Operation ID this error belongs to.
+ */
+operation_id: string,
+/**
+ * Stable error code.
+ */
+code: string,
+/**
+ * Bounded human-readable error message.
+ */
+message: string, } | { "kind": "stream.gap",
 /**
  * The first sequence the subscriber is missing.
  */
-from: number, } | { "kind": "stream.replayed", 
+from: number, } | { "kind": "stream.replayed",
 /**
  * The first replayed sequence.
  */
-from: number, 
+from: number,
 /**
  * The last replayed sequence.
  */

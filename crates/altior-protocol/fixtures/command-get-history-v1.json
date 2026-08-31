@@ -1,0 +1,1 @@
+{"protocol_version":1,"operation_id":"op_fixture000000024","kind":"get_history","payload":{"cursor":{"started_at":1700000000000,"turn_id":"trn_fixture000000002"},"limit":50,"thread_id":"thr_fixture000000001"},"issued_at":1700000000024}

@@ -6,27 +6,27 @@ import type { ProtocolVersion } from "./ProtocolVersion";
 /**
  * The result of a successful handshake negotiation.
  */
-export type NegotiatedHandshake = { 
+export type NegotiatedHandshake = {
 /**
  * The highest protocol version common to both sides.
  */
-selected_version: ProtocolVersion, 
+selected_version: ProtocolVersion,
 /**
  * Desktop's product build version, carried for diagnostics.
  */
-desktop_version: ProductVersion, 
+desktop_version: ProductVersion,
 /**
  * Core's product build version, carried for diagnostics.
  */
-core_version: ProductVersion, 
+core_version: ProductVersion,
 /**
  * Capabilities both sides explicitly declared supported.
  */
-negotiated_capabilities: CapabilitySet, 
+negotiated_capabilities: CapabilitySet,
 /**
  * Capabilities declared supported by Desktop only, for diagnostics.
  */
-desktop_only: Array<string>, 
+desktop_only: Array<string>,
 /**
  * Capabilities declared supported by Core only, for diagnostics.
  */

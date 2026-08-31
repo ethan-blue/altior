@@ -92,8 +92,11 @@ version = "0.0.1"
 dependencies = [
  "altior-domain",
  "altior-protocol",
+ "libc",
  "serde",
  "serde_json",
+ "tempfile",
+ "windows-sys",
 ]
 
 [[package]]

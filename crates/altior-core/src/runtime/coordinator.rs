@@ -14,7 +14,8 @@ use altior_protocol::{CapabilityId, CapabilitySupport};
 
 use super::ports::{AgentRuntime, HarnessRuntimePort, RuntimeCheckpointPort};
 use super::state::{
-    BindingProbeOutcome, CancelOutcome, HarnessSessionId, RuntimeError, RuntimeEvent, TurnAdmission,
+    BindingProbeOutcome, CancelOutcome, HarnessSessionId, RuntimeError, RuntimeEvent,
+    SupervisorState, TurnAdmission,
 };
 use super::supervisor::ThreadRuntimeSupervisor;
 
@@ -69,6 +70,63 @@ where
     /// Returns a mutable thread supervisor if registered.
     pub fn supervisor_mut(&mut self, thread_id: &ThreadId) -> Option<&mut ThreadRuntimeSupervisor> {
         self.threads.get_mut(thread_id)
+    }
+
+    /// Number of tracked thread supervisors.
+    #[must_use]
+    pub fn thread_count(&self) -> usize {
+        self.threads.len()
+    }
+
+    /// Returns a snapshot of all thread supervisor states.
+    #[must_use]
+    pub fn thread_states(&self) -> BTreeMap<ThreadId, SupervisorState> {
+        self.threads
+            .iter()
+            .map(|(id, s)| (id.clone(), s.state().clone()))
+            .collect()
+    }
+
+    /// Returns all registered thread IDs.
+    #[must_use]
+    pub fn thread_ids(&self) -> Vec<ThreadId> {
+        self.threads.keys().cloned().collect()
+    }
+
+    /// Preflights prompt readiness for a thread without mutating state.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`RuntimeError`] if thread is unknown or session is not ready.
+    pub fn preflight_prompt(
+        &self,
+        thread_id: &ThreadId,
+        operation_id: &OperationId,
+        turn_id: &TurnId,
+    ) -> Result<TurnAdmission, RuntimeError> {
+        let supervisor = self
+            .threads
+            .get(thread_id)
+            .ok_or_else(|| RuntimeError::UnknownThread(thread_id.clone()))?;
+        supervisor.preflight_prompt(operation_id, turn_id)
+    }
+
+    /// Returns active turn ID for a thread if currently executing.
+    #[must_use]
+    pub fn active_turn_id(&self, thread_id: &ThreadId) -> Option<&TurnId> {
+        self.supervisor(thread_id)
+            .and_then(ThreadRuntimeSupervisor::active_turn_id)
+    }
+
+    /// Returns active turn ID for a thread if currently awaiting the given permission.
+    #[must_use]
+    pub fn active_permission_turn_id(
+        &self,
+        thread_id: &ThreadId,
+        permission_id: &EventId,
+    ) -> Option<&TurnId> {
+        self.supervisor(thread_id)
+            .and_then(|s| s.active_permission_turn_id(permission_id))
     }
 
     /// Drains all active work and closes all sessions for application shutdown.

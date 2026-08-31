@@ -8,6 +8,10 @@
 use serde::{Deserialize, Serialize};
 
 use crate::error::IpcError;
+use crate::transport::{LocalListener, LocalStream};
+
+/// Type alias for local transport endpoint.
+pub type LocalEndpoint = Endpoint;
 
 /// The environment inputs endpoint derivation needs.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -47,7 +51,7 @@ impl EndpointEnv {
 
 /// The derived local endpoint Core listens on.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "transport", rename_all = "snake_case")]
+#[serde(tag = "transport", content = "address", rename_all = "snake_case")]
 pub enum Endpoint {
     /// A Windows named pipe path (`\\.\pipe\...`).
     WindowsPipe(String),
@@ -56,12 +60,105 @@ pub enum Endpoint {
 }
 
 impl Endpoint {
+    /// Creates a validated Windows named pipe endpoint.
+    ///
+    /// # Errors
+    /// Returns [`IpcError::InvalidEndpoint`] if the name is empty, exceeds 256 bytes,
+    /// or contains invalid characters.
+    pub fn windows_pipe(name: &str) -> Result<Self, IpcError> {
+        if name.is_empty() {
+            return Err(IpcError::InvalidEndpoint {
+                reason: "pipe name cannot be empty".to_owned(),
+            });
+        }
+        let full_name = if name.starts_with(r"\\.\pipe\") {
+            name.to_owned()
+        } else {
+            format!(r"\\.\pipe\{name}")
+        };
+        if full_name.len() > 256 {
+            return Err(IpcError::InvalidEndpoint {
+                reason: format!("pipe name exceeds 256 bytes: {full_name}"),
+            });
+        }
+        Ok(Self::WindowsPipe(full_name))
+    }
+
+    /// Creates a validated Unix domain socket endpoint.
+    ///
+    /// # Errors
+    /// Returns [`IpcError::InvalidEndpoint`] if the path is empty or exceeds 104 bytes.
+    pub fn unix_socket(path: &str) -> Result<Self, IpcError> {
+        if path.is_empty() {
+            return Err(IpcError::InvalidEndpoint {
+                reason: "socket path cannot be empty".to_owned(),
+            });
+        }
+        if path.len() > 104 {
+            return Err(IpcError::InvalidEndpoint {
+                reason: format!("unix socket path exceeds 104 bytes: {path}"),
+            });
+        }
+        Ok(Self::UnixSocket(path.to_owned()))
+    }
+
+    /// Derives an endpoint scoped by user and instance identifier.
+    ///
+    /// # Errors
+    /// Returns [`IpcError::InvalidEndpoint`] if `user` or `instance` is empty.
+    pub fn random_for_user(user: &str, instance: &str) -> Result<Self, IpcError> {
+        if user.is_empty() || instance.is_empty() {
+            return Err(IpcError::InvalidEndpoint {
+                reason: "user and instance cannot be empty".to_owned(),
+            });
+        }
+        let sanitized_user = sanitize(user);
+        let sanitized_instance = sanitize(instance);
+        if cfg!(windows) {
+            Self::windows_pipe(&format!(
+                "altior-core-{sanitized_user}-{sanitized_instance}"
+            ))
+        } else {
+            Self::unix_socket(&format!(
+                "/tmp/altior-core-{sanitized_user}-{sanitized_instance}.sock"
+            ))
+        }
+    }
+
+    /// Derives the default endpoint for the current OS user environment.
+    ///
+    /// # Errors
+    /// Returns [`IpcError::EndpointUnavailable`] if neither `USERNAME` nor `USER` is set.
+    pub fn default_for_current_user() -> Result<Self, IpcError> {
+        let user = std::env::var("USERNAME")
+            .or_else(|_| std::env::var("USER"))
+            .unwrap_or_else(|_| "default".to_owned());
+        let runtime_dir = std::env::var("XDG_RUNTIME_DIR").ok();
+        EndpointEnv { user, runtime_dir }.endpoint()
+    }
+
     /// The endpoint's platform-specific address string.
     #[must_use]
     pub fn address(&self) -> &str {
         match self {
             Self::WindowsPipe(address) | Self::UnixSocket(address) => address,
         }
+    }
+
+    /// Binds a [`LocalListener`] on this endpoint.
+    ///
+    /// # Errors
+    /// Returns [`IpcError`] if binding fails.
+    pub fn bind(&self) -> Result<LocalListener, IpcError> {
+        LocalListener::bind(self)
+    }
+
+    /// Connects a [`LocalStream`] to this endpoint.
+    ///
+    /// # Errors
+    /// Returns [`IpcError`] if connection fails.
+    pub fn connect(&self, timeout: Option<std::time::Duration>) -> Result<LocalStream, IpcError> {
+        LocalStream::connect(self, timeout)
     }
 }
 
@@ -163,5 +260,55 @@ mod tests {
             env.endpoint(),
             Err(IpcError::EndpointUnavailable { endpoint }) if endpoint.is_empty()
         ));
+    }
+
+    #[test]
+    fn validates_windows_pipe_bounds() {
+        assert!(Endpoint::windows_pipe("").is_err());
+        let valid = Endpoint::windows_pipe("test-pipe").unwrap();
+        assert_eq!(valid.address(), r"\\.\pipe\test-pipe");
+        let oversized = "a".repeat(300);
+        assert!(Endpoint::windows_pipe(&oversized).is_err());
+    }
+
+    #[test]
+    fn validates_unix_socket_byte_bounds() {
+        assert!(Endpoint::unix_socket("").is_err());
+
+        // 104 ASCII bytes succeeds
+        let path_104 = "a".repeat(104);
+        assert_eq!(path_104.len(), 104);
+        let ep_104 = Endpoint::unix_socket(&path_104).unwrap();
+        assert_eq!(ep_104.address(), path_104);
+
+        // 105 ASCII bytes fails
+        let path_105 = "a".repeat(105);
+        assert_eq!(path_105.len(), 105);
+        assert!(matches!(
+            Endpoint::unix_socket(&path_105),
+            Err(IpcError::InvalidEndpoint { reason }) if reason.contains("104 bytes")
+        ));
+
+        // Multibyte UTF-8: 34 3-byte characters = 102 bytes + 2 ascii bytes = 104 bytes -> succeeds
+        let mb_104 = format!("{}ab", "中".repeat(34));
+        assert_eq!(mb_104.len(), 104);
+        assert_eq!(mb_104.chars().count(), 36);
+        assert!(Endpoint::unix_socket(&mb_104).is_ok());
+
+        // Multibyte UTF-8: 35 3-byte characters = 105 bytes (only 35 chars!) -> fails by bytes
+        let mb_105 = "中".repeat(35);
+        assert_eq!(mb_105.len(), 105);
+        assert_eq!(mb_105.chars().count(), 35);
+        assert!(matches!(
+            Endpoint::unix_socket(&mb_105),
+            Err(IpcError::InvalidEndpoint { reason }) if reason.contains("104 bytes")
+        ));
+    }
+
+    #[test]
+    fn random_instance_endpoint_derivation() {
+        let ep = Endpoint::random_for_user("Alice", "inst-1234").unwrap();
+        assert!(ep.address().contains("alice"));
+        assert!(ep.address().contains("inst-1234"));
     }
 }

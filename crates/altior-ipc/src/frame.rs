@@ -57,6 +57,11 @@ impl FrameDecoder {
         Self::default()
     }
 
+    /// Appends incoming raw bytes into the internal buffer without decoding yet.
+    pub fn feed_bytes(&mut self, chunk: &[u8]) {
+        self.buffer.extend_from_slice(chunk);
+    }
+
     /// Feeds `chunk` and returns every complete frame now decodable, in
     /// order.
     ///
@@ -66,32 +71,40 @@ impl FrameDecoder {
     /// exceeds [`MAX_FRAME_BYTES`] — the decoder is then poisoned and the
     /// connection must close.
     pub fn feed(&mut self, chunk: &[u8]) -> Result<Vec<Vec<u8>>, IpcError> {
-        self.buffer.extend_from_slice(chunk);
+        self.feed_bytes(chunk);
         let mut frames = Vec::new();
-        loop {
-            if self.buffer.len() < 4 {
-                break;
-            }
-            let length = u32::from_be_bytes([
-                self.buffer[0],
-                self.buffer[1],
-                self.buffer[2],
-                self.buffer[3],
-            ]) as usize;
-            if length > MAX_FRAME_BYTES {
-                return Err(IpcError::FrameTooLarge {
-                    size_bytes: length,
-                    limit_bytes: MAX_FRAME_BYTES,
-                });
-            }
-            if self.buffer.len() < 4 + length {
-                break;
-            }
-            let frame: Vec<u8> = self.buffer.drain(4..4 + length).collect();
-            self.buffer.drain(0..4);
+        while let Some(frame) = self.decode_next()? {
             frames.push(frame);
         }
         Ok(frames)
+    }
+
+    /// Decodes and returns the next complete frame from the internal buffer, if available.
+    ///
+    /// # Errors
+    /// Returns [`IpcError::FrameTooLarge`] if declared frame length exceeds [`MAX_FRAME_BYTES`].
+    pub fn decode_next(&mut self) -> Result<Option<Vec<u8>>, IpcError> {
+        if self.buffer.len() < 4 {
+            return Ok(None);
+        }
+        let length = u32::from_be_bytes([
+            self.buffer[0],
+            self.buffer[1],
+            self.buffer[2],
+            self.buffer[3],
+        ]) as usize;
+        if length > MAX_FRAME_BYTES {
+            return Err(IpcError::FrameTooLarge {
+                size_bytes: length,
+                limit_bytes: MAX_FRAME_BYTES,
+            });
+        }
+        if self.buffer.len() < 4 + length {
+            return Ok(None);
+        }
+        let frame: Vec<u8> = self.buffer.drain(4..4 + length).collect();
+        self.buffer.drain(0..4);
+        Ok(Some(frame))
     }
 
     /// Number of buffered bytes waiting for a complete frame.

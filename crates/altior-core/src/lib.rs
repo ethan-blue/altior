@@ -12,9 +12,20 @@
 //!   command ledger: a re-delivered `OperationId` is acknowledged, never
 //!   executed twice;
 //! - [`runtime`] — Core's use-case layer and supervisor machine over
-//!   injectable harness and checkpoint ports (P1.2).
+//!   injectable harness and checkpoint ports (P1.2);
+//! - [`application`] — Core application service, command dispatcher,
+//!   event pump, and connection sessions (P1.3).
 
+pub mod application;
 pub mod operations;
 pub mod ownership;
 pub mod runtime;
 pub mod supervision;
+
+pub use application::{
+    CommandDispatcher, CoreAppError, CoreApplication, CoreCommand, CoreCommandEnvelope,
+    CoreCommandResponse, CoreDaemon, CoreDaemonConfig, CoreDiagnosticsReport, CoreServerPort,
+    CoreStatusReport, DaemonSessionState, DaemonStepReport, EventPump, FakeConnection,
+    InMemoryClient, InMemoryDuplexConnection, InMemoryListener, IpcConnection, IpcListener,
+    StartupRecoveryReport, ThreadOpenResult,
+};

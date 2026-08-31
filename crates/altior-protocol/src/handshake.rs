@@ -9,6 +9,7 @@
 //! than inferred from product versions (ADR 0004).
 
 use std::collections::BTreeSet;
+use std::fmt;
 
 use serde::{Deserialize, Serialize};
 
@@ -18,7 +19,7 @@ use crate::error::ProtocolError;
 use crate::version::{ProductVersion, ProtocolVersion, ProtocolVersionRange};
 
 /// Desktop's opening handshake message.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(
     feature = "dto-export",
     derive(ts_rs::TS),
@@ -37,6 +38,17 @@ pub struct DesktopHello {
     /// itself stays pure version/capability math.
     #[cfg_attr(feature = "dto-export", ts(type = "string"))]
     pub launch_token: LaunchToken,
+}
+
+impl fmt::Debug for DesktopHello {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("DesktopHello")
+            .field("supported_versions", &self.supported_versions)
+            .field("desktop_version", &self.desktop_version)
+            .field("capabilities", &self.capabilities)
+            .field("launch_token", &self.launch_token)
+            .finish()
+    }
 }
 
 /// Core's handshake reply.
@@ -170,5 +182,17 @@ mod tests {
             ProtocolError::NoCommonProtocolVersion { ref desktop, ref core }
                 if *desktop == range(1, 2) && *core == range(3, 5)
         ));
+    }
+
+    #[test]
+    fn debug_redacts_launch_token_and_preserves_metadata() {
+        let hello = desktop_hello(1, 2);
+        let debug_str = format!("{hello:?}");
+        assert!(!debug_str.contains("0f1e2d3c4b5a69788796a5b4c3d2e1f0"));
+        assert!(debug_str.contains("[REDACTED]"));
+        assert!(debug_str.contains("supported_versions"));
+        assert!(debug_str.contains("desktop_version"));
+        assert!(debug_str.contains("capabilities"));
+        assert!(debug_str.contains("launch_token"));
     }
 }

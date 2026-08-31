@@ -4,9 +4,10 @@
  * per docs/UI_ARCHITECTURE.md; panes resize by drag or keyboard within
  * their token clamps.
  */
-import { useCallback, useRef } from "react";
+import { useCallback, useRef, useState } from "react";
 import type { TimelineRow } from "../features/timeline/timelineStore";
 import type { ThreadFixture, ThreadStatus } from "../fixtures/timeline";
+import type { AgentProfile } from "../stores/applicationStore";
 import {
   INSPECTOR_MAX,
   INSPECTOR_MIN,
@@ -29,13 +30,18 @@ const statusGlyph: Record<ThreadStatus, string> = {
   completed: "✓",
 };
 
-/** Activity rail: Threads now; the rest are explicitly unavailable. */
-export function ActivityRail({ active }: { readonly active: string }) {
+export interface ActivityRailProps {
+  readonly active: string;
+  readonly onNavigate?: (destination: string) => void;
+}
+
+/** Activity rail: Threads and Agents; others arrive with subsequent phases. */
+export function ActivityRail({ active, onNavigate }: ActivityRailProps) {
   const destinations: { id: string; label: string; arrives: string | null }[] = [
     { id: "threads", label: "Threads", arrives: null },
+    { id: "agents", label: "Agents", arrives: null },
     { id: "projects", label: "Projects", arrives: "P1" },
     { id: "memory", label: "Memory", arrives: "P2" },
-    { id: "agents", label: "Agents", arrives: "P1" },
     { id: "devices", label: "Devices", arrives: "P3" },
     { id: "settings", label: "Settings", arrives: "P1" },
   ];
@@ -51,7 +57,9 @@ export function ActivityRail({ active }: { readonly active: string }) {
             aria-current={active === id ? "page" : undefined}
             aria-disabled={!enabled}
             disabled={!enabled}
+            onClick={() => enabled && onNavigate?.(id)}
             title={enabled ? label : `${label} — arrives with ${arrives}`}
+            data-testid={`rail-${id}`}
           >
             <span aria-hidden="true">{label.slice(0, 2)}</span>
             <span className={shell.railLabel}>{label}</span>
@@ -68,36 +76,64 @@ export interface ThreadsPaneProps {
   readonly onSelect: (id: string) => void;
   readonly filter: string;
   readonly onFilterChange: (value: string) => void;
+  readonly onCreateThread?: () => void;
 }
 
-/** Navigation pane: pinned and recent threads with status indicators. */
+/** Navigation pane: pinned and recent threads with search and thread creation. */
 export function ThreadsPane({
   threads,
   selectedThreadId,
   onSelect,
   filter,
   onFilterChange,
+  onCreateThread,
 }: ThreadsPaneProps) {
-  const matches = threads.filter((thread) =>
-    thread.title.toLowerCase().includes(filter.toLowerCase()),
+  const matches = threads.filter(
+    (thread) =>
+      thread.title.toLowerCase().includes(filter.toLowerCase()) ||
+      thread.agent.toLowerCase().includes(filter.toLowerCase()),
   );
   const pinned = matches.filter((thread) => thread.pinned);
   const recent = matches.filter((thread) => !thread.pinned);
+
   return (
     <section className={shell.threadsPane} aria-label="Threads">
-      <input
-        type="search"
-        className={shell.search}
-        placeholder="Filter threads"
-        value={filter}
-        onChange={(event) => onFilterChange(event.target.value)}
-        aria-label="Filter threads"
-        data-testid="thread-filter"
-      />
+      <div className={shell.threadsHeader}>
+        <input
+          type="search"
+          className={shell.search}
+          placeholder="Filter threads"
+          value={filter}
+          onChange={(event) => onFilterChange(event.target.value)}
+          aria-label="Filter threads"
+          data-testid="thread-filter"
+        />
+        {onCreateThread ? (
+          <button
+            type="button"
+            className={shell.newThreadBtn}
+            onClick={onCreateThread}
+            data-testid="new-thread"
+            title="Create new thread"
+          >
+            + New
+          </button>
+        ) : null}
+      </div>
       {pinned.length > 0 ? (
-        <ThreadSection title="Pinned" threads={pinned} selectedThreadId={selectedThreadId} onSelect={onSelect} />
+        <ThreadSection
+          title="Pinned"
+          threads={pinned}
+          selectedThreadId={selectedThreadId}
+          onSelect={onSelect}
+        />
       ) : null}
-      <ThreadSection title="Recent" threads={recent} selectedThreadId={selectedThreadId} onSelect={onSelect} />
+      <ThreadSection
+        title="Recent"
+        threads={recent}
+        selectedThreadId={selectedThreadId}
+        onSelect={onSelect}
+      />
     </section>
   );
 }
@@ -141,25 +177,61 @@ function ThreadSection({
 export interface ThreadHeaderProps {
   readonly title: string;
   readonly agent: string;
+  readonly agents?: readonly AgentProfile[];
+  readonly onSelectAgent?: (agentId: string) => void;
   readonly theme: "light" | "dark";
   readonly onToggleTheme: () => void;
   readonly inspectorOpen: boolean;
   readonly onToggleInspector: () => void;
+  readonly isStreaming?: boolean;
+  readonly onCancel?: () => void;
 }
 
 export function ThreadHeader({
   title,
   agent,
+  agents,
+  onSelectAgent,
   theme,
   onToggleTheme,
   inspectorOpen,
   onToggleInspector,
+  isStreaming,
+  onCancel,
 }: ThreadHeaderProps) {
   return (
     <header className={shell.threadHeader}>
       <h1 className={shell.threadTitleMain}>{title}</h1>
-      <span className={shell.threadAgent}>{agent}</span>
+
+      {agents && onSelectAgent ? (
+        <select
+          className={shell.agentSelect}
+          value={agents.find((a) => a.name === agent)?.id ?? agents[0]?.id}
+          onChange={(e) => onSelectAgent(e.target.value)}
+          aria-label="Select agent"
+          data-testid="agent-selector"
+        >
+          {agents.map((a) => (
+            <option key={a.id} value={a.id}>
+              {a.name} ({a.model})
+            </option>
+          ))}
+        </select>
+      ) : (
+        <span className={shell.threadAgent}>{agent}</span>
+      )}
+
       <div className={shell.headerControls}>
+        {isStreaming && onCancel ? (
+          <button
+            type="button"
+            onClick={onCancel}
+            className={shell.cancelBtn}
+            data-testid="header-cancel-turn"
+          >
+            Cancel turn
+          </button>
+        ) : null}
         <button type="button" onClick={onToggleTheme} data-testid="theme-toggle">
           {theme === "light" ? "Dark theme" : "Light theme"}
         </button>
@@ -175,11 +247,20 @@ export interface ComposerProps {
   readonly draft: string;
   readonly onDraftChange: (text: string) => void;
   readonly onSend: () => void;
+  readonly onCancel?: () => void;
+  readonly isStreaming?: boolean;
   readonly disabledReason: string | null;
 }
 
 /** Composer: one draft per thread; Enter sends, Shift+Enter breaks lines. */
-export function Composer({ draft, onDraftChange, onSend, disabledReason }: ComposerProps) {
+export function Composer({
+  draft,
+  onDraftChange,
+  onSend,
+  onCancel,
+  isStreaming,
+  disabledReason,
+}: ComposerProps) {
   return (
     <div className={shell.composer}>
       <textarea
@@ -197,6 +278,16 @@ export function Composer({ draft, onDraftChange, onSend, disabledReason }: Compo
         aria-label="Composer"
         data-testid="composer"
       />
+      {isStreaming && onCancel ? (
+        <button
+          type="button"
+          className={shell.cancelBtn}
+          onClick={onCancel}
+          data-testid="cancel-turn"
+        >
+          Cancel
+        </button>
+      ) : null}
       <button
         type="button"
         className={shell.send}
@@ -215,6 +306,7 @@ export interface InspectorProps {
   readonly onWidthChange: (width: number) => void;
   readonly onClose: () => void;
   readonly focusedRow: TimelineRow | null;
+  readonly activeAgent?: AgentProfile | null;
 }
 
 /**
@@ -222,7 +314,13 @@ export interface InspectorProps {
  * provenance. The resize handle is a slider: drag or arrow keys, clamped
  * to the token range.
  */
-export function Inspector({ width, onWidthChange, onClose, focusedRow }: InspectorProps) {
+export function Inspector({
+  width,
+  onWidthChange,
+  onClose,
+  focusedRow,
+  activeAgent,
+}: InspectorProps) {
   const dragState = useRef<{ startX: number; startWidth: number } | null>(null);
 
   const onPointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
@@ -258,7 +356,6 @@ export function Inspector({ width, onWidthChange, onClose, focusedRow }: Inspect
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
         onKeyDown={(event) => {
-          // Standard slider semantics: the value is the pane width.
           if (event.key === "ArrowLeft") {
             event.preventDefault();
             step(-16);
@@ -275,15 +372,39 @@ export function Inspector({ width, onWidthChange, onClose, focusedRow }: Inspect
             Close
           </button>
         </div>
-        <InspectorDetails row={focusedRow} />
+        <InspectorDetails row={focusedRow} activeAgent={activeAgent} />
       </div>
     </aside>
   );
 }
 
-function InspectorDetails({ row }: { readonly row: TimelineRow | null }) {
+function InspectorDetails({
+  row,
+  activeAgent,
+}: {
+  readonly row: TimelineRow | null;
+  readonly activeAgent?: AgentProfile | null;
+}) {
   if (!row) {
-    return <p className={shell.inspectorEmpty}>Select a timeline row to inspect it.</p>;
+    return (
+      <div>
+        <p className={shell.inspectorEmpty}>Select a timeline row to inspect it.</p>
+        {activeAgent ? (
+          <dl className={shell.inspectorFields} style={{ marginTop: "1rem" }}>
+            <dt>Agent</dt>
+            <dd>{activeAgent.name}</dd>
+            <dt>Model</dt>
+            <dd className={shell.mono}>{activeAgent.model}</dd>
+            <dt>Provider</dt>
+            <dd>{activeAgent.provider}</dd>
+            <dt>Secret Ref</dt>
+            <dd className={shell.mono}>
+              {activeAgent.secretRef ? activeAgent.secretRef : "none"}
+            </dd>
+          </dl>
+        ) : null}
+      </div>
+    );
   }
   return (
     <dl className={shell.inspectorFields}>
@@ -363,15 +484,188 @@ export function NavResizeHandle({
 export function StatusBar({
   coreState,
   threadStatus,
+  streamState,
+  onReconnect,
 }: {
   readonly coreState: string;
   readonly threadStatus: string;
+  readonly streamState?: string;
+  readonly onReconnect?: () => void;
 }) {
+  const isDisconnected = coreState.includes("disconnected") || coreState.includes("unavailable");
   return (
     <footer className={shell.statusBar} data-testid="status-bar">
       <span>Core · {coreState}</span>
       <span>Thread · {threadStatus}</span>
+      {streamState ? <span>Stream · {streamState}</span> : null}
       <span>Local · no sync (P3)</span>
+      {isDisconnected && onReconnect ? (
+        <button
+          type="button"
+          onClick={onReconnect}
+          className={shell.reconnectBtn}
+          data-testid="reconnect-button"
+        >
+          Reconnect
+        </button>
+      ) : null}
     </footer>
+  );
+}
+
+export interface AgentOnboardingModalProps {
+  readonly isOpen: boolean;
+  readonly onClose: () => void;
+  readonly onSave: (data: {
+    name: string;
+    provider: string;
+    model: string;
+    secretRef?: string;
+  }) => Promise<void>;
+  readonly onTest: (data: {
+    provider: string;
+    model: string;
+    secretRef?: string;
+  }) => Promise<{ success: boolean; latencyMs?: number; error?: string }>;
+  readonly isTesting: boolean;
+  readonly testResult: { success: boolean; latencyMs?: number; error?: string } | null;
+}
+
+/** Minimal Agent Onboarding modal with opaque secret reference handling. */
+export function AgentOnboardingModal({
+  isOpen,
+  onClose,
+  onSave,
+  onTest,
+  isTesting,
+  testResult,
+}: AgentOnboardingModalProps) {
+  const [name, setName] = useState("");
+  const [provider, setProvider] = useState("acp");
+  const [model, setModel] = useState("claude-3-7-sonnet");
+  const [secretRef, setSecretRef] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+
+  if (!isOpen) return null;
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!name.trim()) return;
+    setSubmitting(true);
+    try {
+      await onSave({
+        name: name.trim(),
+        provider: provider.trim(),
+        model: model.trim(),
+        secretRef: secretRef.trim() || undefined,
+      });
+      onClose();
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleTest = async () => {
+    await onTest({
+      provider: provider.trim(),
+      model: model.trim(),
+      secretRef: secretRef.trim() || undefined,
+    });
+  };
+
+  return (
+    <div className={shell.modalOverlay} role="dialog" aria-modal="true" aria-label="Agent Onboarding">
+      <div className={shell.modalCard}>
+        <div className={shell.modalHeader}>
+          <h2>Agent Onboarding</h2>
+          <button type="button" onClick={onClose} data-testid="onboarding-close">
+            ×
+          </button>
+        </div>
+
+        <form onSubmit={handleSubmit}>
+          <div className={shell.formGrid}>
+            <label htmlFor="agent-name">Name</label>
+            <input
+              id="agent-name"
+              className={shell.formInput}
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="e.g. Gamma Agent"
+              required
+              data-testid="agent-name-input"
+            />
+
+            <label htmlFor="agent-provider">Provider</label>
+            <input
+              id="agent-provider"
+              className={shell.formInput}
+              value={provider}
+              onChange={(e) => setProvider(e.target.value)}
+              placeholder="acp / anthropic / openai"
+              required
+              data-testid="agent-provider-input"
+            />
+
+            <label htmlFor="agent-model">Model</label>
+            <input
+              id="agent-model"
+              className={shell.formInput}
+              value={model}
+              onChange={(e) => setModel(e.target.value)}
+              placeholder="claude-3-7-sonnet"
+              required
+              data-testid="agent-model-input"
+            />
+
+            <label htmlFor="agent-secret">Secret Ref</label>
+            <input
+              id="agent-secret"
+              className={shell.formInput}
+              value={secretRef}
+              onChange={(e) => setSecretRef(e.target.value)}
+              placeholder="vault://key-id or env:VAR"
+              data-testid="agent-secret-ref"
+            />
+
+            <p className={shell.secretNotice}>
+              🔒 Plaintext keys are never stored. Only opaque reference pointers (e.g. vault://..., env:...) are accepted.
+            </p>
+          </div>
+
+          <div style={{ marginTop: "0.5rem" }}>
+            {testResult ? (
+              testResult.success ? (
+                <span className={shell.testResultOk}>
+                  ✓ Connection verified ({testResult.latencyMs}ms)
+                </span>
+              ) : (
+                <span className={shell.testResultErr}>
+                  × Test failed: {testResult.error}
+                </span>
+              )
+            ) : null}
+          </div>
+
+          <div className={shell.modalActions}>
+            <button
+              type="button"
+              onClick={handleTest}
+              disabled={isTesting}
+              data-testid="agent-test-button"
+            >
+              {isTesting ? "Testing…" : "Test Connection"}
+            </button>
+            <button
+              type="submit"
+              disabled={submitting || !name.trim()}
+              data-testid="agent-save-button"
+            >
+              {submitting ? "Saving…" : "Save Agent"}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
   );
 }

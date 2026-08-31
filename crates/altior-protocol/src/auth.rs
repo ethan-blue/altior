@@ -20,7 +20,7 @@ const MIN_TOKEN_LEN: usize = 32;
 const MAX_TOKEN_LEN: usize = 128;
 
 /// An opaque per-launch capability token (ADR 0006).
-#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[derive(Clone, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[serde(try_from = "String", into = "String")]
 #[cfg_attr(
     feature = "dto-export",
@@ -32,6 +32,12 @@ const MAX_TOKEN_LEN: usize = 128;
     )
 )]
 pub struct LaunchToken(String);
+
+impl fmt::Debug for LaunchToken {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_tuple("LaunchToken").field(&"[REDACTED]").finish()
+    }
+}
 
 impl LaunchToken {
     /// Validates and constructs a launch token.
@@ -137,5 +143,16 @@ mod tests {
         let decoded: LaunchToken = serde_json::from_value(encoded).unwrap();
         assert_eq!(decoded, token);
         assert!(serde_json::from_value::<LaunchToken>(serde_json::json!("short")).is_err());
+    }
+
+    #[test]
+    fn debug_redacts_launch_token_zero_plaintext() {
+        let token = LaunchToken::try_new(TOKEN).unwrap();
+        let debug_str = format!("{token:?}");
+        assert_eq!(debug_str, "LaunchToken(\"[REDACTED]\")");
+        assert!(!debug_str.contains(TOKEN));
+        let alt_debug_str = format!("{token:#?}");
+        assert!(!alt_debug_str.contains(TOKEN));
+        assert!(alt_debug_str.contains("[REDACTED]"));
     }
 }

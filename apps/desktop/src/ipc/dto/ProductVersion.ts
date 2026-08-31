@@ -8,15 +8,15 @@
  * support is negotiated explicitly instead of being inferred from a
  * version string.
  */
-export type ProductVersion = { 
+export type ProductVersion = {
 /**
  * Major component.
  */
-major: number, 
+major: number,
 /**
  * Minor component.
  */
-minor: number, 
+minor: number,
 /**
  * Patch component.
  */

@@ -87,10 +87,21 @@ tables. Pre-call intents and post-call settlements (`Confirmed`, `Rejected`,
 unsettled intents to `Indeterminate`. Automatic turn re-send on crashes or
 indeterminate outcomes is strictly forbidden. A redact-by-default secret
 boundary and `NoSecretsResolver` seam ensure credentials never leak into logs,
-diagnostics, or SQLite files. This release represents the **0.0.1 developer preview**:
-a complete, verified backend runtime foundation. It is an architecture and developer
-preview, not yet a packaged consumer product; P1.3 Desktop MVP (Tauri workbench
-wiring, live IPC server, and onboarding) is the next milestone.
+diagnostics, or SQLite files. P1.3 delivers the Desktop MVP and local IPC
+layer (ADR 0015): `altior-protocol` expands and exports 12 commands, 12 DTOs,
+snapshots, and stream events to TypeScript; `altior-ipc` delivers physical OS
+IPC over Windows Named Pipes and Unix Domain Sockets with atomic discovery file
+publishing (Unix 0600 / Windows per-user ACLs), 32-byte hex launch token auth,
+256 KiB frame bounds, slow handshake timeouts (5s), 32 session caps, and
+Debug redaction; `altior-core` introduces `CoreApplication` (command dispatch,
+FTS5 search, turn supervision), the `Daemon` server loop, and the `EventPump`
+broadcasting live events with monotonic sequence numbers and retained replay
+windows (background turns survive UI disconnects); `apps/desktop/src-tauri`
+implements `SpawnOrAttach` discovering or launching the Core daemon; and
+`apps/desktop` runs the workbench with `TauriCoreTransport` and `applicationStore`
+managing real agents, threads, streaming turns, inline permission decisions,
+turn cancellation, and diagnostics. P1.4 Acceptance Journey (real third-party
+dual-ACP agent validation on clean OS profiles) is the next milestone.
 
 ## Design anchors
 

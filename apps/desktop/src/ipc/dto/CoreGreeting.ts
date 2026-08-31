@@ -6,19 +6,19 @@ import type { RetainedWindow } from "./RetainedWindow";
 /**
  * Core's first message after a successful handshake (ADR 0006).
  */
-export type CoreGreeting = { 
+export type CoreGreeting = {
 /**
  * The protocol version negotiated for this connection.
  */
-protocol_version: ProtocolVersion, 
+protocol_version: ProtocolVersion,
 /**
  * Identity of this Core launch. Differs across restarts.
  */
-instance_id: string, 
+instance_id: string,
 /**
  * Core's product build version, for diagnostics only.
  */
-core_version: ProductVersion, 
+core_version: ProductVersion,
 /**
  * The retained event window, or `None` on a fresh Core with no events.
  */

@@ -21,8 +21,43 @@ dependencies = [
 name = "altior-desktop-shell"
 version = "0.0.1"
 dependencies = [
+ "altior-domain",
+ "altior-ipc",
+ "altior-protocol",
+ "serde",
+ "serde_json",
  "tauri",
  "tauri-build",
+ "thiserror 2.0.20",
+]
+
+[[package]]
+name = "altior-domain"
+version = "0.0.1"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "altior-ipc"
+version = "0.0.1"
+dependencies = [
+ "altior-domain",
+ "altior-protocol",
+ "libc",
+ "serde",
+ "serde_json",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "altior-protocol"
+version = "0.0.1"
+dependencies = [
+ "altior-domain",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

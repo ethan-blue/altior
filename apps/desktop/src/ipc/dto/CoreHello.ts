@@ -6,15 +6,15 @@ import type { ProtocolVersionRange } from "./ProtocolVersionRange";
 /**
  * Core's handshake reply.
  */
-export type CoreHello = { 
+export type CoreHello = {
 /**
  * Protocol versions this Core build can speak, inclusive.
  */
-supported_versions: ProtocolVersionRange, 
+supported_versions: ProtocolVersionRange,
 /**
  * Core's product build version, for diagnostics only.
  */
-core_version: ProductVersion, 
+core_version: ProductVersion,
 /**
  * Capabilities this Core build explicitly declares.
  */

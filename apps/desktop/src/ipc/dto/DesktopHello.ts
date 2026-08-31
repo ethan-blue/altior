@@ -6,19 +6,19 @@ import type { ProtocolVersionRange } from "./ProtocolVersionRange";
 /**
  * Desktop's opening handshake message.
  */
-export type DesktopHello = { 
+export type DesktopHello = {
 /**
  * Protocol versions this Desktop build can speak, inclusive.
  */
-supported_versions: ProtocolVersionRange, 
+supported_versions: ProtocolVersionRange,
 /**
  * Desktop's product build version, for diagnostics only.
  */
-desktop_version: ProductVersion, 
+desktop_version: ProductVersion,
 /**
  * Capabilities this Desktop build explicitly declares.
  */
-capabilities: CapabilitySet, 
+capabilities: CapabilitySet,
 /**
  * The per-launch capability token proving this connection may drive
  * Core (`docs/SECURITY.md`, ADR 0006). Validation belongs to the IPC

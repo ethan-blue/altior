@@ -1,0 +1,1 @@
+{"protocol_version":1,"operation_id":"op_fixture000000020","kind":"create_thread","payload":{"agent_profile_id":"agp_fixture000000003","project_id":"prj_fixture000000010","title":"New Conversation"},"issued_at":1700000000020}

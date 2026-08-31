@@ -46,6 +46,31 @@ pub enum IpcError {
         /// The underlying typed protocol failure.
         source: ProtocolError,
     },
+    /// The requested endpoint or discovery file was not found.
+    NotFound {
+        /// The missing target (endpoint address or path).
+        endpoint: String,
+    },
+    /// Permission was denied accessing the endpoint or token file.
+    AccessDenied {
+        /// The target for which access was denied.
+        endpoint: String,
+    },
+    /// Connection to the endpoint timed out.
+    Timeout {
+        /// The endpoint that timed out.
+        endpoint: String,
+    },
+    /// Endpoint name or path is invalid or exceeds bounds.
+    InvalidEndpoint {
+        /// Reason for invalidity.
+        reason: String,
+    },
+    /// An underlying I/O error occurred during local transport.
+    Io {
+        /// The underlying I/O error.
+        source: std::io::Error,
+    },
 }
 
 impl fmt::Display for IpcError {
@@ -73,6 +98,11 @@ impl fmt::Display for IpcError {
                 write!(f, "session state forbids {attempted}")
             }
             Self::Protocol { source } => write!(f, "protocol failure: {source}"),
+            Self::NotFound { endpoint } => write!(f, "endpoint not found: {endpoint}"),
+            Self::AccessDenied { endpoint } => write!(f, "access denied for endpoint: {endpoint}"),
+            Self::Timeout { endpoint } => write!(f, "connection to endpoint timed out: {endpoint}"),
+            Self::InvalidEndpoint { reason } => write!(f, "invalid endpoint: {reason}"),
+            Self::Io { source } => write!(f, "transport I/O failure: {source}"),
         }
     }
 }
@@ -81,6 +111,7 @@ impl std::error::Error for IpcError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             Self::Protocol { source } => Some(source),
+            Self::Io { source } => Some(source),
             _ => None,
         }
     }
@@ -89,5 +120,11 @@ impl std::error::Error for IpcError {
 impl From<ProtocolError> for IpcError {
     fn from(source: ProtocolError) -> Self {
         Self::Protocol { source }
+    }
+}
+
+impl From<std::io::Error> for IpcError {
+    fn from(source: std::io::Error) -> Self {
+        Self::Io { source }
     }
 }

@@ -4,11 +4,11 @@ import type { Sequence } from "./Sequence";
 /**
  * The inclusive range of past events Core still holds in memory.
  */
-export type RetainedWindow = { 
+export type RetainedWindow = {
 /**
  * Oldest retained sequence, inclusive.
  */
-from: Sequence, 
+from: Sequence,
 /**
  * Newest retained sequence, inclusive.
  */

@@ -4,25 +4,25 @@ import type { ProtocolVersion } from "./ProtocolVersion";
 
 /**
  * A versioned command envelope. No transport is attached; encoding is a
- * plain JSON contract so any P0.2 transport can carry it.
+ * plain JSON contract so any local IPC transport can carry it.
  */
-export type CommandEnvelope = { 
+export type CommandEnvelope = {
 /**
  * The protocol version negotiated for this connection.
  */
-protocol_version: ProtocolVersion, 
+protocol_version: ProtocolVersion,
 /**
- * The Altior operation this command belongs to.
+ * The Altior operation this command belongs to (for idempotency).
  */
-operation_id: string, 
+operation_id: string,
 /**
  * The command discriminator.
  */
-kind: CommandKind, 
+kind: CommandKind,
 /**
  * Optional bounded JSON payload.
  */
-payload: unknown, 
+payload: unknown,
 /**
  * When the sender issued the command. Supplied by the sender's clock;
  * fixtures use constants.

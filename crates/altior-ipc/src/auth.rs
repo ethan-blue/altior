@@ -8,6 +8,9 @@
 //! domain never generates identifiers or secrets (ADR 0004); this is
 //! infrastructure, which is why it lives here.
 
+use std::fmt;
+use std::str::FromStr;
+
 use serde::{Deserialize, Serialize};
 
 use altior_domain::CoreInstanceId;
@@ -16,12 +19,21 @@ use altior_protocol::{LaunchToken, ProtocolError};
 use crate::error::IpcError;
 
 /// The bound pair published in the token file next to Core's endpoint.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
 pub struct LaunchCredentials {
     /// The Core launch the token authenticates.
     pub instance_id: CoreInstanceId,
     /// The opaque per-launch capability token.
     pub launch_token: LaunchToken,
+}
+
+impl fmt::Debug for LaunchCredentials {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("LaunchCredentials")
+            .field("instance_id", &self.instance_id)
+            .field("launch_token", &"[REDACTED]")
+            .finish()
+    }
 }
 
 /// Mints a launch token from caller-supplied entropy.
@@ -75,17 +87,83 @@ pub fn decode_token_file(input: &str) -> Result<LaunchCredentials, IpcError> {
     })
 }
 
-/// Validates that a presented token matches the launch Core is running.
+#[cfg(windows)]
+fn get_os_entropy(buf: &mut [u8]) -> Result<(), std::io::Error> {
+    #[link(name = "advapi32")]
+    unsafe extern "system" {
+        #[link_name = "SystemFunction036"]
+        fn RtlGenRandom(RandomBuffer: *mut u8, RandomBufferLength: u32) -> u8;
+    }
+    let len = u32::try_from(buf.len())
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidInput, e))?;
+    let ret = unsafe { RtlGenRandom(buf.as_mut_ptr(), len) };
+    if ret != 0 {
+        Ok(())
+    } else {
+        Err(std::io::Error::last_os_error())
+    }
+}
+
+#[cfg(unix)]
+fn get_os_entropy(buf: &mut [u8]) -> Result<(), std::io::Error> {
+    use std::io::Read;
+    let mut file = std::fs::File::open("/dev/urandom")?;
+    file.read_exact(buf)?;
+    Ok(())
+}
+
+/// Generates a cryptographically random launch token from OS entropy.
+///
+/// # Errors
+/// Returns [`IpcError`] on OS RNG failure.
+pub fn generate_launch_token() -> Result<LaunchToken, IpcError> {
+    let mut entropy = [0u8; 16];
+    get_os_entropy(&mut entropy)?;
+    mint_launch_token(&entropy)
+}
+
+/// Generates a collision-safe random Core instance identifier with prefix `cor_`.
+///
+/// # Errors
+/// Returns [`IpcError`] on OS RNG failure or ID validation error.
+pub fn generate_instance_id() -> Result<CoreInstanceId, IpcError> {
+    let mut entropy = [0u8; 16];
+    get_os_entropy(&mut entropy)?;
+    let mut hex = String::with_capacity(32);
+    for byte in entropy {
+        hex.push(HEX[(byte >> 4) as usize]);
+        hex.push(HEX[(byte & 0x0F) as usize]);
+    }
+    CoreInstanceId::from_str(&format!("cor_{hex}")).map_err(|e| IpcError::InvalidEndpoint {
+        reason: e.to_string(),
+    })
+}
+
+/// Validates that a presented token matches the launch Core is running
+/// using constant-time comparison to prevent timing attacks.
 ///
 /// # Errors
 ///
 /// Returns [`IpcError::AuthenticationRejected`] on any mismatch.
 pub fn authenticate(presented: &LaunchToken, expected: &LaunchToken) -> Result<(), IpcError> {
-    if presented == expected {
+    let p_bytes = presented.as_str().as_bytes();
+    let e_bytes = expected.as_str().as_bytes();
+    if constant_time_eq(p_bytes, e_bytes) {
         Ok(())
     } else {
         Err(IpcError::AuthenticationRejected)
     }
+}
+
+fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
+    if a.len() != b.len() {
+        return false;
+    }
+    let mut diff = 0u8;
+    for (x, y) in a.iter().zip(b.iter()) {
+        diff |= x ^ y;
+    }
+    diff == 0
 }
 
 const HEX: [char; 16] = [
@@ -129,6 +207,30 @@ mod tests {
         );
         assert_eq!(decode_token_file(&encoded).unwrap(), credentials);
         assert!(decode_token_file("not json").is_err());
+    }
+
+    #[test]
+    fn debug_redacts_launch_token() {
+        let credentials = LaunchCredentials {
+            instance_id: "cor_fixture000000009".parse().unwrap(),
+            launch_token: mint_launch_token(&[0x11; 16]).unwrap(),
+        };
+        let debug_str = format!("{credentials:?}");
+        assert!(!debug_str.contains("11111111111111111111111111111111"));
+        assert!(debug_str.contains("[REDACTED]"));
+    }
+
+    #[test]
+    fn generates_random_launch_tokens_and_instance_ids() {
+        let token1 = generate_launch_token().unwrap();
+        let token2 = generate_launch_token().unwrap();
+        assert_ne!(token1, token2);
+        assert_eq!(token1.as_str().len(), 32);
+
+        let id1 = generate_instance_id().unwrap();
+        let id2 = generate_instance_id().unwrap();
+        assert_ne!(id1, id2);
+        assert!(id1.as_str().starts_with("cor_"));
     }
 
     #[test]

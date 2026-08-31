@@ -41,5 +41,17 @@ path = "tests/p12_runtime.rs"
 name = "p12_composition"
 path = "tests/p12_composition.rs"
 
+[[test]]
+name = "p13_application"
+path = "tests/p13_application.rs"
+
+[[test]]
+name = "p13_local_ipc"
+path = "tests/p13_local_ipc.rs"
+
+[[test]]
+name = "p13_daemon_process"
+path = "tests/p13_daemon_process.rs"
+
 [lints]
 workspace = true

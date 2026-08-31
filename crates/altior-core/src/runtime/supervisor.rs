@@ -131,6 +131,91 @@ impl ThreadRuntimeSupervisor {
         Ok(())
     }
 
+    /// Checks whether a prompt turn can be admitted on this thread without mutating state.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`RuntimeError`] on state mismatch, forbidden resend, or session error.
+    pub fn preflight_prompt(
+        &self,
+        operation_id: &OperationId,
+        turn_id: &TurnId,
+    ) -> Result<TurnAdmission, RuntimeError> {
+        if let Some(record) = self.turn_history.get(turn_id)
+            && (record.delivery == DeliveryState::Indeterminate
+                || record.delivery == DeliveryState::Confirmed)
+        {
+            return Err(RuntimeError::AutomaticResendForbidden {
+                thread_id: self.thread_id.clone(),
+                turn_id: turn_id.clone(),
+                delivery: record.delivery,
+            });
+        }
+
+        match &self.state {
+            SupervisorState::Ready => {}
+            SupervisorState::Prompting {
+                turn_id: active, ..
+            }
+            | SupervisorState::AwaitingPermission {
+                turn_id: active, ..
+            }
+            | SupervisorState::Cancelling {
+                turn_id: Some(active),
+                ..
+            } => {
+                return Err(RuntimeError::ActiveOperationInProgress {
+                    thread_id: self.thread_id.clone(),
+                    turn_id: active.clone(),
+                });
+            }
+            other => {
+                return Err(RuntimeError::SessionNotReady {
+                    state: format!("{other:?}"),
+                });
+            }
+        }
+
+        if self.session_id.is_none() {
+            return Err(RuntimeError::SessionNotReady {
+                state: "no bound session".to_string(),
+            });
+        }
+
+        if self.operations.knows(operation_id) {
+            return Ok(TurnAdmission::Duplicate);
+        }
+
+        Ok(TurnAdmission::Admitted)
+    }
+
+    /// Returns the currently active turn ID, if any.
+    #[must_use]
+    pub fn active_turn_id(&self) -> Option<&TurnId> {
+        match &self.state {
+            SupervisorState::Prompting { turn_id, .. }
+            | SupervisorState::AwaitingPermission { turn_id, .. }
+            | SupervisorState::Cancelling {
+                turn_id: Some(turn_id),
+                ..
+            } => Some(turn_id),
+            _ => None,
+        }
+    }
+
+    /// Returns the active turn ID if this supervisor is awaiting the given permission decision.
+    #[must_use]
+    pub fn active_permission_turn_id(&self, permission_id: &EventId) -> Option<&TurnId> {
+        match &self.state {
+            SupervisorState::AwaitingPermission {
+                turn_id,
+                pending_permission_id,
+                ..
+            } if pending_permission_id == permission_id => Some(turn_id),
+            _ => None,
+        }
+    }
+
     /// Initiates a prompt turn on this thread.
     ///
     /// # Errors
