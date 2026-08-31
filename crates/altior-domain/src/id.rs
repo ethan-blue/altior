@@ -222,6 +222,11 @@ define_id!(
     ProjectId,
     "prj_"
 );
+define_id!(
+    /// Identity of a durable runtime checkpoint (P1.2).
+    RuntimeCheckpointId,
+    "chk_"
+);
 
 #[cfg(test)]
 mod tests {
@@ -269,6 +274,13 @@ mod tests {
                 .unwrap()
                 .to_string(),
             "prj_fixture000000010"
+        );
+
+        assert_eq!(
+            RuntimeCheckpointId::from_str("chk_fixture000000011")
+                .unwrap()
+                .to_string(),
+            "chk_fixture000000011"
         );
     }
 

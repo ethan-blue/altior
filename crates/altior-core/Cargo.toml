@@ -6,9 +6,16 @@ license.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+altior-acp = { path = "../altior-acp" }
 altior-domain = { path = "../altior-domain" }
 altior-ipc = { path = "../altior-ipc" }
 altior-protocol = { path = "../altior-protocol" }
+altior-storage = { path = "../altior-storage" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[dev-dependencies]
+tempfile = "3"
 
 [lib]
 name = "altior_core"
@@ -18,6 +25,21 @@ path = "src/lib.rs"
 name = "altior-core"
 path = "src/main.rs"
 
+[[test]]
+name = "dependency_boundaries"
+path = "tests/dependency_boundaries.rs"
+
+[[test]]
+name = "p02_evidence"
+path = "tests/p02_evidence.rs"
+
+[[test]]
+name = "p12_runtime"
+path = "tests/p12_runtime.rs"
+
+[[test]]
+name = "p12_composition"
+path = "tests/p12_composition.rs"
+
 [lints]
 workspace = true
-

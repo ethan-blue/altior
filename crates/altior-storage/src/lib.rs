@@ -20,12 +20,14 @@ use rusqlite::{Connection, params};
 
 use altior_domain::{
     AcpHarnessBinding, AgentProfile, AgentProfileCursor, AgentProfileId, AgentProfileListLimit,
-    BoundedLabel, BoundedPath, DisplayName, DomainEvent, DomainEventKind, EntityError, EventId,
-    EventPayload, HarnessBindingCursor, HarnessBindingId, HarnessBindingListLimit, HarnessKind,
-    HistoryLimit, MemoryMode, Permission, PermissionCursor, PermissionDecision,
-    PermissionDescription, PermissionKind, PermissionListLimit, ProjectId, ProjectRef,
-    ProjectRefCursor, ProjectRefListLimit, SearchQuery, ThreadId, ThreadListLimit, ThreadState,
-    TurnCursor, TurnId, TurnListLimit, UnixMillis,
+    BoundaryKind, BoundedLabel, BoundedPath, CHECKPOINT_LIST_LIMIT_MAX, CheckpointCursor,
+    CheckpointListLimit, CheckpointState, DiagnosticSummary, DisplayName, DomainEvent,
+    DomainEventKind, EntityError, EventId, EventPayload, HarnessBindingCursor, HarnessBindingId,
+    HarnessBindingListLimit, HarnessKind, HistoryLimit, MemoryMode, OpaqueSessionId, OperationId,
+    Permission, PermissionCursor, PermissionDecision, PermissionDescription, PermissionKind,
+    PermissionListLimit, ProjectId, ProjectRef, ProjectRefCursor, ProjectRefListLimit,
+    RemoteRequestId, RuntimeCheckpoint, RuntimeCheckpointId, SearchQuery, SessionBinding, ThreadId,
+    ThreadListLimit, ThreadState, TurnCursor, TurnId, TurnListLimit, UnixMillis,
 };
 use altior_protocol::EventEnvelope;
 pub use error::StorageError;
@@ -263,6 +265,7 @@ impl Store {
         let mut store = Self { conn };
         store.ensure_projections_current()?;
         store.ensure_domain_projections_current()?;
+        store.recover_unsettled_checkpoints()?;
         Ok(store)
     }
 
@@ -2019,6 +2022,481 @@ impl Store {
         collect_rows(rows, row_to_permission, "permissions_for_thread")
     }
 
+    // ── Runtime checkpoints (P1.2) ─────────────────────────────────
+
+    /// Records a durable runtime intent BEFORE dispatching an external adapter call.
+    ///
+    /// # Invariants
+    /// - If `checkpoint.turn_id` is present, it must exist in `turn` and belong to `checkpoint.thread_id`.
+    /// - Recording the exact same intent tuple is idempotent.
+    /// - Recording a different tuple with an existing checkpoint ID returns [`StorageError::CheckpointCollision`].
+    /// - State must be [`CheckpointState::Intent`].
+    ///
+    /// # Errors
+    /// Returns [`StorageError::TurnNotFound`], [`StorageError::TurnThreadMismatch`],
+    /// [`StorageError::CheckpointCollision`], [`StorageError::InvalidCheckpointTransition`],
+    /// or SQLite failures.
+    #[allow(clippy::too_many_lines)]
+    pub fn record_runtime_intent(
+        &mut self,
+        checkpoint: &RuntimeCheckpoint,
+    ) -> Result<(), StorageError> {
+        if checkpoint.state != CheckpointState::Intent {
+            return Err(StorageError::InvalidCheckpointTransition {
+                id: checkpoint.id.to_string(),
+                detail: "record_runtime_intent requires state to be intent".to_string(),
+            });
+        }
+
+        let tx = self
+            .conn
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+            .map_err(|error| StorageError::from_sqlite("record_runtime_intent", error))?;
+
+        if let Some(ref turn_id) = checkpoint.turn_id {
+            let actual_thread_id: Option<String> = tx
+                .query_row(
+                    "SELECT thread_id FROM turn WHERE turn_id = ?1",
+                    params![turn_id.as_str()],
+                    |row| row.get(0),
+                )
+                .map(Some)
+                .or_else(|err| match err {
+                    rusqlite::Error::QueryReturnedNoRows => Ok(None),
+                    other => Err(StorageError::from_sqlite(
+                        "record_runtime_intent validate turn",
+                        other,
+                    )),
+                })?;
+
+            match actual_thread_id {
+                None => {
+                    return Err(StorageError::TurnNotFound {
+                        turn_id: turn_id.to_string(),
+                    });
+                }
+                Some(ref actual) if actual != checkpoint.thread_id.as_str() => {
+                    return Err(StorageError::TurnThreadMismatch {
+                        turn_id: turn_id.to_string(),
+                        expected_thread_id: checkpoint.thread_id.to_string(),
+                        actual_thread_id: actual.clone(),
+                    });
+                }
+                _ => {}
+            }
+        }
+
+        let existing = query_optional_row(
+            &tx,
+            "SELECT id, thread_id, turn_id, operation_id, boundary_kind, state,
+                    remote_request_id, diagnostic_summary, created_at, settled_at
+             FROM runtime_checkpoint WHERE id = ?1",
+            params![checkpoint.id.as_str()],
+            row_to_runtime_checkpoint,
+            "record_runtime_intent find existing",
+        )?;
+
+        if let Some(existing) = existing {
+            let matches = existing.thread_id == checkpoint.thread_id
+                && existing.turn_id == checkpoint.turn_id
+                && existing.operation_id == checkpoint.operation_id
+                && existing.boundary_kind == checkpoint.boundary_kind
+                && existing.created_at == checkpoint.created_at;
+
+            if matches {
+                return Ok(());
+            }
+            return Err(StorageError::CheckpointCollision {
+                id: checkpoint.id.to_string(),
+                detail: "existing checkpoint has conflicting intent parameters".to_string(),
+            });
+        }
+
+        let created_at_millis = i64::try_from(checkpoint.created_at.as_millis()).map_err(|_| {
+            StorageError::InvalidEntityData {
+                detail: format!(
+                    "created_at {} exceeds i64 column",
+                    checkpoint.created_at.as_millis()
+                ),
+            }
+        })?;
+        let settled_at_millis = checkpoint
+            .settled_at
+            .map(|t| {
+                i64::try_from(t.as_millis()).map_err(|_| StorageError::InvalidEntityData {
+                    detail: format!("settled_at {} exceeds i64 column", t.as_millis()),
+                })
+            })
+            .transpose()?;
+
+        tx.execute(
+            "INSERT INTO runtime_checkpoint
+                 (id, thread_id, turn_id, operation_id, boundary_kind, state,
+                  remote_request_id, diagnostic_summary, created_at, settled_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+            params![
+                checkpoint.id.as_str(),
+                checkpoint.thread_id.as_str(),
+                checkpoint.turn_id.as_ref().map(TurnId::as_str),
+                checkpoint.operation_id.as_str(),
+                checkpoint.boundary_kind.as_str(),
+                checkpoint.state.as_str(),
+                checkpoint
+                    .remote_request_id
+                    .as_ref()
+                    .map(RemoteRequestId::as_str),
+                checkpoint
+                    .diagnostic_summary
+                    .as_ref()
+                    .map(DiagnosticSummary::as_str),
+                created_at_millis,
+                settled_at_millis,
+            ],
+        )
+        .map_err(|error| StorageError::from_sqlite("record_runtime_intent insert", error))?;
+
+        tx.commit()
+            .map_err(|error| StorageError::from_sqlite("record_runtime_intent commit", error))?;
+        Ok(())
+    }
+
+    /// Durably settles the outcome of an external boundary operation.
+    ///
+    /// # Transitions
+    /// - Only `Intent` -> `Confirmed`, `Rejected`, or `Indeterminate` is allowed.
+    /// - Re-settling to the same terminal state is idempotent.
+    /// - Re-settling to a different terminal state returns [`StorageError::CheckpointSettlementConflict`].
+    /// - Settling to non-terminal `Intent` returns [`StorageError::InvalidCheckpointTransition`].
+    ///
+    /// # Errors
+    /// Returns [`StorageError::CheckpointNotFound`], [`StorageError::CheckpointSettlementConflict`],
+    /// [`StorageError::InvalidCheckpointTransition`], or SQLite failures.
+    pub fn settle_runtime_checkpoint(
+        &mut self,
+        id: &RuntimeCheckpointId,
+        state: CheckpointState,
+        remote_request_id: Option<&RemoteRequestId>,
+        diagnostic_summary: Option<&DiagnosticSummary>,
+        settled_at: UnixMillis,
+    ) -> Result<(), StorageError> {
+        if !state.is_terminal() {
+            return Err(StorageError::InvalidCheckpointTransition {
+                id: id.to_string(),
+                detail: "cannot settle to non-terminal state".to_string(),
+            });
+        }
+
+        let tx = self
+            .conn
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+            .map_err(|error| StorageError::from_sqlite("settle_runtime_checkpoint", error))?;
+
+        let existing_state_str: String = tx
+            .query_row(
+                "SELECT state FROM runtime_checkpoint WHERE id = ?1",
+                params![id.as_str()],
+                |row| row.get(0),
+            )
+            .map_err(|err| match err {
+                rusqlite::Error::QueryReturnedNoRows => {
+                    StorageError::CheckpointNotFound { id: id.to_string() }
+                }
+                other => StorageError::from_sqlite("settle_runtime_checkpoint find", other),
+            })?;
+
+        let existing_state = CheckpointState::try_from_str(&existing_state_str).map_err(|e| {
+            StorageError::InvalidEntityData {
+                detail: format!("invalid existing checkpoint state {existing_state_str}: {e}"),
+            }
+        })?;
+
+        if existing_state == CheckpointState::Intent {
+            let settled_at_millis = i64::try_from(settled_at.as_millis()).map_err(|_| {
+                StorageError::InvalidEntityData {
+                    detail: format!("settled_at {} exceeds i64 column", settled_at.as_millis()),
+                }
+            })?;
+
+            tx.execute(
+                "UPDATE runtime_checkpoint
+                 SET state = ?1, remote_request_id = ?2, diagnostic_summary = ?3, settled_at = ?4
+                 WHERE id = ?5",
+                params![
+                    state.as_str(),
+                    remote_request_id.map(RemoteRequestId::as_str),
+                    diagnostic_summary.map(DiagnosticSummary::as_str),
+                    settled_at_millis,
+                    id.as_str(),
+                ],
+            )
+            .map_err(|error| {
+                StorageError::from_sqlite("settle_runtime_checkpoint update", error)
+            })?;
+
+            tx.commit().map_err(|error| {
+                StorageError::from_sqlite("settle_runtime_checkpoint commit", error)
+            })?;
+            return Ok(());
+        }
+
+        if existing_state == state {
+            // Idempotent settlement to same terminal state
+            return Ok(());
+        }
+
+        Err(StorageError::CheckpointSettlementConflict {
+            id: id.to_string(),
+            current: existing_state.as_str().to_string(),
+            attempted: state.as_str().to_string(),
+        })
+    }
+
+    /// Atomically recovers any unsettled `Intent` checkpoints on startup, marking them `Indeterminate`.
+    ///
+    /// # Errors
+    /// Returns [`StorageError::Sqlite`] on failure.
+    pub fn recover_unsettled_checkpoints(&mut self) -> Result<usize, StorageError> {
+        let count = self
+            .conn
+            .execute(
+                "UPDATE runtime_checkpoint
+                 SET state = 'indeterminate',
+                     settled_at = COALESCE(settled_at, created_at)
+                 WHERE state = 'intent'",
+                [],
+            )
+            .map_err(|error| StorageError::from_sqlite("recover_unsettled_checkpoints", error))?;
+        Ok(count)
+    }
+
+    /// Returns a runtime checkpoint by its unique identifier.
+    ///
+    /// # Errors
+    /// Returns [`StorageError::Sqlite`] or [`StorageError::InvalidEntityData`] on failure.
+    pub fn runtime_checkpoint_by_id(
+        &self,
+        id: &RuntimeCheckpointId,
+    ) -> Result<Option<RuntimeCheckpoint>, StorageError> {
+        query_optional_row(
+            &self.conn,
+            "SELECT id, thread_id, turn_id, operation_id, boundary_kind, state,
+                    remote_request_id, diagnostic_summary, created_at, settled_at
+             FROM runtime_checkpoint WHERE id = ?1",
+            params![id.as_str()],
+            row_to_runtime_checkpoint,
+            "runtime_checkpoint_by_id",
+        )
+    }
+
+    /// Returns a runtime checkpoint by its coordination operation ID.
+    ///
+    /// # Errors
+    /// Returns [`StorageError::Sqlite`] or [`StorageError::InvalidEntityData`] on failure.
+    pub fn runtime_checkpoint_by_operation(
+        &self,
+        operation_id: &OperationId,
+    ) -> Result<Option<RuntimeCheckpoint>, StorageError> {
+        query_optional_row(
+            &self.conn,
+            "SELECT id, thread_id, turn_id, operation_id, boundary_kind, state,
+                    remote_request_id, diagnostic_summary, created_at, settled_at
+             FROM runtime_checkpoint WHERE operation_id = ?1",
+            params![operation_id.as_str()],
+            row_to_runtime_checkpoint,
+            "runtime_checkpoint_by_operation",
+        )
+    }
+
+    /// Returns a bounded, stably sorted list of runtime checkpoints.
+    ///
+    /// Sorted by `created_at DESC, id ASC`.
+    ///
+    /// # Errors
+    /// Returns [`StorageError::Sqlite`] or [`StorageError::InvalidEntityData`] on failure.
+    pub fn runtime_checkpoints(
+        &self,
+        thread_id: Option<&ThreadId>,
+        before: Option<&CheckpointCursor>,
+        limit: CheckpointListLimit,
+    ) -> Result<Vec<RuntimeCheckpoint>, StorageError> {
+        let (before_created_at, before_id) = before.map_or((i64::MAX, ""), |cursor| {
+            (
+                i64::try_from(cursor.created_at.as_millis()).unwrap_or(i64::MAX),
+                cursor.checkpoint_id.as_str(),
+            )
+        });
+
+        let mut statement = self
+            .conn
+            .prepare(
+                "SELECT id, thread_id, turn_id, operation_id, boundary_kind, state,
+                        remote_request_id, diagnostic_summary, created_at, settled_at
+                 FROM runtime_checkpoint
+                 WHERE (?1 IS NULL OR thread_id = ?1)
+                   AND (created_at < ?2 OR (created_at = ?2 AND id > ?3))
+                 ORDER BY created_at DESC, id ASC
+                 LIMIT ?4",
+            )
+            .map_err(|error| StorageError::from_sqlite("runtime_checkpoints prepare", error))?;
+
+        let rows = statement
+            .query(params![
+                thread_id.map(ThreadId::as_str),
+                before_created_at,
+                before_id,
+                i64::from(limit.get()),
+            ])
+            .map_err(|error| StorageError::from_sqlite("runtime_checkpoints query", error))?;
+
+        collect_rows(rows, row_to_runtime_checkpoint, "runtime_checkpoints")
+    }
+
+    /// Returns a bounded list of runtime checkpoints filtered by state.
+    ///
+    /// # Errors
+    /// Returns [`StorageError::Sqlite`] or [`StorageError::InvalidEntityData`] on failure.
+    pub fn checkpoints_by_state(
+        &self,
+        state: CheckpointState,
+        thread_id: Option<&ThreadId>,
+        before: Option<&CheckpointCursor>,
+        limit: CheckpointListLimit,
+    ) -> Result<Vec<RuntimeCheckpoint>, StorageError> {
+        let (before_created_at, before_id) = before.map_or((i64::MAX, ""), |cursor| {
+            (
+                i64::try_from(cursor.created_at.as_millis()).unwrap_or(i64::MAX),
+                cursor.checkpoint_id.as_str(),
+            )
+        });
+
+        let mut statement = self
+            .conn
+            .prepare(
+                "SELECT id, thread_id, turn_id, operation_id, boundary_kind, state,
+                        remote_request_id, diagnostic_summary, created_at, settled_at
+                 FROM runtime_checkpoint
+                 WHERE state = ?1
+                   AND (?2 IS NULL OR thread_id = ?2)
+                   AND (created_at < ?3 OR (created_at = ?3 AND id > ?4))
+                 ORDER BY created_at DESC, id ASC
+                 LIMIT ?5",
+            )
+            .map_err(|error| StorageError::from_sqlite("checkpoints_by_state prepare", error))?;
+
+        let rows = statement
+            .query(params![
+                state.as_str(),
+                thread_id.map(ThreadId::as_str),
+                before_created_at,
+                before_id,
+                i64::from(limit.get()),
+            ])
+            .map_err(|error| StorageError::from_sqlite("checkpoints_by_state query", error))?;
+
+        collect_rows(rows, row_to_runtime_checkpoint, "checkpoints_by_state")
+    }
+
+    /// Returns all active (Intent) runtime checkpoints for a thread (or all threads).
+    ///
+    /// # Errors
+    /// Returns [`StorageError::Sqlite`] on failure.
+    pub fn active_checkpoints(
+        &self,
+        thread_id: Option<&ThreadId>,
+    ) -> Result<Vec<RuntimeCheckpoint>, StorageError> {
+        let limit = CheckpointListLimit::try_new(CHECKPOINT_LIST_LIMIT_MAX).map_err(|e| {
+            StorageError::InvalidEntityData {
+                detail: format!("invalid checkpoint list limit: {e}"),
+            }
+        })?;
+        self.checkpoints_by_state(CheckpointState::Intent, thread_id, None, limit)
+    }
+
+    /// Returns indeterminate runtime checkpoints for a thread (or all threads).
+    ///
+    /// # Errors
+    /// Returns [`StorageError::Sqlite`] on failure.
+    pub fn indeterminate_checkpoints(
+        &self,
+        thread_id: Option<&ThreadId>,
+        before: Option<&CheckpointCursor>,
+        limit: CheckpointListLimit,
+    ) -> Result<Vec<RuntimeCheckpoint>, StorageError> {
+        self.checkpoints_by_state(CheckpointState::Indeterminate, thread_id, before, limit)
+    }
+
+    // ── Session bindings (P1.2) ────────────────────────────────────
+
+    /// Replaces or inserts the device-local harness session binding for a thread.
+    ///
+    /// # Errors
+    /// Returns [`StorageError::Sqlite`] on failure.
+    pub fn replace_session_binding(
+        &mut self,
+        binding: &SessionBinding,
+    ) -> Result<(), StorageError> {
+        let updated_at_millis = i64::try_from(binding.updated_at.as_millis()).map_err(|_| {
+            StorageError::InvalidEntityData {
+                detail: format!(
+                    "updated_at {} exceeds i64 column",
+                    binding.updated_at.as_millis()
+                ),
+            }
+        })?;
+
+        self.conn
+            .execute(
+                "INSERT INTO thread_session_binding
+                     (thread_id, harness_binding_id, opaque_session_id, updated_at)
+                 VALUES (?1, ?2, ?3, ?4)
+                 ON CONFLICT(thread_id) DO UPDATE SET
+                     harness_binding_id = excluded.harness_binding_id,
+                     opaque_session_id = excluded.opaque_session_id,
+                     updated_at = excluded.updated_at",
+                params![
+                    binding.thread_id.as_str(),
+                    binding.harness_binding_id.as_str(),
+                    binding.opaque_session_id.as_str(),
+                    updated_at_millis,
+                ],
+            )
+            .map_err(|error| StorageError::from_sqlite("replace_session_binding", error))?;
+        Ok(())
+    }
+
+    /// Gets the current harness session binding for a thread.
+    ///
+    /// # Errors
+    /// Returns [`StorageError::Sqlite`] or [`StorageError::InvalidEntityData`] on failure.
+    pub fn get_session_binding(
+        &self,
+        thread_id: &ThreadId,
+    ) -> Result<Option<SessionBinding>, StorageError> {
+        query_optional_row(
+            &self.conn,
+            "SELECT thread_id, harness_binding_id, opaque_session_id, updated_at
+                 FROM thread_session_binding WHERE thread_id = ?1",
+            params![thread_id.as_str()],
+            row_to_session_binding,
+            "get_session_binding",
+        )
+    }
+
+    /// Removes the harness session binding for a thread. Returns true if a binding was removed.
+    ///
+    /// # Errors
+    /// Returns [`StorageError::Sqlite`] on failure.
+    pub fn remove_session_binding(&mut self, thread_id: &ThreadId) -> Result<bool, StorageError> {
+        let count = self
+            .conn
+            .execute(
+                "DELETE FROM thread_session_binding WHERE thread_id = ?1",
+                params![thread_id.as_str()],
+            )
+            .map_err(|error| StorageError::from_sqlite("remove_session_binding", error))?;
+        Ok(count > 0)
+    }
+
     /// Rebuilds domain projections from the domain journal in one
     /// transaction (ADR 0013).
     ///
@@ -2535,6 +3013,186 @@ fn row_to_permission(row: &rusqlite::Row<'_>) -> Result<Permission, StorageError
         requested_at,
         decided_at,
     })
+}
+
+/// Maps one runtime checkpoint row.
+fn row_to_runtime_checkpoint(row: &rusqlite::Row<'_>) -> Result<RuntimeCheckpoint, StorageError> {
+    let id_raw: String = row
+        .get(0)
+        .map_err(|e| StorageError::from_sqlite("read checkpoint id", e))?;
+    let thread_id_raw: String = row
+        .get(1)
+        .map_err(|e| StorageError::from_sqlite("read checkpoint thread_id", e))?;
+    let turn_id_raw: Option<String> = row
+        .get(2)
+        .map_err(|e| StorageError::from_sqlite("read checkpoint turn_id", e))?;
+    let op_id_raw: String = row
+        .get(3)
+        .map_err(|e| StorageError::from_sqlite("read checkpoint operation_id", e))?;
+    let kind_raw: String = row
+        .get(4)
+        .map_err(|e| StorageError::from_sqlite("read checkpoint boundary_kind", e))?;
+    let state_raw: String = row
+        .get(5)
+        .map_err(|e| StorageError::from_sqlite("read checkpoint state", e))?;
+    let remote_req_raw: Option<String> = row
+        .get(6)
+        .map_err(|e| StorageError::from_sqlite("read checkpoint remote_request_id", e))?;
+    let diag_raw: Option<String> = row
+        .get(7)
+        .map_err(|e| StorageError::from_sqlite("read checkpoint diagnostic_summary", e))?;
+    let created_at_raw: i64 = row
+        .get(8)
+        .map_err(|e| StorageError::from_sqlite("read checkpoint created_at", e))?;
+    let settled_at_raw: Option<i64> = row
+        .get(9)
+        .map_err(|e| StorageError::from_sqlite("read checkpoint settled_at", e))?;
+
+    let id =
+        id_raw
+            .parse::<RuntimeCheckpointId>()
+            .map_err(|e| StorageError::InvalidEntityData {
+                detail: format!("invalid checkpoint id {id_raw}: {e}"),
+            })?;
+    let thread_id =
+        thread_id_raw
+            .parse::<ThreadId>()
+            .map_err(|e| StorageError::InvalidEntityData {
+                detail: format!("invalid thread_id {thread_id_raw}: {e}"),
+            })?;
+    let turn_id = turn_id_raw
+        .map(|s| s.parse::<TurnId>())
+        .transpose()
+        .map_err(|e| StorageError::InvalidEntityData {
+            detail: format!("invalid turn_id: {e}"),
+        })?;
+    let operation_id =
+        op_id_raw
+            .parse::<OperationId>()
+            .map_err(|e| StorageError::InvalidEntityData {
+                detail: format!("invalid operation_id {op_id_raw}: {e}"),
+            })?;
+    let boundary_kind =
+        BoundaryKind::try_from_str(&kind_raw).map_err(|e| StorageError::InvalidEntityData {
+            detail: format!("invalid boundary_kind {kind_raw}: {e}"),
+        })?;
+    let state =
+        CheckpointState::try_from_str(&state_raw).map_err(|e| StorageError::InvalidEntityData {
+            detail: format!("invalid state {state_raw}: {e}"),
+        })?;
+    let remote_request_id = remote_req_raw
+        .map(|s| RemoteRequestId::try_from(s.as_str()))
+        .transpose()
+        .map_err(|e| StorageError::InvalidEntityData {
+            detail: format!("invalid remote_request_id: {e}"),
+        })?;
+    let diagnostic_summary = diag_raw
+        .map(|s| DiagnosticSummary::try_from(s.as_str()))
+        .transpose()
+        .map_err(|e| StorageError::InvalidEntityData {
+            detail: format!("invalid diagnostic_summary: {e}"),
+        })?;
+    let created_at = UnixMillis::from_millis(u64::try_from(created_at_raw).map_err(|_| {
+        StorageError::InvalidEntityData {
+            detail: format!("negative created_at {created_at_raw}"),
+        }
+    })?);
+    let settled_at = settled_at_raw
+        .map(|raw| {
+            u64::try_from(raw)
+                .map(UnixMillis::from_millis)
+                .map_err(|_| StorageError::InvalidEntityData {
+                    detail: format!("negative settled_at {raw}"),
+                })
+        })
+        .transpose()?;
+
+    Ok(RuntimeCheckpoint {
+        id,
+        thread_id,
+        turn_id,
+        operation_id,
+        boundary_kind,
+        state,
+        remote_request_id,
+        diagnostic_summary,
+        created_at,
+        settled_at,
+    })
+}
+
+/// Maps one session binding row.
+fn row_to_session_binding(row: &rusqlite::Row<'_>) -> Result<SessionBinding, StorageError> {
+    let thread_id_raw: String = row
+        .get(0)
+        .map_err(|e| StorageError::from_sqlite("read session_binding thread_id", e))?;
+    let harness_binding_id_raw: String = row
+        .get(1)
+        .map_err(|e| StorageError::from_sqlite("read session_binding harness_binding_id", e))?;
+    let opaque_session_id_raw: String = row
+        .get(2)
+        .map_err(|e| StorageError::from_sqlite("read session_binding opaque_session_id", e))?;
+    let updated_at_raw: i64 = row
+        .get(3)
+        .map_err(|e| StorageError::from_sqlite("read session_binding updated_at", e))?;
+
+    let thread_id =
+        thread_id_raw
+            .parse::<ThreadId>()
+            .map_err(|e| StorageError::InvalidEntityData {
+                detail: format!("invalid thread_id {thread_id_raw}: {e}"),
+            })?;
+    let harness_binding_id = harness_binding_id_raw
+        .parse::<HarnessBindingId>()
+        .map_err(|e| StorageError::InvalidEntityData {
+            detail: format!("invalid harness_binding_id {harness_binding_id_raw}: {e}"),
+        })?;
+    let opaque_session_id =
+        OpaqueSessionId::try_from(opaque_session_id_raw.as_str()).map_err(|e| {
+            StorageError::InvalidEntityData {
+                detail: format!("invalid opaque_session_id {opaque_session_id_raw}: {e}"),
+            }
+        })?;
+    let updated_at = UnixMillis::from_millis(u64::try_from(updated_at_raw).map_err(|_| {
+        StorageError::InvalidEntityData {
+            detail: format!("negative updated_at {updated_at_raw}"),
+        }
+    })?);
+
+    Ok(SessionBinding {
+        thread_id,
+        harness_binding_id,
+        opaque_session_id,
+        updated_at,
+    })
+}
+
+/// Queries an optional single row, keeping typed mapper errors distinct from SQLite errors.
+fn query_optional_row<T, P, F>(
+    conn: &Connection,
+    sql: &str,
+    params: P,
+    map: F,
+    context: &'static str,
+) -> Result<Option<T>, StorageError>
+where
+    P: rusqlite::Params,
+    F: FnOnce(&rusqlite::Row<'_>) -> Result<T, StorageError>,
+{
+    let mut stmt = conn
+        .prepare(sql)
+        .map_err(|e| StorageError::from_sqlite(context, e))?;
+    let mut rows = stmt
+        .query(params)
+        .map_err(|e| StorageError::from_sqlite(context, e))?;
+    if let Some(row) = rows
+        .next()
+        .map_err(|e| StorageError::from_sqlite(context, e))?
+    {
+        map(row).map(Some)
+    } else {
+        Ok(None)
+    }
 }
 
 /// Collects rows mapped with custom fallible mapper.

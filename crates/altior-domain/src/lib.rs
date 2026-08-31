@@ -6,18 +6,21 @@ pub mod time;
 
 pub use entity::{
     AGENT_PROFILE_LIST_LIMIT_MAX, AcpHarnessBinding, AgentProfile, AgentProfileCursor,
-    AgentProfileListLimit, BoundedLabel, BoundedPath, DisplayName, DomainEvent, DomainEventKind,
-    EntityError, EventPayload, HARNESS_BINDING_LIST_LIMIT_MAX, HISTORY_LIMIT_MAX,
-    HarnessBindingCursor, HarnessBindingListLimit, HistoryLimit, PERMISSION_LIST_LIMIT_MAX,
-    PROJECT_REF_LIST_LIMIT_MAX, Permission, PermissionCursor, PermissionDecision,
-    PermissionDescription, PermissionKind, PermissionListLimit, ProjectRef, ProjectRefCursor,
-    ProjectRefListLimit, SearchQuery, THREAD_LIST_LIMIT_MAX, TURN_LIST_LIMIT_MAX, Thread,
-    ThreadCursor, ThreadListLimit, ThreadState, ThreadTitle, Turn, TurnCursor, TurnListLimit,
-    TurnState,
+    AgentProfileListLimit, BoundaryKind, BoundedLabel, BoundedPath, CHECKPOINT_LIST_LIMIT_MAX,
+    CheckpointCursor, CheckpointListLimit, CheckpointState, DiagnosticSummary, DisplayName,
+    DomainEvent, DomainEventKind, EntityError, EventPayload, HARNESS_BINDING_LIST_LIMIT_MAX,
+    HISTORY_LIMIT_MAX, HarnessBindingCursor, HarnessBindingListLimit, HistoryLimit,
+    OpaqueSessionId, PERMISSION_LIST_LIMIT_MAX, PROJECT_REF_LIST_LIMIT_MAX, Permission,
+    PermissionCursor, PermissionDecision, PermissionDescription, PermissionKind,
+    PermissionListLimit, ProjectRef, ProjectRefCursor, ProjectRefListLimit, RemoteRequestId,
+    RuntimeCheckpoint, SearchQuery, SessionBinding, THREAD_LIST_LIMIT_MAX, TURN_LIST_LIMIT_MAX,
+    Thread, ThreadCursor, ThreadListLimit, ThreadState, ThreadTitle, Turn, TurnCursor,
+    TurnListLimit, TurnState,
 };
+
 pub use id::{
     AgentProfileId, CoreInstanceId, EventId, HarnessBindingId, IdParseError, OperationId,
-    ProjectId, ThreadId, TurnId,
+    ProjectId, RuntimeCheckpointId, ThreadId, TurnId,
 };
 pub use time::{LogicalTick, TimeError, UnixMillis};
 

@@ -31,6 +31,10 @@ pub(crate) const MIGRATIONS: &[Migration] = &[
         version: 3,
         sql: SCHEMA_V3,
     },
+    Migration {
+        version: 4,
+        sql: SCHEMA_V4,
+    },
 ];
 
 /// The highest schema version this build understands.
@@ -292,4 +296,32 @@ END;
 /// rows even when the journal high-water sequence happens to match.
 const SCHEMA_V3: &str = r"
 ALTER TABLE domain_projection_state ADD COLUMN projection_digest TEXT NOT NULL DEFAULT '';
+";
+
+/// P1.2 runtime boundary checkpointing and thread session bindings (ADR 0002, ADR 0013).
+/// Device-local tables, excluded from domain projection rebuilds.
+const SCHEMA_V4: &str = r"
+CREATE TABLE runtime_checkpoint (
+    id TEXT PRIMARY KEY,
+    thread_id TEXT NOT NULL,
+    turn_id TEXT,
+    operation_id TEXT NOT NULL,
+    boundary_kind TEXT NOT NULL,
+    state TEXT NOT NULL,
+    remote_request_id TEXT,
+    diagnostic_summary TEXT,
+    created_at INTEGER NOT NULL,
+    settled_at INTEGER
+);
+
+CREATE INDEX runtime_checkpoint_thread_created ON runtime_checkpoint(thread_id, created_at, id);
+CREATE INDEX runtime_checkpoint_state ON runtime_checkpoint(state, created_at, id);
+CREATE INDEX runtime_checkpoint_op ON runtime_checkpoint(operation_id);
+
+CREATE TABLE thread_session_binding (
+    thread_id TEXT PRIMARY KEY,
+    harness_binding_id TEXT NOT NULL,
+    opaque_session_id TEXT NOT NULL,
+    updated_at INTEGER NOT NULL
+);
 ";

@@ -55,6 +55,26 @@ impl OperationRegistry {
         })
     }
 
+    /// Admits a raw operation id without requiring a full `CommandEnvelope`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`AdmissionError::Full`] at capacity.
+    pub fn admit_operation(
+        &mut self,
+        operation_id: &OperationId,
+    ) -> Result<Admission, AdmissionError> {
+        if self.knows(operation_id) {
+            return Ok(Admission::Duplicate);
+        }
+        if self.admitted.len() == self.capacity {
+            return Err(AdmissionError::Full);
+        }
+        self.admitted
+            .insert(operation_id.clone(), CommandKind::Ping);
+        Ok(Admission::Execute)
+    }
+
     /// Admits a command unless its operation was already admitted or has
     /// finished. Finished operations are never re-executed.
     ///

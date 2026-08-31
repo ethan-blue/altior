@@ -1,6 +1,6 @@
 [package]
 name = "altior-desktop-shell"
-version = "0.1.0"
+version = "0.0.1"
 edition = "2021"
 description = "Thin Tauri shell for the Altior Desktop workbench (ADR 0008)."
 publish = false

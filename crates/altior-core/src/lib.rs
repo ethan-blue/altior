@@ -1,7 +1,7 @@
 //! Altior Core runtime contracts: supervision, turn ownership, and the
-//! operation registry (ADR 0006).
+//! operation registry (ADR 0006, P1.2).
 //!
-//! P0.2 core semantics, all deterministic and transport-free:
+//! P0.2 and P1.2 core semantics, all deterministic and transport-free:
 //!
 //! - [`supervision`] — the spawn-or-attach supervisor as a pure state
 //!   machine: probe the endpoint, decide, health-check with `ping`, and
@@ -10,11 +10,11 @@
 //!   do; only an explicit cancel or Core's own shutdown policy;
 //! - [`operations`] — Core's dedup registry, the mirror of Desktop's
 //!   command ledger: a re-delivered `OperationId` is acknowledged, never
-//!   executed twice.
-//!
-//! The bin target remains the composition root; the real OS transport and
-//! process spawn arrive in the ADR 0006 OS-facing slice.
+//!   executed twice;
+//! - [`runtime`] — Core's use-case layer and supervisor machine over
+//!   injectable harness and checkpoint ports (P1.2).
 
 pub mod operations;
 pub mod ownership;
+pub mod runtime;
 pub mod supervision;

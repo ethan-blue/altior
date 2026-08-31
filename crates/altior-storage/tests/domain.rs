@@ -155,7 +155,7 @@ fn ensure_project_ref(store: &mut Store, name: &str) -> ProjectId {
 #[test]
 fn v3_migration_adds_domain_tables() {
     let store = Store::open_in_memory().expect("store");
-    assert_eq!(store.schema_version().expect("version"), 3);
+    assert_eq!(store.schema_version().expect("version"), 4);
     assert_eq!(store.domain_journal_len().expect("count"), 0);
 }
 
@@ -184,7 +184,7 @@ fn v3_migration_preserves_v1_journal() {
 
     // Reopen — v3 migration applied, v1 data intact.
     let store = Store::open(&path).expect("reopen");
-    assert_eq!(store.schema_version().expect("version"), 3);
+    assert_eq!(store.schema_version().expect("version"), 4);
     assert_eq!(store.journal_len().expect("v1 count"), 1);
     assert_eq!(store.domain_journal_len().expect("domain count"), 0);
 }
@@ -204,7 +204,7 @@ fn newer_schema_refused() {
         error,
         StorageError::SchemaTooNew {
             found: 99,
-            supported: 3
+            supported: 4
         }
     ));
 }

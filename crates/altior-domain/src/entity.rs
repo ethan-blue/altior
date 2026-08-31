@@ -10,7 +10,8 @@ use std::fmt;
 use serde::{Deserialize, Serialize};
 
 use crate::id::{
-    AgentProfileId, EventId, HarnessBindingId, OperationId, ProjectId, ThreadId, TurnId,
+    AgentProfileId, EventId, HarnessBindingId, OperationId, ProjectId, RuntimeCheckpointId,
+    ThreadId, TurnId,
 };
 use crate::time::UnixMillis;
 use crate::{DeliveryState, HarnessKind, MemoryMode};
@@ -597,6 +598,405 @@ pub struct ProjectRef {
     pub created_at: UnixMillis,
 }
 
+// ── Runtime checkpoint and session binding ─────────────────────────
+
+/// Maximum length of an opaque session identifier in bytes.
+const MAX_OPAQUE_SESSION_ID_BYTES: usize = 256;
+
+/// A bounded opaque harness session identifier.
+#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[serde(try_from = "String", into = "String")]
+pub struct OpaqueSessionId(String);
+
+impl OpaqueSessionId {
+    /// The byte-cap.
+    #[must_use]
+    pub const fn capacity() -> usize {
+        MAX_OPAQUE_SESSION_ID_BYTES
+    }
+
+    /// Returns the session id as a string slice.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl TryFrom<&str> for OpaqueSessionId {
+    type Error = EntityError;
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        let trimmed = value.trim();
+        if trimmed.is_empty() {
+            return Err(EntityError::EmptyOpaqueSessionId);
+        }
+        if trimmed.len() > MAX_OPAQUE_SESSION_ID_BYTES {
+            return Err(EntityError::OpaqueSessionIdTooLong {
+                length: trimmed.len(),
+                max: MAX_OPAQUE_SESSION_ID_BYTES,
+            });
+        }
+        if trimmed.chars().any(|c| c.is_ascii_control()) {
+            return Err(EntityError::InvalidOpaqueSessionId);
+        }
+        Ok(Self(trimmed.to_owned()))
+    }
+}
+
+impl TryFrom<String> for OpaqueSessionId {
+    type Error = EntityError;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        Self::try_from(value.as_str())
+    }
+}
+
+impl From<OpaqueSessionId> for String {
+    fn from(value: OpaqueSessionId) -> Self {
+        value.0
+    }
+}
+
+impl fmt::Display for OpaqueSessionId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+/// Maximum length of a remote request identifier in bytes.
+const MAX_REMOTE_REQUEST_ID_BYTES: usize = 256;
+
+/// A bounded remote request identifier issued by or sent to an external harness.
+#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[serde(try_from = "String", into = "String")]
+pub struct RemoteRequestId(String);
+
+impl RemoteRequestId {
+    /// The byte-cap.
+    #[must_use]
+    pub const fn capacity() -> usize {
+        MAX_REMOTE_REQUEST_ID_BYTES
+    }
+
+    /// Returns the remote request id as a string slice.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl TryFrom<&str> for RemoteRequestId {
+    type Error = EntityError;
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        let trimmed = value.trim();
+        if trimmed.is_empty() {
+            return Err(EntityError::EmptyRemoteRequestId);
+        }
+        if trimmed.len() > MAX_REMOTE_REQUEST_ID_BYTES {
+            return Err(EntityError::RemoteRequestIdTooLong {
+                length: trimmed.len(),
+                max: MAX_REMOTE_REQUEST_ID_BYTES,
+            });
+        }
+        if trimmed.chars().any(|c| c.is_ascii_control()) {
+            return Err(EntityError::InvalidRemoteRequestId);
+        }
+        Ok(Self(trimmed.to_owned()))
+    }
+}
+
+impl TryFrom<String> for RemoteRequestId {
+    type Error = EntityError;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        Self::try_from(value.as_str())
+    }
+}
+
+impl From<RemoteRequestId> for String {
+    fn from(value: RemoteRequestId) -> Self {
+        value.0
+    }
+}
+
+impl fmt::Display for RemoteRequestId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+/// Maximum length of a diagnostic summary in bytes.
+const MAX_DIAGNOSTIC_SUMMARY_BYTES: usize = 4096;
+
+/// A bounded, sanitized human-readable diagnostic summary (not raw bytes).
+#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[serde(try_from = "String", into = "String")]
+pub struct DiagnosticSummary(String);
+
+impl DiagnosticSummary {
+    /// The byte-cap.
+    #[must_use]
+    pub const fn capacity() -> usize {
+        MAX_DIAGNOSTIC_SUMMARY_BYTES
+    }
+
+    /// Returns the summary as a string slice.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl TryFrom<&str> for DiagnosticSummary {
+    type Error = EntityError;
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        let trimmed = value.trim();
+        if trimmed.is_empty() {
+            return Err(EntityError::EmptyDiagnosticSummary);
+        }
+        if trimmed.len() > MAX_DIAGNOSTIC_SUMMARY_BYTES {
+            return Err(EntityError::DiagnosticSummaryTooLong {
+                length: trimmed.len(),
+                max: MAX_DIAGNOSTIC_SUMMARY_BYTES,
+            });
+        }
+        if trimmed
+            .chars()
+            .any(|c| c.is_ascii_control() && c != '\n' && c != '\r' && c != '\t')
+        {
+            return Err(EntityError::InvalidDiagnosticSummary);
+        }
+        Ok(Self(trimmed.to_owned()))
+    }
+}
+
+impl TryFrom<String> for DiagnosticSummary {
+    type Error = EntityError;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        Self::try_from(value.as_str())
+    }
+}
+
+impl From<DiagnosticSummary> for String {
+    fn from(value: DiagnosticSummary) -> Self {
+        value.0
+    }
+}
+
+impl fmt::Display for DiagnosticSummary {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+/// Execution boundary operation kind for runtime checkpoints.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(try_from = "String", into = "String")]
+pub enum BoundaryKind {
+    CreateSession,
+    ResumeSession,
+    Prompt,
+    Steer,
+    PermissionDecision,
+    Cancel,
+    Close,
+}
+
+impl BoundaryKind {
+    /// Returns the canonical string identifier.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::CreateSession => "create_session",
+            Self::ResumeSession => "resume_session",
+            Self::Prompt => "prompt",
+            Self::Steer => "steer",
+            Self::PermissionDecision => "permission_decision",
+            Self::Cancel => "cancel",
+            Self::Close => "close",
+        }
+    }
+
+    /// Parses a boundary kind from a string slice.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`EntityError::InvalidBoundaryKind`] if `s` is not recognized.
+    pub fn try_from_str(s: &str) -> Result<Self, EntityError> {
+        match s {
+            "create_session" => Ok(Self::CreateSession),
+            "resume_session" => Ok(Self::ResumeSession),
+            "prompt" => Ok(Self::Prompt),
+            "steer" => Ok(Self::Steer),
+            "permission_decision" => Ok(Self::PermissionDecision),
+            "cancel" => Ok(Self::Cancel),
+            "close" => Ok(Self::Close),
+            _ => Err(EntityError::InvalidBoundaryKind),
+        }
+    }
+}
+
+impl TryFrom<&str> for BoundaryKind {
+    type Error = EntityError;
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        Self::try_from_str(value)
+    }
+}
+
+impl TryFrom<String> for BoundaryKind {
+    type Error = EntityError;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        Self::try_from_str(&value)
+    }
+}
+
+impl std::str::FromStr for BoundaryKind {
+    type Err = EntityError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Self::try_from_str(s)
+    }
+}
+
+impl From<BoundaryKind> for String {
+    fn from(kind: BoundaryKind) -> Self {
+        kind.as_str().to_owned()
+    }
+}
+
+impl fmt::Display for BoundaryKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+/// Lifecycle state of a runtime checkpoint across an external boundary.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(try_from = "String", into = "String")]
+pub enum CheckpointState {
+    /// Intent recorded before dispatching to external adapter.
+    Intent,
+    /// Adapter acknowledged successful completion.
+    Confirmed,
+    /// Adapter rejected execution before starting or reported unrecoverable error.
+    Rejected,
+    /// Execution status across the boundary could not be determined.
+    Indeterminate,
+}
+
+impl CheckpointState {
+    /// Returns the canonical string identifier.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Intent => "intent",
+            Self::Confirmed => "confirmed",
+            Self::Rejected => "rejected",
+            Self::Indeterminate => "indeterminate",
+        }
+    }
+
+    /// Whether this state is terminal (settled).
+    #[must_use]
+    pub const fn is_terminal(self) -> bool {
+        matches!(self, Self::Confirmed | Self::Rejected | Self::Indeterminate)
+    }
+
+    /// Parses a checkpoint state from a string slice.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`EntityError::InvalidCheckpointState`] if `s` is not recognized.
+    pub fn try_from_str(s: &str) -> Result<Self, EntityError> {
+        match s {
+            "intent" => Ok(Self::Intent),
+            "confirmed" => Ok(Self::Confirmed),
+            "rejected" => Ok(Self::Rejected),
+            "indeterminate" => Ok(Self::Indeterminate),
+            _ => Err(EntityError::InvalidCheckpointState),
+        }
+    }
+}
+
+impl TryFrom<&str> for CheckpointState {
+    type Error = EntityError;
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        Self::try_from_str(value)
+    }
+}
+
+impl TryFrom<String> for CheckpointState {
+    type Error = EntityError;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        Self::try_from_str(&value)
+    }
+}
+
+impl std::str::FromStr for CheckpointState {
+    type Err = EntityError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Self::try_from_str(s)
+    }
+}
+
+impl From<CheckpointState> for String {
+    fn from(state: CheckpointState) -> Self {
+        state.as_str().to_owned()
+    }
+}
+
+impl fmt::Display for CheckpointState {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+/// A durable runtime checkpoint recording the lifecycle of an external boundary operation.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RuntimeCheckpoint {
+    /// Stable identity of this checkpoint.
+    pub id: RuntimeCheckpointId,
+    /// Thread this operation belongs to.
+    pub thread_id: ThreadId,
+    /// Turn this operation belongs to, if turn-scoped.
+    pub turn_id: Option<TurnId>,
+    /// Coordination operation identifier.
+    pub operation_id: OperationId,
+    /// Boundary kind being executed.
+    pub boundary_kind: BoundaryKind,
+    /// Current lifecycle state.
+    pub state: CheckpointState,
+    /// Optional remote request id issued to/by the harness.
+    pub remote_request_id: Option<RemoteRequestId>,
+    /// Optional diagnostic summary if settled with error/warning.
+    pub diagnostic_summary: Option<DiagnosticSummary>,
+    /// When the intent was recorded.
+    pub created_at: UnixMillis,
+    /// When the checkpoint settled, if settled.
+    pub settled_at: Option<UnixMillis>,
+}
+
+/// A device-local session binding associating a thread with an active harness session.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SessionBinding {
+    /// Thread this binding belongs to.
+    pub thread_id: ThreadId,
+    /// Harness binding used for this session.
+    pub harness_binding_id: HarnessBindingId,
+    /// Opaque session identifier issued by the harness.
+    pub opaque_session_id: OpaqueSessionId,
+    /// When the binding was last updated.
+    pub updated_at: UnixMillis,
+}
+
 // ── Domain journal record ──────────────────────────────────────────
 
 /// Maximum length of a domain event payload in bytes.
@@ -848,6 +1248,9 @@ pub const PERMISSION_LIST_LIMIT_MAX: u32 = 500;
 /// Maximum number of turns in a bounded list page.
 pub const TURN_LIST_LIMIT_MAX: u32 = 500;
 
+/// Maximum number of checkpoints in a bounded list page.
+pub const CHECKPOINT_LIST_LIMIT_MAX: u32 = 500;
+
 /// Validated unsigned page size for thread list queries.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct ThreadListLimit(u32);
@@ -1079,6 +1482,39 @@ impl TurnListLimit {
     }
 }
 
+/// Validated unsigned page size for checkpoint list queries.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct CheckpointListLimit(u32);
+
+impl CheckpointListLimit {
+    /// Validates an unsigned page size.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`EntityError::CheckpointListLimitOutOfRange`] above the cap.
+    pub fn try_new(value: u32) -> Result<Self, EntityError> {
+        if value == 0 {
+            return Err(EntityError::CheckpointListLimitOutOfRange {
+                value,
+                max: CHECKPOINT_LIST_LIMIT_MAX,
+            });
+        }
+        if value > CHECKPOINT_LIST_LIMIT_MAX {
+            return Err(EntityError::CheckpointListLimitOutOfRange {
+                value,
+                max: CHECKPOINT_LIST_LIMIT_MAX,
+            });
+        }
+        Ok(Self(value))
+    }
+
+    /// The validated count.
+    #[must_use]
+    pub const fn get(self) -> u32 {
+        self.0
+    }
+}
+
 /// Unique cursor for stable newest-first thread pagination.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ThreadCursor {
@@ -1131,6 +1567,15 @@ pub struct TurnCursor {
     pub started_at: UnixMillis,
     /// Turn identifier tie-breaker of the last row.
     pub turn_id: TurnId,
+}
+
+/// Unique cursor for stable checkpoint pagination.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CheckpointCursor {
+    /// Timestamp of the last row.
+    pub created_at: UnixMillis,
+    /// Checkpoint identifier tie-breaker of the last row.
+    pub checkpoint_id: RuntimeCheckpointId,
 }
 
 // ── Typed validation errors ────────────────────────────────────────
@@ -1251,6 +1696,50 @@ pub enum EntityError {
         /// The maximum allowed value.
         max: u32,
     },
+    /// An opaque session id is empty after trimming.
+    EmptyOpaqueSessionId,
+    /// An opaque session id exceeds the byte cap.
+    OpaqueSessionIdTooLong {
+        /// The actual length.
+        length: usize,
+        /// The maximum allowed length.
+        max: usize,
+    },
+    /// An opaque session id contains invalid control characters.
+    InvalidOpaqueSessionId,
+    /// A remote request id is empty after trimming.
+    EmptyRemoteRequestId,
+    /// A remote request id exceeds the byte cap.
+    RemoteRequestIdTooLong {
+        /// The actual length.
+        length: usize,
+        /// The maximum allowed length.
+        max: usize,
+    },
+    /// A remote request id contains invalid control characters.
+    InvalidRemoteRequestId,
+    /// A diagnostic summary is empty after trimming.
+    EmptyDiagnosticSummary,
+    /// A diagnostic summary exceeds the byte cap.
+    DiagnosticSummaryTooLong {
+        /// The actual length.
+        length: usize,
+        /// The maximum allowed length.
+        max: usize,
+    },
+    /// A diagnostic summary contains invalid control characters.
+    InvalidDiagnosticSummary,
+    /// The string does not name a valid boundary kind.
+    InvalidBoundaryKind,
+    /// The string does not name a valid checkpoint state.
+    InvalidCheckpointState,
+    /// A checkpoint list page size is outside the valid range.
+    CheckpointListLimitOutOfRange {
+        /// The rejected value.
+        value: u32,
+        /// The maximum allowed value.
+        max: u32,
+    },
     /// The string does not name a valid harness kind.
     InvalidHarnessKind,
     /// The string does not name a valid memory mode.
@@ -1321,6 +1810,32 @@ impl fmt::Display for EntityError {
             }
             Self::TurnListLimitOutOfRange { value, max } => {
                 write!(f, "turn list limit {value} is outside 1..={max}")
+            }
+            Self::EmptyOpaqueSessionId => write!(f, "opaque session id is empty"),
+            Self::OpaqueSessionIdTooLong { length, max } => {
+                write!(f, "opaque session id is {length} bytes, limit is {max}")
+            }
+            Self::InvalidOpaqueSessionId => {
+                write!(f, "opaque session id contains invalid control characters")
+            }
+            Self::EmptyRemoteRequestId => write!(f, "remote request id is empty"),
+            Self::RemoteRequestIdTooLong { length, max } => {
+                write!(f, "remote request id is {length} bytes, limit is {max}")
+            }
+            Self::InvalidRemoteRequestId => {
+                write!(f, "remote request id contains invalid control characters")
+            }
+            Self::EmptyDiagnosticSummary => write!(f, "diagnostic summary is empty"),
+            Self::DiagnosticSummaryTooLong { length, max } => {
+                write!(f, "diagnostic summary is {length} bytes, limit is {max}")
+            }
+            Self::InvalidDiagnosticSummary => {
+                write!(f, "diagnostic summary contains invalid control characters")
+            }
+            Self::InvalidBoundaryKind => write!(f, "invalid boundary kind"),
+            Self::InvalidCheckpointState => write!(f, "invalid checkpoint state"),
+            Self::CheckpointListLimitOutOfRange { value, max } => {
+                write!(f, "checkpoint list limit {value} is outside 1..={max}")
             }
             Self::InvalidHarnessKind => write!(f, "invalid harness kind"),
             Self::InvalidMemoryMode => write!(f, "invalid memory mode"),
@@ -1702,5 +2217,196 @@ mod tests {
         };
         let cursor2 = cursor1.clone();
         assert_eq!(cursor1, cursor2);
+    }
+
+    #[test]
+    fn boundary_kind_parses_and_displays() {
+        let kinds = [
+            (BoundaryKind::CreateSession, "create_session"),
+            (BoundaryKind::ResumeSession, "resume_session"),
+            (BoundaryKind::Prompt, "prompt"),
+            (BoundaryKind::Steer, "steer"),
+            (BoundaryKind::Cancel, "cancel"),
+            (BoundaryKind::Close, "close"),
+        ];
+
+        for (kind, s) in kinds {
+            assert_eq!(kind.as_str(), s);
+            assert_eq!(kind.to_string(), s);
+            assert_eq!(BoundaryKind::try_from_str(s).unwrap(), kind);
+            assert_eq!(BoundaryKind::from_str(s).unwrap(), kind);
+            let json = serde_json::to_string(&kind).unwrap();
+            let back: BoundaryKind = serde_json::from_str(&json).unwrap();
+            assert_eq!(back, kind);
+        }
+
+        assert_eq!(
+            BoundaryKind::try_from_str("invalid_kind"),
+            Err(EntityError::InvalidBoundaryKind)
+        );
+    }
+
+    #[test]
+    fn checkpoint_state_parses_and_identifies_terminal() {
+        assert_eq!(CheckpointState::Intent.as_str(), "intent");
+        assert!(!CheckpointState::Intent.is_terminal());
+        assert_eq!(CheckpointState::Confirmed.as_str(), "confirmed");
+        assert!(CheckpointState::Confirmed.is_terminal());
+        assert_eq!(CheckpointState::Rejected.as_str(), "rejected");
+        assert!(CheckpointState::Rejected.is_terminal());
+        assert_eq!(CheckpointState::Indeterminate.as_str(), "indeterminate");
+        assert!(CheckpointState::Indeterminate.is_terminal());
+
+        for state in [
+            CheckpointState::Intent,
+            CheckpointState::Confirmed,
+            CheckpointState::Rejected,
+            CheckpointState::Indeterminate,
+        ] {
+            let s = state.as_str();
+            assert_eq!(CheckpointState::try_from_str(s).unwrap(), state);
+            assert_eq!(CheckpointState::from_str(s).unwrap(), state);
+            let json = serde_json::to_string(&state).unwrap();
+            let back: CheckpointState = serde_json::from_str(&json).unwrap();
+            assert_eq!(back, state);
+        }
+
+        assert_eq!(
+            CheckpointState::try_from_str("unknown"),
+            Err(EntityError::InvalidCheckpointState)
+        );
+    }
+
+    #[test]
+    fn opaque_session_id_bounds_and_validations() {
+        assert_eq!(
+            OpaqueSessionId::try_from("  sess_abc123  ")
+                .unwrap()
+                .as_str(),
+            "sess_abc123"
+        );
+        assert_eq!(
+            OpaqueSessionId::try_from("   "),
+            Err(EntityError::EmptyOpaqueSessionId)
+        );
+        let too_long = "s".repeat(MAX_OPAQUE_SESSION_ID_BYTES + 1);
+        assert!(matches!(
+            OpaqueSessionId::try_from(too_long.as_str()),
+            Err(EntityError::OpaqueSessionIdTooLong { .. })
+        ));
+        assert_eq!(
+            OpaqueSessionId::try_from("sess\0ion"),
+            Err(EntityError::InvalidOpaqueSessionId)
+        );
+
+        let valid = OpaqueSessionId::try_from("s_12345").unwrap();
+        let json = serde_json::to_string(&valid).unwrap();
+        let back: OpaqueSessionId = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, valid);
+    }
+
+    #[test]
+    fn remote_request_id_bounds_and_validations() {
+        assert_eq!(
+            RemoteRequestId::try_from("  req_123  ").unwrap().as_str(),
+            "req_123"
+        );
+        assert_eq!(
+            RemoteRequestId::try_from("   "),
+            Err(EntityError::EmptyRemoteRequestId)
+        );
+        let too_long = "r".repeat(MAX_REMOTE_REQUEST_ID_BYTES + 1);
+        assert!(matches!(
+            RemoteRequestId::try_from(too_long.as_str()),
+            Err(EntityError::RemoteRequestIdTooLong { .. })
+        ));
+        assert_eq!(
+            RemoteRequestId::try_from("req\x01id"),
+            Err(EntityError::InvalidRemoteRequestId)
+        );
+    }
+
+    #[test]
+    fn diagnostic_summary_bounds_and_validations() {
+        assert_eq!(
+            DiagnosticSummary::try_from("  error message: check logs  ")
+                .unwrap()
+                .as_str(),
+            "error message: check logs"
+        );
+        assert_eq!(
+            DiagnosticSummary::try_from("   "),
+            Err(EntityError::EmptyDiagnosticSummary)
+        );
+        let too_long = "d".repeat(MAX_DIAGNOSTIC_SUMMARY_BYTES + 1);
+        assert!(matches!(
+            DiagnosticSummary::try_from(too_long.as_str()),
+            Err(EntityError::DiagnosticSummaryTooLong { .. })
+        ));
+
+        // Allows multiline with newlines and tabs
+        assert!(DiagnosticSummary::try_from("line 1\n\tline 2\r\nline 3").is_ok());
+
+        // Rejects binary control characters
+        assert_eq!(
+            DiagnosticSummary::try_from("err\x00msg"),
+            Err(EntityError::InvalidDiagnosticSummary)
+        );
+    }
+
+    #[test]
+    fn checkpoint_list_limit_and_cursor() {
+        assert_eq!(
+            CheckpointListLimit::try_new(0),
+            Err(EntityError::CheckpointListLimitOutOfRange {
+                value: 0,
+                max: CHECKPOINT_LIST_LIMIT_MAX
+            })
+        );
+        assert_eq!(
+            CheckpointListLimit::try_new(CHECKPOINT_LIST_LIMIT_MAX + 1),
+            Err(EntityError::CheckpointListLimitOutOfRange {
+                value: CHECKPOINT_LIST_LIMIT_MAX + 1,
+                max: CHECKPOINT_LIST_LIMIT_MAX
+            })
+        );
+
+        let limit = CheckpointListLimit::try_new(50).unwrap();
+        assert_eq!(limit.get(), 50);
+
+        let cursor = CheckpointCursor {
+            created_at: UnixMillis::from_millis(1_700_000_000_000),
+            checkpoint_id: RuntimeCheckpointId::from_str("chk_fixture000000001").unwrap(),
+        };
+        assert_eq!(cursor.created_at.as_millis(), 1_700_000_000_000);
+        assert_eq!(cursor.checkpoint_id.as_str(), "chk_fixture000000001");
+    }
+
+    #[test]
+    fn runtime_checkpoint_and_session_binding_entities() {
+        let chk = RuntimeCheckpoint {
+            id: RuntimeCheckpointId::from_str("chk_fixture000000001").unwrap(),
+            thread_id: ThreadId::from_str("thr_fixture000000001").unwrap(),
+            turn_id: Some(TurnId::from_str("trn_fixture000000001").unwrap()),
+            operation_id: OperationId::from_str("op_fixture000000001").unwrap(),
+            boundary_kind: BoundaryKind::Prompt,
+            state: CheckpointState::Intent,
+            remote_request_id: Some(RemoteRequestId::try_from("req_001").unwrap()),
+            diagnostic_summary: Some(DiagnosticSummary::try_from("diag msg").unwrap()),
+            created_at: UnixMillis::from_millis(1_700_000_000_000),
+            settled_at: None,
+        };
+
+        assert_eq!(chk.boundary_kind, BoundaryKind::Prompt);
+        assert_eq!(chk.state, CheckpointState::Intent);
+
+        let binding = SessionBinding {
+            thread_id: ThreadId::from_str("thr_fixture000000001").unwrap(),
+            harness_binding_id: HarnessBindingId::from_str("hsb_fixture000000001").unwrap(),
+            opaque_session_id: OpaqueSessionId::try_from("sess_123").unwrap(),
+            updated_at: UnixMillis::from_millis(1_700_000_000_000),
+        };
+
+        assert_eq!(binding.opaque_session_id.as_str(), "sess_123");
     }
 }

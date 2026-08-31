@@ -316,9 +316,7 @@ Projection self-healing is backed by a deterministic length-prefixed, type-tagge
 FNV-1a 64-bit digest over business projections (`thread`, `turn`, `permission` —
 strictly excluding FTS shadow tables), preflight FTS rebuild before table clear to
 prevent trigger failures, and automatic single-transaction replay and verification
-on reopen. P1.2 ACP runtime (subprocess trees, boundary adapter checkpoints, OS
-secret resolution, and live IPC integration) is the next milestone and has not yet
-been implemented.
+on reopen. P1.1 delivers a complete, usable persistence slice feeding P1.2.
 
 Evidence:
 
@@ -347,6 +345,48 @@ Evidence:
 - persist delivery checkpoints before/after adapter boundaries
 - supervise subprocess trees and recover or surface interrupted turns
 - keep raw ACP diagnostics bounded and device-local
+
+Status: implemented in full (ADR 0014). `altior-acp` implements real subprocess
+execution (`AcpChild`, `ProcessTransport`), typed launch configuration
+(`LaunchConfig`, `ResolvedLaunchConfig`), opaque secret references (`SecretRef`,
+`SecretResolver`), stream line I/O framing with 1 MiB line limits, bounded
+stderr capture (64 KiB), and RAII child termination (`KillOnDrop`). `altior-core`
+introduces Core-owned runtime ports (`HarnessRuntimePort`, `RuntimeCheckpointPort`,
+`AgentRuntime`), the thread supervisor state machine (`ThreadRuntimeSupervisor`,
+single active turn per thread, `OperationRegistry` dedup, capability gates, UI
+detachment resilience), and `AcpHarnessAdapter` managing dedicated worker threads
+with 1024-bounded channels, cancel ack flow control backpressure, and permission
+routing. `altior-storage` introduces forward migration v3→v4 with the
+`runtime_checkpoint` and `thread_session_binding` tables. Pre-call intents and
+post-call settlements (`Confirmed`, `Rejected`, `Indeterminate`) provide crash
+safety, with automatic reopen recovery converting unsettled intents to
+`Indeterminate`. Automatic turn re-send on crashes or indeterminate outcomes is
+strictly forbidden. A redact-by-default secret boundary and `NoSecretsResolver`
+seam ensure credentials never leak into logs, diagnostics, or SQLite storage.
+Deferred to P1.3/P5: OS Credential Manager integration (DPAPI/Keychain), Windows
+Job Object process trees, and formal OS IPC server transport into Desktop. P1.3
+Desktop MVP is the next milestone.
+
+Evidence:
+
+- 12 runtime supervisor unit tests (`crates/altior-core/tests/p12_runtime.rs`)
+  covering session creation, probing, and resumption, streaming event flows,
+  permission pause/decision routing, cancellation races and idempotence,
+  single-active-turn limits and multi-thread isolation, transport failure and
+  unexpected exit handling with `Indeterminate` marking and resend prohibition,
+  diagnostics redaction, and UI detachment resilience.
+- 6 end-to-end real subprocess composition tests (`crates/altior-core/tests/p12_composition.rs`)
+  verifying live streaming with `mock_acp_agent`, abnormal exit code 42 handling,
+  permission request/approval flow, turn cancellation, secret canary isolation in
+  SQLite files, and multi-run RAII executable cleanup.
+- 6 storage checkpoint integration tests (`crates/altior-storage/tests/checkpoint.rs`)
+  covering schema v4 migration, intent recording and round-trips, settlement
+  state transitions and conflicts, reopen recovery of unsettled intents to
+  `Indeterminate`, and session binding CRUD.
+- 6 process adapter tests (`crates/altior-acp/tests/process_adapter.rs`)
+  verifying real child process spawning, pipe I/O, stderr capture, and RAII termination.
+- 160+ total workspace Rust tests pass cleanly across all crates.
+- Cargo default gate and `--all-features` pass cleanly with zero warnings.
 
 ### P1.3 Desktop MVP
 

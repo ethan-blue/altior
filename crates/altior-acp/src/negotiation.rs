@@ -22,6 +22,8 @@ pub struct NegotiatedCapabilities {
     /// `agentCapabilities.sessionCapabilities.resume`: the newer resume
     /// path exists; the spike still uses `session/load`.
     pub resume: bool,
+    /// Whether `session/steer` is supported by the agent.
+    pub steer: bool,
     /// Which prompt content kinds the agent accepts.
     pub prompt: PromptCapabilities,
     /// The agent's `protocolVersion`, recorded verbatim.
@@ -33,6 +35,12 @@ impl NegotiatedCapabilities {
     #[must_use]
     pub fn may_resume(self) -> bool {
         self.load_session || self.resume
+    }
+
+    /// Whether mid-turn prompt steering is supported.
+    #[must_use]
+    pub fn supports_steer(self) -> bool {
+        self.steer
     }
 
     /// Whether plain-text prompts work (every v1 agent must accept them).
@@ -48,6 +56,8 @@ pub fn negotiate(result: &InitializeResult) -> NegotiatedCapabilities {
     NegotiatedCapabilities {
         load_session: result.agent_capabilities.load_session,
         resume: result.agent_capabilities.session_capabilities.resume,
+        steer: result.agent_capabilities.steer
+            || result.agent_capabilities.session_capabilities.steer,
         prompt: result.agent_capabilities.prompt_capabilities,
         agent_protocol_version: result.protocol_version,
     }
@@ -82,6 +92,7 @@ pub fn no_capabilities() -> AgentCapabilities {
         load_session: false,
         prompt_capabilities: PromptCapabilities::default(),
         session_capabilities: SessionCapabilities::default(),
+        steer: false,
     }
 }
 
@@ -95,25 +106,29 @@ mod tests {
 
     #[test]
     fn capability_booleans_gate_features_not_versions() {
-        let capable =
-            initialize_result(r#"{"protocolVersion":1,"agentCapabilities":{"loadSession":true}}"#);
+        let capable = initialize_result(
+            r#"{"protocolVersion":1,"agentCapabilities":{"loadSession":true,"steer":true}}"#,
+        );
         assert!(negotiate(&capable).may_resume());
+        assert!(negotiate(&capable).supports_steer());
 
         // A different version number with the same capabilities negotiates
         // identical gates: versions are data, capabilities are the contract.
-        let other_version =
-            initialize_result(r#"{"protocolVersion":7,"agentCapabilities":{"loadSession":true}}"#);
+        let other_version = initialize_result(
+            r#"{"protocolVersion":7,"agentCapabilities":{"loadSession":true,"steer":true}}"#,
+        );
         let a = negotiate(&capable);
         let b = negotiate(&other_version);
         assert_eq!(
-            (a.load_session, a.resume, a.prompt),
-            (b.load_session, b.resume, b.prompt)
+            (a.load_session, a.resume, a.steer, a.prompt),
+            (b.load_session, b.resume, b.steer, b.prompt)
         );
         assert_ne!(a.agent_protocol_version, b.agent_protocol_version);
 
         let silent = initialize_result(r#"{"protocolVersion":1}"#);
         let negotiated = negotiate(&silent);
         assert!(!negotiated.may_resume());
+        assert!(!negotiated.supports_steer());
         assert!(negotiated.accepts_text_prompts());
     }
 

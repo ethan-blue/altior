@@ -119,13 +119,26 @@ fn acp_depends_only_on_domain_protocol_and_json() {
 }
 
 #[test]
-fn core_depends_only_on_domain_ipc_and_protocol() {
+fn core_depends_on_composed_contract_and_adapter_crates() {
     assert_eq!(
         dependency_names(CORE_MANIFEST),
-        ["altior-domain", "altior-ipc", "altior-protocol"],
-        "altior-core composes the contract layers; the ACP adapter wires \
-         in behind the harness port in P1, not as a core dependency"
+        [
+            "altior-acp",
+            "altior-domain",
+            "altior-ipc",
+            "altior-protocol",
+            "altior-storage",
+            "serde",
+            "serde_json",
+        ],
+        "altior-core composes the contract layers and runtime adapters (ADR 0002, ADR 0007, ADR 0013)"
     );
+    for forbidden in ["tauri", "tokio"] {
+        assert!(
+            !CORE_MANIFEST.to_lowercase().contains(forbidden),
+            "altior-core manifest mentions {forbidden}"
+        );
+    }
 }
 
 #[test]

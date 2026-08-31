@@ -1,7 +1,7 @@
 {
   "name": "@altior/desktop",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.0.1",
   "type": "module",
   "description": "Altior Desktop fixture shell (P0.1): runs against the in-memory IPC transport with Rust-owned protocol fixtures.",
   "scripts": {

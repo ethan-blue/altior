@@ -71,10 +71,26 @@ replay decoupled from local profile/project pre-existence), bounded turn and
 permission queries with compound indexes, safe literal FTS5 title search with
 title clearing and official `rank='integrity-check', 1` consistency checks, and a
 deterministic business projection digest (excluding FTS private shadow tables)
-that self-heals via single-transaction rebuild on reopen. P1.1 delivers a complete,
-usable persistence slice; P1.2 ACP runtime (subprocess trees, boundary adapter
-checkpoints, OS secret resolution, and live IPC integration) is the next milestone
-and has not yet been implemented.
+that self-heals via single-transaction rebuild on reopen. P1.2 adds the ACP
+subprocess runtime, boundary checkpoints, and process supervision (ADR 0014):
+`altior-acp` implements real subprocess execution (`AcpChild`, `ProcessTransport`),
+stdio JSON-RPC framing (1 MiB line cap), bounded stderr capture (64 KiB), and
+RAII child process termination (`KillOnDrop`). `altior-core` introduces Core-owned
+runtime ports (`HarnessRuntimePort`, `RuntimeCheckpointPort`, `AgentRuntime`),
+the per-thread runtime supervisor (`ThreadRuntimeSupervisor`, single active turn
+per thread, capability gates, UI detachment resilience), and `AcpHarnessAdapter`
+managing dedicated worker threads with 1024-bounded channels, cancel ack flow
+control backpressure, and permission routing. `altior-storage` introduces
+forward migration v3→v4 with `runtime_checkpoint` and `thread_session_binding`
+tables. Pre-call intents and post-call settlements (`Confirmed`, `Rejected`,
+`Indeterminate`) provide crash safety, with automatic reopen recovery converting
+unsettled intents to `Indeterminate`. Automatic turn re-send on crashes or
+indeterminate outcomes is strictly forbidden. A redact-by-default secret
+boundary and `NoSecretsResolver` seam ensure credentials never leak into logs,
+diagnostics, or SQLite files. This release represents the **0.0.1 developer preview**:
+a complete, verified backend runtime foundation. It is an architecture and developer
+preview, not yet a packaged consumer product; P1.3 Desktop MVP (Tauri workbench
+wiring, live IPC server, and onboarding) is the next milestone.
 
 ## Design anchors
 

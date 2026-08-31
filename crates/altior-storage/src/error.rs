@@ -120,6 +120,48 @@ pub enum StorageError {
         /// The rejected detail.
         detail: String,
     },
+    /// A checkpoint ID already exists with different intent fields.
+    CheckpointCollision {
+        /// The conflicting checkpoint ID.
+        id: String,
+        /// Detail of the conflict.
+        detail: String,
+    },
+    /// The specified checkpoint was not found.
+    CheckpointNotFound {
+        /// The missing checkpoint ID.
+        id: String,
+    },
+    /// A checkpoint settlement conflicts with its existing terminal state.
+    CheckpointSettlementConflict {
+        /// The checkpoint ID.
+        id: String,
+        /// Current state in database.
+        current: String,
+        /// Attempted settlement state.
+        attempted: String,
+    },
+    /// An invalid checkpoint state transition was attempted.
+    InvalidCheckpointTransition {
+        /// The checkpoint ID.
+        id: String,
+        /// Description of the invalid transition.
+        detail: String,
+    },
+    /// The turn referenced by a checkpoint does not exist.
+    TurnNotFound {
+        /// The turn ID.
+        turn_id: String,
+    },
+    /// The turn referenced by a checkpoint belongs to a different thread.
+    TurnThreadMismatch {
+        /// The turn ID.
+        turn_id: String,
+        /// The thread ID specified on the checkpoint.
+        expected_thread_id: String,
+        /// The actual thread ID the turn belongs to.
+        actual_thread_id: String,
+    },
     /// A SQLite failure not classified above.
     Sqlite {
         /// The operation context, e.g. `"append_event"`.
@@ -130,6 +172,7 @@ pub enum StorageError {
 }
 
 impl fmt::Display for StorageError {
+    #[allow(clippy::too_many_lines)]
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::SchemaTooNew { found, supported } => write!(
@@ -200,6 +243,41 @@ impl fmt::Display for StorageError {
             Self::InvalidEntityData { detail } => {
                 write!(f, "invalid entity data in database: {detail}")
             }
+            Self::CheckpointCollision { id, detail } => {
+                write!(
+                    f,
+                    "checkpoint {id} already exists with conflicting fields: {detail}"
+                )
+            }
+            Self::CheckpointNotFound { id } => {
+                write!(f, "checkpoint {id} not found")
+            }
+            Self::CheckpointSettlementConflict {
+                id,
+                current,
+                attempted,
+            } => {
+                write!(
+                    f,
+                    "checkpoint {id} already settled as {current}, cannot settle as {attempted}"
+                )
+            }
+            Self::InvalidCheckpointTransition { id, detail } => {
+                write!(f, "invalid checkpoint transition for {id}: {detail}")
+            }
+            Self::TurnNotFound { turn_id } => {
+                write!(f, "turn {turn_id} not found")
+            }
+            Self::TurnThreadMismatch {
+                turn_id,
+                expected_thread_id,
+                actual_thread_id,
+            } => {
+                write!(
+                    f,
+                    "turn {turn_id} belongs to thread {actual_thread_id}, expected {expected_thread_id}"
+                )
+            }
             Self::Sqlite { context, .. } => write!(f, "SQLite failure during {context}"),
         }
     }
@@ -225,7 +303,13 @@ impl std::error::Error for StorageError {
             | Self::ProjectRefAlreadyExists { .. }
             | Self::ProjectRefNotFound { .. }
             | Self::ProjectReferencedByThreads { .. }
-            | Self::InvalidEntityData { .. } => None,
+            | Self::InvalidEntityData { .. }
+            | Self::CheckpointCollision { .. }
+            | Self::CheckpointNotFound { .. }
+            | Self::CheckpointSettlementConflict { .. }
+            | Self::InvalidCheckpointTransition { .. }
+            | Self::TurnNotFound { .. }
+            | Self::TurnThreadMismatch { .. } => None,
         }
     }
 }

@@ -87,6 +87,9 @@ pub struct AgentCapabilities {
     /// Session capability flags; only `resume` is modeled.
     #[serde(rename = "sessionCapabilities", default)]
     pub session_capabilities: SessionCapabilities,
+    /// Whether `session/steer` is supported.
+    #[serde(default)]
+    pub steer: bool,
 }
 
 /// Which prompt content kinds the agent accepts beyond plain text.
@@ -109,6 +112,9 @@ pub struct SessionCapabilities {
     /// Whether `session/resume` (the newer resume path) is available.
     #[serde(default)]
     pub resume: bool,
+    /// Whether prompt steering is supported via session/steer.
+    #[serde(default)]
+    pub steer: bool,
 }
 
 /// `session/new` request parameters.
@@ -441,6 +447,8 @@ pub enum Method {
     LoadSession,
     /// `session/prompt`
     Prompt,
+    /// `session/steer`
+    Steer,
     /// `session/cancel`
     Cancel,
     /// `session/update` (notification, agent → client)
@@ -462,6 +470,7 @@ impl Method {
             Self::NewSession => "session/new",
             Self::LoadSession => "session/load",
             Self::Prompt => "session/prompt",
+            Self::Steer => "session/steer",
             Self::Cancel => "session/cancel",
             Self::SessionUpdate => "session/update",
             Self::RequestPermission => "session/request_permission",
@@ -478,6 +487,7 @@ impl Method {
             "session/new" => Self::NewSession,
             "session/load" => Self::LoadSession,
             "session/prompt" => Self::Prompt,
+            "session/steer" => Self::Steer,
             "session/cancel" => Self::Cancel,
             "session/update" => Self::SessionUpdate,
             "session/request_permission" => Self::RequestPermission,

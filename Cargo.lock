@@ -36,7 +36,7 @@ dependencies = [
 
 [[package]]
 name = "altior-acp"
-version = "0.1.0"
+version = "0.0.1"
 dependencies = [
  "altior-domain",
  "altior-protocol",
@@ -46,16 +46,21 @@ dependencies = [
 
 [[package]]
 name = "altior-core"
-version = "0.1.0"
+version = "0.0.1"
 dependencies = [
+ "altior-acp",
  "altior-domain",
  "altior-ipc",
  "altior-protocol",
+ "altior-storage",
+ "serde",
+ "serde_json",
+ "tempfile",
 ]
 
 [[package]]
 name = "altior-crdt"
-version = "0.1.0"
+version = "0.0.1"
 dependencies = [
  "automerge",
  "loro",
@@ -63,7 +68,7 @@ dependencies = [
 
 [[package]]
 name = "altior-crypto"
-version = "0.1.0"
+version = "0.0.1"
 dependencies = [
  "chacha20poly1305",
  "ed25519-dalek",
@@ -75,7 +80,7 @@ dependencies = [
 
 [[package]]
 name = "altior-domain"
-version = "0.1.0"
+version = "0.0.1"
 dependencies = [
  "serde",
  "serde_json",
@@ -83,7 +88,7 @@ dependencies = [
 
 [[package]]
 name = "altior-ipc"
-version = "0.1.0"
+version = "0.0.1"
 dependencies = [
  "altior-domain",
  "altior-protocol",
@@ -93,7 +98,7 @@ dependencies = [
 
 [[package]]
 name = "altior-protocol"
-version = "0.1.0"
+version = "0.0.1"
 dependencies = [
  "altior-domain",
  "serde",
@@ -103,14 +108,14 @@ dependencies = [
 
 [[package]]
 name = "altior-relay"
-version = "0.1.0"
+version = "0.0.1"
 dependencies = [
  "altior-crypto",
 ]
 
 [[package]]
 name = "altior-storage"
-version = "0.1.0"
+version = "0.0.1"
 dependencies = [
  "altior-domain",
  "altior-protocol",
