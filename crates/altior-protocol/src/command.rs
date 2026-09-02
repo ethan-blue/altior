@@ -23,7 +23,7 @@ use altior_domain::{
 };
 
 use crate::bounded::{BoundedPayload, EnvelopeLimits, MessageText};
-use crate::dto::{ThreadCursorDto, TurnCursorDto};
+use crate::dto::{HarnessBindingConfigDto, ThreadCursorDto, TurnCursorDto};
 use crate::error::ProtocolError;
 use crate::version::{ProtocolVersion, SUPPORTED_PROTOCOL_VERSIONS};
 
@@ -231,6 +231,33 @@ pub struct ConfigureAgentCommand {
     pub preferred_harness: String,
     /// Memory mode: `"off"`, `"session"`, or `"long_term"`.
     pub memory_mode: String,
+    /// Optional harness launch binding configuration.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub binding: Option<HarnessBindingConfigDto>,
+}
+
+impl ConfigureAgentCommand {
+    /// Validates the configure agent command fields and optional binding against domain bounds.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ProtocolError`] if display name, preferred harness, memory mode,
+    /// or binding invariants are violated.
+    pub fn validate(&self) -> Result<(), ProtocolError> {
+        if self.display_name.len() > 256 {
+            return Err(ProtocolError::TextTooLarge {
+                size_bytes: self.display_name.len(),
+                limit_bytes: 256,
+            });
+        }
+        let _ = altior_domain::DisplayName::try_from(self.display_name.as_str())?;
+        let _ = altior_domain::HarnessKind::try_from_str(self.preferred_harness.as_str())?;
+        let _ = altior_domain::MemoryMode::try_from_str(self.memory_mode.as_str())?;
+        if let Some(binding) = &self.binding {
+            binding.validate()?;
+        }
+        Ok(())
+    }
 }
 
 /// Payload for probing/testing a harness binding (`test_harness_binding`).
@@ -245,18 +272,77 @@ pub struct ConfigureAgentCommand {
 )]
 pub struct TestHarnessBindingCommand {
     /// Existing harness binding ID, if probing an already saved binding.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     #[cfg_attr(feature = "dto-export", ts(as = "Option<String>"))]
     pub harness_binding_id: Option<HarnessBindingId>,
     /// Program executable path (bounded to 4096 bytes).
     pub program: String,
     /// Command arguments.
+    #[serde(default)]
     pub args: Vec<String>,
     /// Environment variable keys to pass.
+    #[serde(default)]
     pub env_keys: Vec<String>,
     /// Opaque secret references (NEVER plaintext secrets).
+    #[serde(default)]
     pub secret_refs: Vec<String>,
     /// Optional label for the binding.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub label: Option<String>,
+}
+
+impl From<TestHarnessBindingCommand> for HarnessBindingConfigDto {
+    fn from(cmd: TestHarnessBindingCommand) -> Self {
+        Self {
+            harness_binding_id: cmd.harness_binding_id,
+            agent_profile_id: None,
+            program: cmd.program,
+            args: cmd.args,
+            env_keys: cmd.env_keys,
+            secret_refs: cmd.secret_refs,
+            label: cmd.label,
+        }
+    }
+}
+
+impl From<&TestHarnessBindingCommand> for HarnessBindingConfigDto {
+    fn from(cmd: &TestHarnessBindingCommand) -> Self {
+        Self {
+            harness_binding_id: cmd.harness_binding_id.clone(),
+            agent_profile_id: None,
+            program: cmd.program.clone(),
+            args: cmd.args.clone(),
+            env_keys: cmd.env_keys.clone(),
+            secret_refs: cmd.secret_refs.clone(),
+            label: cmd.label.clone(),
+        }
+    }
+}
+
+impl From<HarnessBindingConfigDto> for TestHarnessBindingCommand {
+    fn from(cfg: HarnessBindingConfigDto) -> Self {
+        Self {
+            harness_binding_id: cfg.harness_binding_id,
+            program: cfg.program,
+            args: cfg.args,
+            env_keys: cfg.env_keys,
+            secret_refs: cfg.secret_refs,
+            label: cfg.label,
+        }
+    }
+}
+
+impl TestHarnessBindingCommand {
+    /// Validates the harness binding test command against domain invariants and bounds.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ProtocolError`] if `program`, `label`, `args`, `env_keys`, or `secret_refs`
+    /// violate domain bounds or if `env_keys.len() != secret_refs.len()`.
+    pub fn validate(&self) -> Result<(), ProtocolError> {
+        let config = HarnessBindingConfigDto::from(self);
+        config.validate()
+    }
 }
 
 /// Payload for starting a turn / sending a prompt (`start_turn`).
@@ -726,28 +812,27 @@ impl CommandEnvelope {
     ///
     /// # Errors
     ///
-    /// Returns [`ProtocolError`] if display name exceeds 256 bytes or bounds check fails.
+    /// Returns [`ProtocolError`] if display name exceeds 256 bytes, binding is invalid,
+    /// or bounds check fails.
+    #[allow(clippy::too_many_arguments)]
     pub fn configure_agent(
         agent_profile_id: Option<AgentProfileId>,
         display_name: String,
         preferred_harness: String,
         memory_mode: String,
+        binding: Option<HarnessBindingConfigDto>,
         operation_id: OperationId,
         issued_at: UnixMillis,
         limits: &EnvelopeLimits,
     ) -> Result<Self, ProtocolError> {
-        if display_name.len() > 256 {
-            return Err(ProtocolError::TextTooLarge {
-                size_bytes: display_name.len(),
-                limit_bytes: 256,
-            });
-        }
         let cmd = ConfigureAgentCommand {
             agent_profile_id,
             display_name,
             preferred_harness,
             memory_mode,
+            binding,
         };
+        cmd.validate()?;
         Self::new_typed(
             CommandKind::ConfigureAgent,
             &cmd,
@@ -770,7 +855,8 @@ impl CommandEnvelope {
     ///
     /// # Errors
     ///
-    /// Returns [`ProtocolError`] if program path exceeds 4096 bytes or bounds check fails.
+    /// Returns [`ProtocolError`] if program path exceeds 4096 bytes, bounds check fails,
+    /// or `env_keys` and `secret_refs` count mismatch.
     #[allow(clippy::too_many_arguments)]
     pub fn test_harness_binding(
         harness_binding_id: Option<HarnessBindingId>,
@@ -783,12 +869,6 @@ impl CommandEnvelope {
         issued_at: UnixMillis,
         limits: &EnvelopeLimits,
     ) -> Result<Self, ProtocolError> {
-        if program.len() > 4096 {
-            return Err(ProtocolError::TextTooLarge {
-                size_bytes: program.len(),
-                limit_bytes: 4096,
-            });
-        }
         let cmd = TestHarnessBindingCommand {
             harness_binding_id,
             program,
@@ -797,6 +877,7 @@ impl CommandEnvelope {
             secret_refs,
             label,
         };
+        cmd.validate()?;
         Self::new_typed(
             CommandKind::TestHarnessBinding,
             &cmd,
@@ -1106,6 +1187,84 @@ mod tests {
         let json = envelope.to_json().unwrap();
         assert!(!json.contains("sk-"));
         assert!(json.contains("sec_ref_key1"));
+    }
+
+    #[test]
+    fn configure_agent_command_without_binding_roundtrips() {
+        let envelope = CommandEnvelope::configure_agent(
+            Some("agp_fixture000000003".parse().unwrap()),
+            "Coding Assistant".to_string(),
+            "acp".to_string(),
+            "session".to_string(),
+            None,
+            "op_fixture000000025".parse().unwrap(),
+            UnixMillis::from_millis(1_700_000_000_025),
+            &EnvelopeLimits::default(),
+        )
+        .unwrap();
+        envelope.validate(&EnvelopeLimits::default()).unwrap();
+        assert_eq!(envelope.kind, CommandKind::ConfigureAgent);
+        let payload = envelope.configure_agent_payload().unwrap();
+        assert_eq!(payload.display_name, "Coding Assistant");
+        assert_eq!(payload.binding, None);
+
+        let json = envelope.to_json().unwrap();
+        assert!(!json.contains("binding"));
+        let decoded = CommandEnvelope::from_json(&json).unwrap();
+        assert_eq!(decoded, envelope);
+    }
+
+    #[test]
+    fn configure_agent_command_with_binding_roundtrips() {
+        let binding = HarnessBindingConfigDto {
+            harness_binding_id: Some("hsb_fixture000000004".parse().unwrap()),
+            agent_profile_id: Some("agp_fixture000000003".parse().unwrap()),
+            program: "C:\\Agents\\acp-agent.exe".to_string(),
+            args: vec!["--acp".to_string()],
+            env_keys: vec!["ANTHROPIC_API_KEY".to_string()],
+            secret_refs: vec!["sec_ref_openai_01".to_string()],
+            label: Some("Local ACP Agent".to_string()),
+        };
+        let envelope = CommandEnvelope::configure_agent(
+            Some("agp_fixture000000003".parse().unwrap()),
+            "Coding Assistant".to_string(),
+            "acp".to_string(),
+            "session".to_string(),
+            Some(binding.clone()),
+            "op_fixture000000027".parse().unwrap(),
+            UnixMillis::from_millis(1_700_000_000_027),
+            &EnvelopeLimits::default(),
+        )
+        .unwrap();
+        envelope.validate(&EnvelopeLimits::default()).unwrap();
+        let payload = envelope.configure_agent_payload().unwrap();
+        assert_eq!(payload.binding, Some(binding));
+
+        let json = envelope.to_json().unwrap();
+        let decoded = CommandEnvelope::from_json(&json).unwrap();
+        assert_eq!(decoded, envelope);
+    }
+
+    #[test]
+    fn test_harness_binding_command_rejects_env_secret_mismatch() {
+        let result = CommandEnvelope::test_harness_binding(
+            None,
+            "agent.exe".to_string(),
+            vec![],
+            vec!["KEY1".to_string(), "KEY2".to_string()],
+            vec!["sec_ref_1".to_string()],
+            None,
+            "op_fixture000000028".parse().unwrap(),
+            UnixMillis::from_millis(1_700_000_000_028),
+            &EnvelopeLimits::default(),
+        );
+        assert!(matches!(
+            result,
+            Err(ProtocolError::HarnessEnvSecretMismatch {
+                env_keys_count: 2,
+                secret_refs_count: 1,
+            })
+        ));
     }
 
     #[test]

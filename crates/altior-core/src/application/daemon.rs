@@ -12,10 +12,10 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use altior_domain::{
-    AcpHarnessBinding, AgentProfile, AgentProfileId, DisplayName, EventId, HarnessBindingId,
-    HarnessKind, MemoryMode, OperationId, PermissionDecision, PermissionListLimit, ProjectId,
-    SearchQuery, ThreadCursor, ThreadId, ThreadListLimit, ThreadTitle, TurnCursor, TurnId,
-    TurnListLimit, UnixMillis,
+    AcpHarnessBinding, AgentProfile, AgentProfileId, BoundedPath, DisplayName, EventId, HarnessArg,
+    HarnessBindingId, HarnessEnvKey, HarnessKind, HarnessSecretRef, MemoryMode, OperationId,
+    PermissionDecision, PermissionListLimit, ProjectId, SearchQuery, ThreadCursor, ThreadId,
+    ThreadListLimit, ThreadTitle, TurnCursor, TurnId, TurnListLimit, UnixMillis,
 };
 use altior_ipc::{CatchUpDelivery, IpcError, LaunchCredentials, ServerSession};
 use altior_protocol::{
@@ -418,8 +418,8 @@ where
                     Ok(Some(frame)) => {
                         session.last_activity_at = now;
                         frames_read += 1;
-                        let handle_res = Self::process_incoming_frame(session, &frame);
-                        if handle_res.is_err() {
+                        if let Err(err) = Self::process_incoming_frame(session, &frame) {
+                            eprintln!("[altior-core] closing connection: frame error: {err}");
                             let _ = session.connection.close();
                             disconnected_indices.push(idx);
                             break;
@@ -473,14 +473,16 @@ where
                 continue;
             }
             while let Some(cmd) = session.pending_control_commands.pop_front() {
-                let res =
-                    Self::execute_control_command(&mut self.app, &self.limits, session, &cmd, now);
-                if res.is_err() {
-                    let _ = session.connection.close();
-                    disconnected_indices.push(idx);
-                    break;
+                match Self::execute_control_command(&mut self.app, &self.limits, session, &cmd, now)
+                {
+                    Ok(()) => report.control_commands_dispatched += 1,
+                    Err(err) => {
+                        eprintln!("[altior-core] closing connection: control command error: {err}");
+                        let _ = session.connection.close();
+                        disconnected_indices.push(idx);
+                        break;
+                    }
                 }
-                report.control_commands_dispatched += 1;
             }
         }
 
@@ -499,12 +501,15 @@ where
                     &mut broadcast_events,
                     now,
                 );
-                if res.is_err() {
-                    let _ = session.connection.close();
-                    disconnected_indices.push(idx);
-                    break;
+                match res {
+                    Ok(()) => report.normal_commands_dispatched += 1,
+                    Err(err) => {
+                        eprintln!("[altior-core] closing connection: command error: {err}");
+                        let _ = session.connection.close();
+                        disconnected_indices.push(idx);
+                        break;
+                    }
                 }
-                report.normal_commands_dispatched += 1;
             }
         }
 
@@ -522,6 +527,7 @@ where
                     && session.state == DaemonSessionState::Subscribed
                     && session.connection.send_frame(bytes).is_err()
                 {
+                    eprintln!("[altior-core] closing connection: event send failed");
                     let _ = session.connection.close();
                     disconnected_indices.push(idx);
                 }
@@ -1085,6 +1091,7 @@ where
         Ok(())
     }
 
+    #[allow(clippy::too_many_lines)]
     fn handle_configure_agent(
         app: &mut CoreApplication<H, StoreCheckpointAdapter>,
         limits: &EnvelopeLimits,
@@ -1096,32 +1103,96 @@ where
         let res = (|| -> Result<(), CoreAppError> {
             let payload: ConfigureAgentCommand =
                 cmd.parse_payload().map_err(CoreAppError::Protocol)?;
+            payload.validate().map_err(CoreAppError::Protocol)?;
             let profile_id = match payload.agent_profile_id {
                 Some(p) => p,
-                None => AgentProfileId::from_str(&format!("prf_{:016x}", now.as_millis()))
+                None => AgentProfileId::from_str(&format!("agp_{:016x}", now.as_millis()))
                     .map_err(CoreAppError::Id)?,
             };
             let display_name = DisplayName::try_from(payload.display_name.as_str())
                 .map_err(CoreAppError::Entity)?;
-            let preferred_harness = match payload.preferred_harness.as_str() {
-                "terminal" => HarnessKind::Terminal,
-                "native" => HarnessKind::Native,
-                _ => HarnessKind::Acp,
-            };
-            let memory_mode = match payload.memory_mode.as_str() {
-                "session" => MemoryMode::Session,
-                "long_term" => MemoryMode::LongTerm,
-                _ => MemoryMode::Off,
-            };
+            let preferred_harness = HarnessKind::try_from_str(payload.preferred_harness.as_str())
+                .map_err(CoreAppError::Entity)?;
+            let memory_mode = MemoryMode::try_from_str(payload.memory_mode.as_str())
+                .map_err(CoreAppError::Entity)?;
             let profile = AgentProfile {
-                id: profile_id,
+                id: profile_id.clone(),
                 display_name,
                 preferred_harness,
                 memory_mode,
                 created_at: now,
                 updated_at: now,
             };
-            app.configure_agent(&profile, None)
+
+            let binding = if let Some(b_dto) = payload.binding {
+                let binding_agent_id = match b_dto.agent_profile_id {
+                    Some(ref a_id) => {
+                        if a_id != &profile_id {
+                            return Err(CoreAppError::InvalidInput(
+                                "binding agent_profile_id does not match profile id".to_string(),
+                            ));
+                        }
+                        a_id.clone()
+                    }
+                    None => profile_id.clone(),
+                };
+
+                let binding_id = if let Some(b) = b_dto.harness_binding_id {
+                    b
+                } else {
+                    let profile_body = profile_id
+                        .as_str()
+                        .strip_prefix("agp_")
+                        .unwrap_or(profile_id.as_str());
+                    HarnessBindingId::from_str(&format!("hsb_{profile_body}"))
+                        .map_err(CoreAppError::Id)?
+                };
+
+                let label = DisplayName::try_from(
+                    b_dto
+                        .label
+                        .as_deref()
+                        .unwrap_or(profile.display_name.as_str()),
+                )
+                .map_err(CoreAppError::Entity)?;
+                let command =
+                    BoundedPath::try_from(b_dto.program.as_str()).map_err(CoreAppError::Entity)?;
+
+                let mut args = Vec::with_capacity(b_dto.args.len());
+                for a in &b_dto.args {
+                    args.push(HarnessArg::try_from(a.as_str()).map_err(CoreAppError::Entity)?);
+                }
+
+                let mut env_keys = Vec::with_capacity(b_dto.env_keys.len());
+                for k in &b_dto.env_keys {
+                    env_keys
+                        .push(HarnessEnvKey::try_from(k.as_str()).map_err(CoreAppError::Entity)?);
+                }
+
+                let mut secret_refs = Vec::with_capacity(b_dto.secret_refs.len());
+                for r in &b_dto.secret_refs {
+                    secret_refs.push(
+                        HarnessSecretRef::try_from(r.as_str()).map_err(CoreAppError::Entity)?,
+                    );
+                }
+
+                let b = AcpHarnessBinding::new(
+                    binding_id,
+                    binding_agent_id,
+                    label,
+                    command,
+                    args,
+                    env_keys,
+                    secret_refs,
+                    now,
+                )
+                .map_err(CoreAppError::Entity)?;
+                Some(b)
+            } else {
+                None
+            };
+
+            app.configure_agent(&profile, binding.as_ref())
         })();
 
         match res {
@@ -1154,21 +1225,46 @@ where
         let res = (|| -> Result<serde_json::Value, CoreAppError> {
             let payload: TestHarnessBindingCommand =
                 cmd.parse_payload().map_err(CoreAppError::Protocol)?;
+            payload.validate().map_err(CoreAppError::Protocol)?;
             let binding_id = match payload.harness_binding_id {
                 Some(b) => b,
-                None => HarnessBindingId::from_str(&format!("hnb_{:016x}", now.as_millis()))
+                None => HarnessBindingId::from_str(&format!("hsb_{:016x}", now.as_millis()))
                     .map_err(CoreAppError::Id)?,
             };
-            let agent_id = AgentProfileId::from_str("prf_default").map_err(CoreAppError::Id)?;
-            let binding = AcpHarnessBinding {
-                id: binding_id,
-                agent_profile_id: agent_id,
-                command: altior_domain::BoundedPath::try_from(payload.program.as_str())
-                    .map_err(CoreAppError::Entity)?,
-                label: DisplayName::try_from(payload.label.as_deref().unwrap_or("test"))
-                    .map_err(CoreAppError::Entity)?,
-                created_at: now,
-            };
+            let agent_id =
+                AgentProfileId::from_str("agp_0000000000000000").map_err(CoreAppError::Id)?;
+            let label = DisplayName::try_from(payload.label.as_deref().unwrap_or("test"))
+                .map_err(CoreAppError::Entity)?;
+            let command =
+                BoundedPath::try_from(payload.program.as_str()).map_err(CoreAppError::Entity)?;
+
+            let mut args = Vec::with_capacity(payload.args.len());
+            for a in &payload.args {
+                args.push(HarnessArg::try_from(a.as_str()).map_err(CoreAppError::Entity)?);
+            }
+
+            let mut env_keys = Vec::with_capacity(payload.env_keys.len());
+            for k in &payload.env_keys {
+                env_keys.push(HarnessEnvKey::try_from(k.as_str()).map_err(CoreAppError::Entity)?);
+            }
+
+            let mut secret_refs = Vec::with_capacity(payload.secret_refs.len());
+            for r in &payload.secret_refs {
+                secret_refs
+                    .push(HarnessSecretRef::try_from(r.as_str()).map_err(CoreAppError::Entity)?);
+            }
+
+            let binding = AcpHarnessBinding::new(
+                binding_id,
+                agent_id,
+                label,
+                command,
+                args,
+                env_keys,
+                secret_refs,
+                now,
+            )
+            .map_err(CoreAppError::Entity)?;
             let outcome = app.test_agent_binding(&binding)?;
             Ok(serde_json::json!({
                 "ok": outcome.ok,

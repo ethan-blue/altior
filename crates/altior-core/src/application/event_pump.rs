@@ -429,38 +429,27 @@ fn map_runtime_to_event_body(event: &RuntimeEvent) -> Result<EventBody, CoreAppE
         }
         RuntimeEvent::TurnCompleted { .. } => Ok(EventBody::Known(KnownEvent::TurnCompleted)),
         RuntimeEvent::PermissionRequested {
-            permission_id,
-            kind,
-            description,
-            ..
+            kind, description, ..
         } => {
-            let kind_str = kind.as_str();
-            let desc_str = description.as_str();
-            let diagnostic_str = format!(
-                r#"{{"permission_id":"{permission_id}","kind":"{kind_str}","description":"{desc_str}"}}"#
-            );
-            let diagnostic = DiagnosticText::try_from(diagnostic_str.as_str())?;
-            Ok(EventBody::Unknown {
-                provider_kind: "permission.requested".to_string(),
-                diagnostic,
-            })
+            let permission_kind = kind.as_str().to_string();
+            let desc = DiagnosticText::try_from(description.as_str())?;
+            Ok(EventBody::Known(KnownEvent::PermissionRequested {
+                permission_kind,
+                description: desc,
+            }))
         }
         RuntimeEvent::TurnCancelled { .. } => {
-            let diagnostic = DiagnosticText::try_from(r#"{"status":"cancelled"}"#)?;
-            Ok(EventBody::Unknown {
-                provider_kind: "turn.cancelled".to_string(),
-                diagnostic,
-            })
+            Ok(EventBody::Known(KnownEvent::TurnCancelled { reason: None }))
         }
         RuntimeEvent::TurnFailed {
             reason, delivery, ..
         } => {
-            let diagnostic_str = format!(r#"{{"reason":"{reason}","delivery":"{delivery:?}"}}"#);
-            let diagnostic = DiagnosticText::try_from(diagnostic_str.as_str())?;
-            Ok(EventBody::Unknown {
-                provider_kind: "turn.failed".to_string(),
-                diagnostic,
-            })
+            let reason_text = DiagnosticText::try_from(reason.as_str())?;
+            let delivery_state = format!("{delivery:?}").to_lowercase();
+            Ok(EventBody::Known(KnownEvent::TurnFailed {
+                reason: reason_text,
+                delivery_state,
+            }))
         }
         RuntimeEvent::ProcessExited { exit_code, .. } => {
             let diagnostic_str = format!(r#"{{"exit_code":{exit_code:?}}}"#);

@@ -34,6 +34,10 @@ pub struct AcpRuntime<T: ProcessTransport> {
     session_id: Option<String>,
 }
 
+/// How often the prompt loop re-checks the cancellation signal while the
+/// child produces no output.
+const CANCEL_POLL_INTERVAL: std::time::Duration = std::time::Duration::from_millis(100);
+
 impl<T: ProcessTransport> AcpRuntime<T> {
     /// Creates a new runtime adapter around the provided transport.
     #[must_use]
@@ -197,7 +201,9 @@ impl<T: ProcessTransport> AcpRuntime<T> {
 
         let mut cancel_sent = false;
 
-        // Read stream until prompt completes or error occurs.
+        // Read stream until prompt completes or error occurs. Reads are
+        // interruptible: while the child stays silent we re-check the
+        // cancellation signal instead of blocking indefinitely.
         loop {
             // Check cancellation signal
             if !cancel_sent
@@ -208,14 +214,22 @@ impl<T: ProcessTransport> AcpRuntime<T> {
                 cancel_sent = true;
             }
 
-            let line_opt = self.transport.read_line().inspect_err(|_| {
-                let _ = self
-                    .delivery
-                    .on_connection_lost(DeliveryCause::ProcessExited);
-                let _ = self.lifecycle.on_process_lost();
-            })?;
+            let line_opt = self
+                .transport
+                .read_line_timeout(CANCEL_POLL_INTERVAL)
+                .inspect_err(|_| {
+                    let _ = self
+                        .delivery
+                        .on_connection_lost(DeliveryCause::ProcessExited);
+                    let _ = self.lifecycle.on_process_lost();
+                })?;
 
             let Some(line) = line_opt else {
+                // Timed out waiting for output: loop to re-check cancellation.
+                continue;
+            };
+
+            let Some(line) = line else {
                 let _ = self
                     .delivery
                     .on_connection_lost(DeliveryCause::ProcessExited);

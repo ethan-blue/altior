@@ -9,13 +9,15 @@ pub use entity::{
     AgentProfileListLimit, BoundaryKind, BoundedLabel, BoundedPath, CHECKPOINT_LIST_LIMIT_MAX,
     CheckpointCursor, CheckpointListLimit, CheckpointState, DiagnosticSummary, DisplayName,
     DomainEvent, DomainEventKind, EntityError, EventPayload, HARNESS_BINDING_LIST_LIMIT_MAX,
-    HISTORY_LIMIT_MAX, HarnessBindingCursor, HarnessBindingListLimit, HistoryLimit,
-    OpaqueSessionId, PERMISSION_LIST_LIMIT_MAX, PROJECT_REF_LIST_LIMIT_MAX, Permission,
-    PermissionCursor, PermissionDecision, PermissionDescription, PermissionKind,
-    PermissionListLimit, ProjectRef, ProjectRefCursor, ProjectRefListLimit, RemoteRequestId,
-    RuntimeCheckpoint, SearchQuery, SessionBinding, THREAD_LIST_LIMIT_MAX, TURN_LIST_LIMIT_MAX,
-    Thread, ThreadCursor, ThreadListLimit, ThreadState, ThreadTitle, Turn, TurnCursor,
-    TurnListLimit, TurnState,
+    HISTORY_LIMIT_MAX, HarnessArg, HarnessBindingCursor, HarnessBindingListLimit, HarnessEnvKey,
+    HarnessSecretRef, HistoryLimit, MAX_HARNESS_ARG_BYTES, MAX_HARNESS_ARGS_COUNT,
+    MAX_HARNESS_ENV_KEY_BYTES, MAX_HARNESS_ENV_KEYS_COUNT, MAX_HARNESS_SECRET_REF_BYTES,
+    MAX_HARNESS_SECRET_REFS_COUNT, OpaqueSessionId, PERMISSION_LIST_LIMIT_MAX,
+    PROJECT_REF_LIST_LIMIT_MAX, Permission, PermissionCursor, PermissionDecision,
+    PermissionDescription, PermissionKind, PermissionListLimit, ProjectRef, ProjectRefCursor,
+    ProjectRefListLimit, RemoteRequestId, RuntimeCheckpoint, SearchQuery, SessionBinding,
+    THREAD_LIST_LIMIT_MAX, TURN_LIST_LIMIT_MAX, Thread, ThreadCursor, ThreadListLimit, ThreadState,
+    ThreadTitle, Turn, TurnCursor, TurnListLimit, TurnState,
 };
 
 pub use id::{

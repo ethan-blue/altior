@@ -1,7 +1,8 @@
-//! Deterministic in-repo fixture child process for ACP runtime testing (P1.2).
+//! Deterministic in-repo fixture child process for ACP runtime testing (P1.2 / P1.4).
 //!
 //! Speaks ACP v1 JSON-RPC over stdin/stdout without timers, sleeps, or network.
-//! Controlled by the `ALTIOR_ACP_MOCK_SCENARIO` environment variable or `--scenario` arg.
+//! Controlled by the `ALTIOR_ACP_MOCK_SCENARIO` environment variable, `--scenario` arg,
+//! or binary executable filename matching.
 
 use std::io::{BufRead, BufReader, Write as _};
 
@@ -27,6 +28,18 @@ fn main() {
                     .and_then(|n| n.to_str())
                     .unwrap_or("")
                     .to_ascii_lowercase();
+                if file_name.contains("agent_a")
+                    || file_name.contains("agent-a")
+                    || file_name.contains("agent_full")
+                {
+                    return Ok("agent_a_full".to_owned());
+                }
+                if file_name.contains("agent_b")
+                    || file_name.contains("agent-b")
+                    || file_name.contains("agent_minimal")
+                {
+                    return Ok("agent_b_minimal".to_owned());
+                }
                 if file_name.contains("permission") {
                     return Ok("permission_flow".to_owned());
                 }
@@ -48,6 +61,261 @@ fn main() {
         .unwrap_or_else(|_| "prompt_streaming".to_owned());
 
     run_scenario(&scenario);
+}
+
+fn extract_prompt_text(val: &serde_json::Value) -> String {
+    let mut out = String::new();
+    if let Some(blocks) = val
+        .get("params")
+        .and_then(|p| p.get("prompt"))
+        .and_then(|pr| pr.as_array())
+    {
+        for block in blocks {
+            if let Some(text) = block.get("text").and_then(|t| t.as_str()) {
+                out.push_str(text);
+            }
+        }
+    }
+    out
+}
+
+#[allow(clippy::too_many_lines)]
+fn run_agent_a_full<R: BufRead, W: std::io::Write, E: std::io::Write>(
+    reader: &mut R,
+    stdout: &mut W,
+    stderr: &mut E,
+) {
+    if std::env::var("ALTIOR_REQUIRE_SECRET").as_deref() == Ok("1")
+        && std::env::var("ALTIOR_TEST_SECRET").as_deref() != Ok(SECRET_CANARY)
+    {
+        let _ = stderr.write_all(b"secret missing or mismatched\n");
+        let _ = stderr.flush();
+        std::process::exit(1);
+    }
+
+    let mut active_session_id = "mock-session-a".to_owned();
+
+    // 1. initialize
+    let Some(line) = read_line_opt(reader) else {
+        return;
+    };
+    let id = extract_id(&line);
+    writeln_flush(
+        stdout,
+        &format!(
+            r#"{{"jsonrpc":"2.0","id":{id},"result":{{"protocolVersion":1,"agentCapabilities":{{"loadSession":true,"steer":false}}}}}}"#
+        ),
+    );
+
+    // Multi-request loop
+    while let Some(line) = read_line_opt(reader) {
+        let val: serde_json::Value = match serde_json::from_str(&line) {
+            Ok(v) => v,
+            Err(_) => return,
+        };
+
+        let req_id = extract_id(&line);
+        let method = val.get("method").and_then(|m| m.as_str()).unwrap_or("");
+
+        match method {
+            "session/new" => {
+                active_session_id = String::from("mock-session-a");
+                writeln_flush(
+                    stdout,
+                    &format!(
+                        r#"{{"jsonrpc":"2.0","id":{req_id},"result":{{"sessionId":"{active_session_id}"}}}}"#
+                    ),
+                );
+            }
+            "session/load" => {
+                if let Some(sess_id) = val
+                    .get("params")
+                    .and_then(|p| p.get("sessionId"))
+                    .and_then(|s| s.as_str())
+                {
+                    active_session_id = String::from(sess_id);
+                }
+                writeln_flush(
+                    stdout,
+                    &format!(
+                        r#"{{"jsonrpc":"2.0","id":{req_id},"result":{{"sessionId":"{active_session_id}"}}}}"#
+                    ),
+                );
+            }
+            "session/prompt" => {
+                let prompt_text = extract_prompt_text(&val);
+
+                if prompt_text.contains("[TRIGGER_SECRET_CHECK]")
+                    && std::env::var("ALTIOR_REQUIRE_SECRET").as_deref() == Ok("1")
+                    && std::env::var("ALTIOR_TEST_SECRET").as_deref() != Ok(SECRET_CANARY)
+                {
+                    let _ = stderr.write_all(b"secret missing or mismatched\n");
+                    let _ = stderr.flush();
+                    std::process::exit(1);
+                }
+
+                if prompt_text.contains("[TRIGGER_PERMISSION]")
+                    || prompt_text.to_lowercase().contains("permission")
+                {
+                    // Send permission request to client
+                    writeln_flush(
+                        stdout,
+                        &format!(
+                            r#"{{"jsonrpc":"2.0","id":77,"method":"session/request_permission","params":{{"sessionId":"{active_session_id}","toolCall":{{"toolCallId":"tc-perm-1","status":"pending"}},"options":[{{"optionId":"allow","name":"Allow"}}]}}}}"#
+                        ),
+                    );
+
+                    // Read client's answer to permission request
+                    let Some(_answer) = read_line_opt(reader) else {
+                        return;
+                    };
+
+                    // Emit delta
+                    writeln_flush(
+                        stdout,
+                        &format!(
+                            r#"{{"jsonrpc":"2.0","method":"session/update","params":{{"sessionId":"{active_session_id}","update":{{"sessionUpdate":"agent_message_chunk","content":{{"type":"text","text":"Permission granted. Done."}}}}}}}}"#
+                        ),
+                    );
+
+                    // Finish prompt turn
+                    writeln_flush(
+                        stdout,
+                        &format!(
+                            r#"{{"jsonrpc":"2.0","id":{req_id},"result":{{"stopReason":"end_turn"}}}}"#
+                        ),
+                    );
+                } else {
+                    // Normal prompt streaming
+                    writeln_flush(
+                        stdout,
+                        &format!(
+                            r#"{{"jsonrpc":"2.0","method":"session/update","params":{{"sessionId":"{active_session_id}","update":{{"sessionUpdate":"agent_message_chunk","content":{{"type":"text","text":"Agent A response: {prompt_text}"}}}}}}}}"#
+                        ),
+                    );
+                    writeln_flush(
+                        stdout,
+                        &format!(
+                            r#"{{"jsonrpc":"2.0","id":{req_id},"result":{{"stopReason":"end_turn"}}}}"#
+                        ),
+                    );
+                }
+            }
+            // `session/cancel` (one-way notification) and unknown methods are ignored.
+            _ => {}
+        }
+    }
+}
+
+fn run_agent_b_minimal<R: BufRead, W: std::io::Write>(reader: &mut R, stdout: &mut W) {
+    let mut active_session_id = "mock-session-b".to_owned();
+
+    // 1. initialize: loadSession = false
+    let Some(line) = read_line_opt(reader) else {
+        return;
+    };
+    let id = extract_id(&line);
+    writeln_flush(
+        stdout,
+        &format!(
+            r#"{{"jsonrpc":"2.0","id":{id},"result":{{"protocolVersion":1,"agentCapabilities":{{"loadSession":false,"steer":false}}}}}}"#
+        ),
+    );
+
+    // Multi-request loop
+    while let Some(line) = read_line_opt(reader) {
+        let val: serde_json::Value = match serde_json::from_str(&line) {
+            Ok(v) => v,
+            Err(_) => return,
+        };
+
+        let req_id = extract_id(&line);
+        let method = val.get("method").and_then(|m| m.as_str()).unwrap_or("");
+
+        match method {
+            "session/new" => {
+                active_session_id = String::from("mock-session-b");
+                writeln_flush(
+                    stdout,
+                    &format!(
+                        r#"{{"jsonrpc":"2.0","id":{req_id},"result":{{"sessionId":"{active_session_id}"}}}}"#
+                    ),
+                );
+            }
+            "session/load" => {
+                // session/load not supported for agent B
+                writeln_flush(
+                    stdout,
+                    &format!(
+                        r#"{{"jsonrpc":"2.0","id":{req_id},"error":{{"code":-32601,"message":"session/load not supported"}}}}"#
+                    ),
+                );
+            }
+            "session/prompt" => {
+                let prompt_text = extract_prompt_text(&val);
+
+                if prompt_text.contains("[TRIGGER_CRASH]")
+                    || prompt_text.to_lowercase().contains("crash")
+                {
+                    // Emit first delta then exit(42)
+                    writeln_flush(
+                        stdout,
+                        &format!(
+                            r#"{{"jsonrpc":"2.0","method":"session/update","params":{{"sessionId":"{active_session_id}","update":{{"sessionUpdate":"agent_message_chunk","content":{{"type":"text","text":"About to crash..."}}}}}}}}"#
+                        ),
+                    );
+                    std::process::exit(42);
+                } else if prompt_text.contains("[TRIGGER_CANCEL]")
+                    || prompt_text.to_lowercase().contains("cancel")
+                {
+                    // Emit first delta then wait for cancel notification without sleep
+                    writeln_flush(
+                        stdout,
+                        &format!(
+                            r#"{{"jsonrpc":"2.0","method":"session/update","params":{{"sessionId":"{active_session_id}","update":{{"sessionUpdate":"agent_message_chunk","content":{{"type":"text","text":"Working on cancelable task..."}}}}}}}}"#
+                        ),
+                    );
+
+                    // Wait for cancel notification (session/cancel)
+                    loop {
+                        let Some(cancel_line) = read_line_opt(reader) else {
+                            return;
+                        };
+                        if let Ok(c_val) = serde_json::from_str::<serde_json::Value>(&cancel_line)
+                            && let Some(c_method) = c_val.get("method").and_then(|m| m.as_str())
+                            && (c_method == "session/cancel" || cancel_line.contains("cancel"))
+                        {
+                            break;
+                        }
+                    }
+
+                    // Respond with cancelled
+                    writeln_flush(
+                        stdout,
+                        &format!(
+                            r#"{{"jsonrpc":"2.0","id":{req_id},"result":{{"stopReason":"cancelled"}}}}"#
+                        ),
+                    );
+                } else {
+                    // Normal prompt streaming
+                    writeln_flush(
+                        stdout,
+                        &format!(
+                            r#"{{"jsonrpc":"2.0","method":"session/update","params":{{"sessionId":"{active_session_id}","update":{{"sessionUpdate":"agent_message_chunk","content":{{"type":"text","text":"Agent B response: {prompt_text}"}}}}}}}}"#
+                        ),
+                    );
+                    writeln_flush(
+                        stdout,
+                        &format!(
+                            r#"{{"jsonrpc":"2.0","id":{req_id},"result":{{"stopReason":"end_turn"}}}}"#
+                        ),
+                    );
+                }
+            }
+            // `session/cancel` (one-way notification) and unknown methods are ignored.
+            _ => {}
+        }
+    }
 }
 
 fn run_prompt_streaming_protocol<R: BufRead, W: std::io::Write>(reader: &mut R, stdout: &mut W) {
@@ -98,6 +366,14 @@ fn run_scenario(scenario: &str) {
     let mut stderr = std::io::stderr().lock();
 
     match scenario {
+        "agent_a_full" => {
+            run_agent_a_full(&mut reader, &mut stdout, &mut stderr);
+        }
+
+        "agent_b_minimal" => {
+            run_agent_b_minimal(&mut reader, &mut stdout);
+        }
+
         "prompt_streaming" => {
             run_prompt_streaming_protocol(&mut reader, &mut stdout);
         }
@@ -342,18 +618,18 @@ fn run_scenario(scenario: &str) {
     }
 }
 
-fn read_line<R: BufRead>(reader: &mut R) -> String {
+fn read_line_opt<R: BufRead>(reader: &mut R) -> Option<String> {
     let mut line = String::new();
     match reader.read_line(&mut line) {
-        Ok(0) => {
-            // Parent closed stdin (EOF) or disconnected. Exit immediately.
-            std::process::exit(0);
-        }
-        Ok(_) => line,
-        Err(_) => {
-            // Read error (e.g. broken pipe). Exit immediately.
-            std::process::exit(0);
-        }
+        Ok(n) if n > 0 => Some(line),
+        Ok(_) | Err(_) => None,
+    }
+}
+
+fn read_line<R: BufRead>(reader: &mut R) -> String {
+    match read_line_opt(reader) {
+        Some(line) => line,
+        None => std::process::exit(0),
     }
 }
 
@@ -375,5 +651,71 @@ fn writeln_flush<W: std::io::Write>(writer: &mut W, line: &str) {
     }
     if writer.flush().is_err() {
         std::process::exit(0);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Cursor;
+
+    #[test]
+    fn test_agent_a_full_scenario_session_and_permission() {
+        let input = concat!(
+            r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":1}}"#,
+            "\n",
+            r#"{"jsonrpc":"2.0","id":2,"method":"session/new","params":{"cwd":"/tmp"}}"#,
+            "\n",
+            r#"{"jsonrpc":"2.0","id":3,"method":"session/prompt","params":{"sessionId":"mock-session-a","prompt":[{"type":"text","text":"[TRIGGER_PERMISSION] run tool"}]}}"#,
+            "\n",
+            r#"{"jsonrpc":"2.0","id":77,"result":{"optionId":"allow"}}"#,
+            "\n",
+            r#"{"jsonrpc":"2.0","id":4,"method":"session/prompt","params":{"sessionId":"mock-session-a","prompt":[{"type":"text","text":"normal follow up"}]}}"#,
+            "\n",
+            r#"{"jsonrpc":"2.0","id":5,"method":"session/load","params":{"sessionId":"resumed-sess-1","cwd":"/tmp"}}"#,
+            "\n"
+        );
+
+        let mut reader = BufReader::new(Cursor::new(input));
+        let mut stdout = Vec::new();
+        let mut stderr = Vec::new();
+
+        run_agent_a_full(&mut reader, &mut stdout, &mut stderr);
+
+        let output_str = String::from_utf8(stdout).unwrap();
+        assert!(output_str.contains(r#""loadSession":true"#));
+        assert!(output_str.contains(r#""sessionId":"mock-session-a""#));
+        assert!(output_str.contains(r#""method":"session/request_permission""#));
+        assert!(output_str.contains(r#""Permission granted. Done.""#));
+        assert!(output_str.contains(r#""Agent A response: normal follow up""#));
+        assert!(output_str.contains(r#""sessionId":"resumed-sess-1""#));
+    }
+
+    #[test]
+    fn test_agent_b_minimal_scenario_cancel_and_prompt() {
+        let input = concat!(
+            r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":1}}"#,
+            "\n",
+            r#"{"jsonrpc":"2.0","id":2,"method":"session/new","params":{"cwd":"/tmp"}}"#,
+            "\n",
+            r#"{"jsonrpc":"2.0","id":3,"method":"session/prompt","params":{"sessionId":"mock-session-b","prompt":[{"type":"text","text":"[TRIGGER_CANCEL] long task"}]}}"#,
+            "\n",
+            r#"{"jsonrpc":"2.0","method":"session/cancel","params":{"sessionId":"mock-session-b"}}"#,
+            "\n",
+            r#"{"jsonrpc":"2.0","id":4,"method":"session/prompt","params":{"sessionId":"mock-session-b","prompt":[{"type":"text","text":"normal task"}]}}"#,
+            "\n"
+        );
+
+        let mut reader = BufReader::new(Cursor::new(input));
+        let mut stdout = Vec::new();
+
+        run_agent_b_minimal(&mut reader, &mut stdout);
+
+        let output_str = String::from_utf8(stdout).unwrap();
+        assert!(output_str.contains(r#""loadSession":false"#));
+        assert!(output_str.contains(r#""sessionId":"mock-session-b""#));
+        assert!(output_str.contains(r#""Working on cancelable task...""#));
+        assert!(output_str.contains(r#""stopReason":"cancelled""#));
+        assert!(output_str.contains(r#""Agent B response: normal task""#));
     }
 }

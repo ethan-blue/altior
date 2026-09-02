@@ -477,6 +477,18 @@ and Windows Job Object hierarchy. P1.4 Acceptance Journey is the next milestone.
 Exit: this journey passes for two ACP agents. Terminal, Codex app-server,
 Altior-native execution, multi-agent delegation, and sync are not P1 scope.
 
+Status: **complete (ADR 0016)**. All eight steps run as a single E2E test
+against a real daemon process, real named pipe, persistent SQLite, and two
+mock ACP agent binaries (`p14_acceptance_journey.rs`, ~1.2 s, no sleeps).
+Enablers: harness binding v5 (`args`/`env_keys`/`secret_refs` persisted via
+`configure_agent`), default binding auto-selection on `open_thread`, default
+discovery path parity with the Tauri shell, and three journey-hardening fixes
+(daemon close observability, typed `KnownEvent` mapping for
+permission/cancel/fail, and interruptible prompt reads so silent agents can be
+cancelled). Deferred to P1.5+/P5: real third-party dual ACP agents on a clean
+OS profile, OS secret manager (DPAPI/Keychain), signed installers, Windows Job
+Object hierarchy.
+
 ## P2: Personal identity and memory
 
 - implement identity documents above ACP

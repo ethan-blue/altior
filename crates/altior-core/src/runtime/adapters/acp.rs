@@ -8,7 +8,6 @@
 
 use std::collections::BTreeMap;
 use std::fmt;
-use std::path::Path;
 use std::str::FromStr;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -17,11 +16,11 @@ use std::thread::JoinHandle;
 use altior_acp::messages::{ContentBlock, StopReason};
 use altior_acp::{
     AcpChild, AcpError, AcpRuntime, AgentEvent, EnvVarValue, LaunchConfig, NegotiatedCapabilities,
-    NoSecretsResolver, NormalizedEvent, RpcId, SecretResolver,
+    NoSecretsResolver, NormalizedEvent, RpcId, SecretRef, SecretResolver,
 };
 use altior_domain::{
-    AcpHarnessBinding, BoundedPath, DeliveryState, EventId, PermissionDecision,
-    PermissionDescription, PermissionKind, ProjectRef, ThreadId,
+    AcpHarnessBinding, DeliveryState, EventId, PermissionDecision, PermissionDescription,
+    PermissionKind, ProjectRef, ThreadId,
 };
 use altior_protocol::{CapabilitySet, CapabilitySupport};
 
@@ -135,7 +134,7 @@ impl AcpHarnessAdapter {
         binding: &AcpHarnessBinding,
         project: Option<&ProjectRef>,
     ) -> Result<AcpChild, HarnessError> {
-        let mut launch_config = parse_launch_config(&binding.command, project)?;
+        let mut launch_config = parse_launch_config(binding, project)?;
         for (k, v) in &self.launch_env {
             match v {
                 EnvVarValue::Literal(lit) => {
@@ -576,27 +575,33 @@ fn run_session_worker(
 }
 
 fn parse_launch_config(
-    command: &BoundedPath,
+    binding: &AcpHarnessBinding,
     project: Option<&ProjectRef>,
 ) -> Result<LaunchConfig, HarnessError> {
-    let raw = command.as_str();
-    let mut config = if Path::new(raw).exists() {
-        LaunchConfig::new(raw).map_err(|e| HarnessError::SpawnFailed(e.to_string()))?
-    } else {
-        let parts: Vec<&str> = raw.split_whitespace().collect();
-        if let Some((first, rest)) = parts.split_first() {
-            let mut cfg =
-                LaunchConfig::new(*first).map_err(|e| HarnessError::SpawnFailed(e.to_string()))?;
-            for arg in rest {
-                cfg = cfg
-                    .with_arg(*arg)
-                    .map_err(|e| HarnessError::SpawnFailed(e.to_string()))?;
-            }
-            cfg
-        } else {
-            LaunchConfig::new(raw).map_err(|e| HarnessError::SpawnFailed(e.to_string()))?
-        }
-    };
+    let mut config = LaunchConfig::new(binding.command.as_str())
+        .map_err(|e| HarnessError::SpawnFailed(e.to_string()))?;
+
+    for arg in &binding.args {
+        config = config
+            .with_arg(arg.as_str())
+            .map_err(|e| HarnessError::SpawnFailed(e.to_string()))?;
+    }
+
+    if binding.env_keys.len() != binding.secret_refs.len() {
+        return Err(HarnessError::SpawnFailed(format!(
+            "mismatch between env_keys count ({}) and secret_refs count ({})",
+            binding.env_keys.len(),
+            binding.secret_refs.len()
+        )));
+    }
+
+    for (key, sref) in binding.env_keys.iter().zip(binding.secret_refs.iter()) {
+        let secret_ref =
+            SecretRef::new(sref.as_str()).map_err(|e| HarnessError::SpawnFailed(e.to_string()))?;
+        config = config
+            .with_secret_env(key.as_str(), secret_ref)
+            .map_err(|e| HarnessError::SpawnFailed(e.to_string()))?;
+    }
 
     if let Some(proj) = project {
         config = config

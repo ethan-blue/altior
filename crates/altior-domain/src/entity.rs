@@ -33,6 +33,24 @@ const MAX_LABEL_BYTES: usize = 256;
 /// Maximum path length in bytes.
 const MAX_PATH_BYTES: usize = 4096;
 
+/// Maximum number of arguments in a harness binding.
+pub const MAX_HARNESS_ARGS_COUNT: usize = 256;
+
+/// Maximum length of a single harness argument in bytes (64 KiB).
+pub const MAX_HARNESS_ARG_BYTES: usize = 64 * 1024;
+
+/// Maximum number of environment variable keys in a harness binding.
+pub const MAX_HARNESS_ENV_KEYS_COUNT: usize = 256;
+
+/// Maximum length of an environment variable key in bytes.
+pub const MAX_HARNESS_ENV_KEY_BYTES: usize = 256;
+
+/// Maximum number of secret references in a harness binding.
+pub const MAX_HARNESS_SECRET_REFS_COUNT: usize = 256;
+
+/// Maximum length of an opaque secret reference in bytes.
+pub const MAX_HARNESS_SECRET_REF_BYTES: usize = 256;
+
 /// A bounded display name validated at construction.
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[serde(try_from = "String", into = "String")]
@@ -277,6 +295,208 @@ impl fmt::Display for BoundedPath {
     }
 }
 
+/// A bounded argument in a harness launch invocation.
+#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[serde(try_from = "String", into = "String")]
+pub struct HarnessArg(String);
+
+impl HarnessArg {
+    /// The byte-cap of a single harness argument (64 KiB).
+    #[must_use]
+    pub const fn capacity() -> usize {
+        MAX_HARNESS_ARG_BYTES
+    }
+
+    /// Returns the argument as a string slice.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl TryFrom<&str> for HarnessArg {
+    type Error = EntityError;
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        if value.len() > MAX_HARNESS_ARG_BYTES {
+            return Err(EntityError::HarnessArgTooLong {
+                length: value.len(),
+                max: MAX_HARNESS_ARG_BYTES,
+            });
+        }
+        Ok(Self(value.to_owned()))
+    }
+}
+
+impl TryFrom<String> for HarnessArg {
+    type Error = EntityError;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        if value.len() > MAX_HARNESS_ARG_BYTES {
+            return Err(EntityError::HarnessArgTooLong {
+                length: value.len(),
+                max: MAX_HARNESS_ARG_BYTES,
+            });
+        }
+        Ok(Self(value))
+    }
+}
+
+impl From<HarnessArg> for String {
+    fn from(value: HarnessArg) -> Self {
+        value.0
+    }
+}
+
+impl fmt::Display for HarnessArg {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+/// A bounded, validated environment variable key.
+///
+/// Invariant: non-empty, byte length <= 256, valid identifier characters
+/// (`[a-zA-Z_][a-zA-Z0-9_]*`).
+#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[serde(try_from = "String", into = "String")]
+pub struct HarnessEnvKey(String);
+
+impl HarnessEnvKey {
+    /// The byte-cap of an environment variable key.
+    #[must_use]
+    pub const fn capacity() -> usize {
+        MAX_HARNESS_ENV_KEY_BYTES
+    }
+
+    /// Returns the environment variable key as a string slice.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    fn is_valid_key(s: &str) -> bool {
+        if s.is_empty() {
+            return false;
+        }
+        let mut chars = s.chars();
+        match chars.next() {
+            Some(c) if c.is_ascii_alphabetic() || c == '_' => {}
+            _ => return false,
+        }
+        chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
+    }
+}
+
+impl TryFrom<&str> for HarnessEnvKey {
+    type Error = EntityError;
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        let trimmed = value.trim();
+        if trimmed.is_empty() {
+            return Err(EntityError::EmptyHarnessEnvKey);
+        }
+        if trimmed.len() > MAX_HARNESS_ENV_KEY_BYTES {
+            return Err(EntityError::HarnessEnvKeyTooLong {
+                length: trimmed.len(),
+                max: MAX_HARNESS_ENV_KEY_BYTES,
+            });
+        }
+        if !Self::is_valid_key(trimmed) {
+            return Err(EntityError::InvalidHarnessEnvKey);
+        }
+        Ok(Self(trimmed.to_owned()))
+    }
+}
+
+impl TryFrom<String> for HarnessEnvKey {
+    type Error = EntityError;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        Self::try_from(value.as_str())
+    }
+}
+
+impl From<HarnessEnvKey> for String {
+    fn from(value: HarnessEnvKey) -> Self {
+        value.0
+    }
+}
+
+impl fmt::Display for HarnessEnvKey {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+/// An opaque reference to a platform secret.
+///
+/// Plaintext secrets must never be held in this type or serialized (ADR 0006, ADR 0014).
+#[derive(Clone, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[serde(try_from = "String", into = "String")]
+pub struct HarnessSecretRef(String);
+
+impl HarnessSecretRef {
+    /// The byte-cap of a secret reference identifier.
+    #[must_use]
+    pub const fn capacity() -> usize {
+        MAX_HARNESS_SECRET_REF_BYTES
+    }
+
+    /// Returns the secret reference identifier as a string slice.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl TryFrom<&str> for HarnessSecretRef {
+    type Error = EntityError;
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        let trimmed = value.trim();
+        if trimmed.is_empty() {
+            return Err(EntityError::EmptyHarnessSecretRef);
+        }
+        if trimmed.len() > MAX_HARNESS_SECRET_REF_BYTES {
+            return Err(EntityError::HarnessSecretRefTooLong {
+                length: trimmed.len(),
+                max: MAX_HARNESS_SECRET_REF_BYTES,
+            });
+        }
+        if trimmed.chars().any(char::is_control) {
+            return Err(EntityError::InvalidHarnessSecretRef);
+        }
+        Ok(Self(trimmed.to_owned()))
+    }
+}
+
+impl TryFrom<String> for HarnessSecretRef {
+    type Error = EntityError;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        Self::try_from(value.as_str())
+    }
+}
+
+impl From<HarnessSecretRef> for String {
+    fn from(value: HarnessSecretRef) -> Self {
+        value.0
+    }
+}
+
+impl fmt::Display for HarnessSecretRef {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl fmt::Debug for HarnessSecretRef {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_tuple("HarnessSecretRef").field(&self.0).finish()
+    }
+}
+
 /// A device-local ACP harness binding: the executable path and arguments
 /// needed to launch an ACP agent process.
 ///
@@ -293,8 +513,73 @@ pub struct AcpHarnessBinding {
     pub label: DisplayName,
     /// The executable path.
     pub command: BoundedPath,
+    /// Command-line arguments.
+    pub args: Vec<HarnessArg>,
+    /// Environment variable keys to pass.
+    pub env_keys: Vec<HarnessEnvKey>,
+    /// Opaque secret references (never plaintext secrets).
+    pub secret_refs: Vec<HarnessSecretRef>,
     /// When the binding was created.
     pub created_at: UnixMillis,
+}
+
+impl AcpHarnessBinding {
+    /// Creates and validates a new [`AcpHarnessBinding`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`EntityError`] if arguments, environment keys, or secret references exceed bounds.
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        id: HarnessBindingId,
+        agent_profile_id: AgentProfileId,
+        label: DisplayName,
+        command: BoundedPath,
+        args: Vec<HarnessArg>,
+        env_keys: Vec<HarnessEnvKey>,
+        secret_refs: Vec<HarnessSecretRef>,
+        created_at: UnixMillis,
+    ) -> Result<Self, EntityError> {
+        let binding = Self {
+            id,
+            agent_profile_id,
+            label,
+            command,
+            args,
+            env_keys,
+            secret_refs,
+            created_at,
+        };
+        binding.validate()?;
+        Ok(binding)
+    }
+
+    /// Validates list count bounds.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`EntityError`] if list count exceeds bounds.
+    pub fn validate(&self) -> Result<(), EntityError> {
+        if self.args.len() > MAX_HARNESS_ARGS_COUNT {
+            return Err(EntityError::HarnessArgsCountExceeded {
+                count: self.args.len(),
+                max: MAX_HARNESS_ARGS_COUNT,
+            });
+        }
+        if self.env_keys.len() > MAX_HARNESS_ENV_KEYS_COUNT {
+            return Err(EntityError::HarnessEnvKeysCountExceeded {
+                count: self.env_keys.len(),
+                max: MAX_HARNESS_ENV_KEYS_COUNT,
+            });
+        }
+        if self.secret_refs.len() > MAX_HARNESS_SECRET_REFS_COUNT {
+            return Err(EntityError::HarnessSecretRefsCountExceeded {
+                count: self.secret_refs.len(),
+                max: MAX_HARNESS_SECRET_REFS_COUNT,
+            });
+        }
+        Ok(())
+    }
 }
 
 // ── Thread lifecycle ───────────────────────────────────────────────
@@ -1675,6 +1960,56 @@ pub enum EntityError {
         /// The maximum allowed value.
         max: u32,
     },
+    /// A harness argument exceeds the byte cap.
+    HarnessArgTooLong {
+        /// The actual length.
+        length: usize,
+        /// The maximum allowed length.
+        max: usize,
+    },
+    /// A harness binding arguments list exceeds the count cap.
+    HarnessArgsCountExceeded {
+        /// The actual count.
+        count: usize,
+        /// The maximum allowed count.
+        max: usize,
+    },
+    /// A harness environment variable key is empty after trimming.
+    EmptyHarnessEnvKey,
+    /// A harness environment variable key exceeds the byte cap.
+    HarnessEnvKeyTooLong {
+        /// The actual length in bytes.
+        length: usize,
+        /// The maximum allowed length.
+        max: usize,
+    },
+    /// A harness environment variable key contains invalid characters.
+    InvalidHarnessEnvKey,
+    /// A harness binding environment variable keys list exceeds the count cap.
+    HarnessEnvKeysCountExceeded {
+        /// The actual count.
+        count: usize,
+        /// The maximum allowed count.
+        max: usize,
+    },
+    /// A harness secret reference is empty after trimming.
+    EmptyHarnessSecretRef,
+    /// A harness secret reference exceeds the byte cap.
+    HarnessSecretRefTooLong {
+        /// The actual length in bytes.
+        length: usize,
+        /// The maximum allowed length.
+        max: usize,
+    },
+    /// A harness secret reference contains invalid characters.
+    InvalidHarnessSecretRef,
+    /// A harness binding secret references list exceeds the count cap.
+    HarnessSecretRefsCountExceeded {
+        /// The actual count.
+        count: usize,
+        /// The maximum allowed count.
+        max: usize,
+    },
     /// A project reference list page size is outside the valid range.
     ProjectRefListLimitOutOfRange {
         /// The rejected value.
@@ -1751,6 +2086,7 @@ pub enum EntityError {
 }
 
 impl fmt::Display for EntityError {
+    #[allow(clippy::too_many_lines)]
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::EmptyDisplayName => write!(f, "display name is empty"),
@@ -1801,6 +2137,28 @@ impl fmt::Display for EntityError {
             }
             Self::HarnessBindingListLimitOutOfRange { value, max } => {
                 write!(f, "harness binding list limit {value} is outside 1..={max}")
+            }
+            Self::HarnessArgTooLong { length, max } => {
+                write!(f, "harness arg is {length} bytes, limit is {max}")
+            }
+            Self::HarnessArgsCountExceeded { count, max } => {
+                write!(f, "harness args count {count} exceeds limit {max}")
+            }
+            Self::EmptyHarnessEnvKey => write!(f, "harness env key is empty"),
+            Self::HarnessEnvKeyTooLong { length, max } => {
+                write!(f, "harness env key is {length} bytes, limit is {max}")
+            }
+            Self::InvalidHarnessEnvKey => write!(f, "invalid harness env key"),
+            Self::HarnessEnvKeysCountExceeded { count, max } => {
+                write!(f, "harness env keys count {count} exceeds limit {max}")
+            }
+            Self::EmptyHarnessSecretRef => write!(f, "harness secret ref is empty"),
+            Self::HarnessSecretRefTooLong { length, max } => {
+                write!(f, "harness secret ref is {length} bytes, limit is {max}")
+            }
+            Self::InvalidHarnessSecretRef => write!(f, "invalid harness secret ref"),
+            Self::HarnessSecretRefsCountExceeded { count, max } => {
+                write!(f, "harness secret refs count {count} exceeds limit {max}")
             }
             Self::ProjectRefListLimitOutOfRange { value, max } => {
                 write!(f, "project ref list limit {value} is outside 1..={max}")
@@ -2408,5 +2766,176 @@ mod tests {
         };
 
         assert_eq!(binding.opaque_session_id.as_str(), "sess_123");
+    }
+
+    #[test]
+    fn harness_arg_bounds_and_validations() {
+        assert!(HarnessArg::try_from("--verbose").is_ok());
+        assert_eq!(HarnessArg::try_from("").unwrap().as_str(), "");
+        let max_arg = "a".repeat(MAX_HARNESS_ARG_BYTES);
+        assert!(HarnessArg::try_from(max_arg.as_str()).is_ok());
+        let too_long_arg = "a".repeat(MAX_HARNESS_ARG_BYTES + 1);
+        assert!(matches!(
+            HarnessArg::try_from(too_long_arg.as_str()),
+            Err(EntityError::HarnessArgTooLong { .. })
+        ));
+
+        let arg = HarnessArg::try_from("--opt=1").unwrap();
+        let json = serde_json::to_string(&arg).unwrap();
+        let decoded: HarnessArg = serde_json::from_str(&json).unwrap();
+        assert_eq!(decoded, arg);
+    }
+
+    #[test]
+    fn harness_env_key_bounds_and_validations() {
+        assert_eq!(
+            HarnessEnvKey::try_from("  MY_ENV_VAR_1  ")
+                .unwrap()
+                .as_str(),
+            "MY_ENV_VAR_1"
+        );
+        assert_eq!(
+            HarnessEnvKey::try_from(""),
+            Err(EntityError::EmptyHarnessEnvKey)
+        );
+        assert_eq!(
+            HarnessEnvKey::try_from("   "),
+            Err(EntityError::EmptyHarnessEnvKey)
+        );
+        let max_key = "A".repeat(MAX_HARNESS_ENV_KEY_BYTES);
+        assert!(HarnessEnvKey::try_from(max_key.as_str()).is_ok());
+        let too_long_key = "A".repeat(MAX_HARNESS_ENV_KEY_BYTES + 1);
+        assert!(matches!(
+            HarnessEnvKey::try_from(too_long_key.as_str()),
+            Err(EntityError::HarnessEnvKeyTooLong { .. })
+        ));
+
+        // Valid identifier check
+        assert_eq!(
+            HarnessEnvKey::try_from("INVALID=KEY"),
+            Err(EntityError::InvalidHarnessEnvKey)
+        );
+        assert_eq!(
+            HarnessEnvKey::try_from("123_STARTS_WITH_DIGIT"),
+            Err(EntityError::InvalidHarnessEnvKey)
+        );
+        assert_eq!(
+            HarnessEnvKey::try_from("HAS SPACE"),
+            Err(EntityError::InvalidHarnessEnvKey)
+        );
+        assert!(HarnessEnvKey::try_from("_UNDERSCORE_OK").is_ok());
+
+        let key = HarnessEnvKey::try_from("OPENAI_API_KEY").unwrap();
+        let json = serde_json::to_string(&key).unwrap();
+        let decoded: HarnessEnvKey = serde_json::from_str(&json).unwrap();
+        assert_eq!(decoded, key);
+    }
+
+    #[test]
+    fn harness_secret_ref_bounds_and_validations() {
+        assert_eq!(
+            HarnessSecretRef::try_from("  sec_ref_openai_01  ")
+                .unwrap()
+                .as_str(),
+            "sec_ref_openai_01"
+        );
+        assert_eq!(
+            HarnessSecretRef::try_from(""),
+            Err(EntityError::EmptyHarnessSecretRef)
+        );
+        assert_eq!(
+            HarnessSecretRef::try_from("   "),
+            Err(EntityError::EmptyHarnessSecretRef)
+        );
+        let max_ref = "s".repeat(MAX_HARNESS_SECRET_REF_BYTES);
+        assert!(HarnessSecretRef::try_from(max_ref.as_str()).is_ok());
+        let too_long_ref = "s".repeat(MAX_HARNESS_SECRET_REF_BYTES + 1);
+        assert!(matches!(
+            HarnessSecretRef::try_from(too_long_ref.as_str()),
+            Err(EntityError::HarnessSecretRefTooLong { .. })
+        ));
+
+        // Rejects control chars
+        assert_eq!(
+            HarnessSecretRef::try_from("sec\x00ref"),
+            Err(EntityError::InvalidHarnessSecretRef)
+        );
+
+        let sref = HarnessSecretRef::try_from("sec_key_123").unwrap();
+        let json = serde_json::to_string(&sref).unwrap();
+        let decoded: HarnessSecretRef = serde_json::from_str(&json).unwrap();
+        assert_eq!(decoded, sref);
+    }
+
+    #[test]
+    fn acp_harness_binding_list_count_bounds() {
+        let binding = AcpHarnessBinding::new(
+            HarnessBindingId::from_str("hsb_fixture000000001").unwrap(),
+            AgentProfileId::from_str("agp_fixture000000001").unwrap(),
+            DisplayName::try_from("Test Binding").unwrap(),
+            BoundedPath::try_from("/usr/bin/agent").unwrap(),
+            vec![HarnessArg::try_from("--arg1").unwrap()],
+            vec![HarnessEnvKey::try_from("ENV_KEY").unwrap()],
+            vec![HarnessSecretRef::try_from("sec_ref").unwrap()],
+            UnixMillis::from_millis(1_700_000_000_000),
+        )
+        .unwrap();
+        assert_eq!(binding.args.len(), 1);
+        assert_eq!(binding.env_keys.len(), 1);
+        assert_eq!(binding.secret_refs.len(), 1);
+
+        // Args count exceeded
+        let too_many_args: Vec<HarnessArg> = (0..=MAX_HARNESS_ARGS_COUNT)
+            .map(|i| HarnessArg::try_from(format!("-a{i}").as_str()).unwrap())
+            .collect();
+        assert!(matches!(
+            AcpHarnessBinding::new(
+                HarnessBindingId::from_str("hsb_fixture000000001").unwrap(),
+                AgentProfileId::from_str("agp_fixture000000001").unwrap(),
+                DisplayName::try_from("Test Binding").unwrap(),
+                BoundedPath::try_from("/usr/bin/agent").unwrap(),
+                too_many_args,
+                vec![],
+                vec![],
+                UnixMillis::from_millis(1_700_000_000_000),
+            ),
+            Err(EntityError::HarnessArgsCountExceeded { .. })
+        ));
+
+        // Env keys count exceeded
+        let too_many_env: Vec<HarnessEnvKey> = (0..=MAX_HARNESS_ENV_KEYS_COUNT)
+            .map(|i| HarnessEnvKey::try_from(format!("ENV_{i}").as_str()).unwrap())
+            .collect();
+        assert!(matches!(
+            AcpHarnessBinding::new(
+                HarnessBindingId::from_str("hsb_fixture000000001").unwrap(),
+                AgentProfileId::from_str("agp_fixture000000001").unwrap(),
+                DisplayName::try_from("Test Binding").unwrap(),
+                BoundedPath::try_from("/usr/bin/agent").unwrap(),
+                vec![],
+                too_many_env,
+                vec![],
+                UnixMillis::from_millis(1_700_000_000_000),
+            ),
+            Err(EntityError::HarnessEnvKeysCountExceeded { .. })
+        ));
+
+        // Secret refs count exceeded
+        let too_many_sec: Vec<HarnessSecretRef> = (0..=MAX_HARNESS_SECRET_REFS_COUNT)
+            .map(|i| HarnessSecretRef::try_from(format!("sec_{i}").as_str()).unwrap())
+            .collect();
+        assert!(matches!(
+            AcpHarnessBinding::new(
+                HarnessBindingId::from_str("hsb_fixture000000001").unwrap(),
+                AgentProfileId::from_str("agp_fixture000000001").unwrap(),
+                DisplayName::try_from("Test Binding").unwrap(),
+                BoundedPath::try_from("/usr/bin/agent").unwrap(),
+                vec![],
+                vec![],
+                too_many_sec,
+                UnixMillis::from_millis(1_700_000_000_000),
+            ),
+            Err(EntityError::HarnessSecretRefsCountExceeded { .. })
+        ));
     }
 }

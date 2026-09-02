@@ -20,6 +20,10 @@ const COMPAT_DESKTOP_NEWER: &str =
 const COMPAT_CORE_NEWER: &str = include_str!("../fixtures/handshake-compat-core-newer-v1.json");
 const COMMAND_PING: &str = include_str!("../fixtures/command-ping-v1.json");
 const COMMAND_CANCEL: &str = include_str!("../fixtures/command-cancel-v1.json");
+const COMMAND_CONFIGURE_AGENT: &str = include_str!("../fixtures/command-configure-agent-v1.json");
+const COMMAND_CONFIGURE_AGENT_WITH_BINDING: &str =
+    include_str!("../fixtures/command-configure-agent-with-binding-v1.json");
+const COMMAND_TEST_HARNESS: &str = include_str!("../fixtures/command-test-harness-v1.json");
 const COMMAND_SUBSCRIBE: &str = include_str!("../fixtures/command-subscribe-v1.json");
 const SNAPSHOT_THREAD: &str = include_str!("../fixtures/snapshot-thread-v1.json");
 const GREETING_CORE: &str = include_str!("../fixtures/greeting-core-v1.json");
@@ -98,6 +102,50 @@ fn fixture_cancel_command_roundtrips_and_targets_its_operation() {
         "op_fixture000000005"
     );
     assert_eq!(envelope.to_json().unwrap(), COMMAND_CANCEL.trim());
+}
+
+#[test]
+fn fixture_configure_agent_without_binding_roundtrips_and_validates() {
+    let envelope = CommandEnvelope::from_json(COMMAND_CONFIGURE_AGENT).unwrap();
+    envelope.validate(&EnvelopeLimits::default()).unwrap();
+    let payload = envelope.configure_agent_payload().unwrap();
+    payload.validate().unwrap();
+    assert_eq!(payload.display_name, "Coding Assistant");
+    assert!(payload.binding.is_none());
+    assert_eq!(envelope.to_json().unwrap(), COMMAND_CONFIGURE_AGENT.trim());
+}
+
+#[test]
+fn fixture_configure_agent_with_binding_roundtrips_and_validates() {
+    let envelope = CommandEnvelope::from_json(COMMAND_CONFIGURE_AGENT_WITH_BINDING).unwrap();
+    envelope.validate(&EnvelopeLimits::default()).unwrap();
+    let payload = envelope.configure_agent_payload().unwrap();
+    payload.validate().unwrap();
+    assert_eq!(payload.display_name, "Coding Assistant");
+    let binding = payload.binding.expect("expected binding payload");
+    assert_eq!(binding.program, "C:\\Agents\\acp-agent.exe");
+    assert_eq!(binding.args, vec!["--acp"]);
+    assert_eq!(binding.env_keys, vec!["ANTHROPIC_API_KEY"]);
+    assert_eq!(binding.secret_refs, vec!["sec_ref_openai_01"]);
+    assert_eq!(binding.label.as_deref(), Some("Local ACP Agent"));
+    assert_eq!(
+        envelope.to_json().unwrap(),
+        COMMAND_CONFIGURE_AGENT_WITH_BINDING.trim()
+    );
+}
+
+#[test]
+fn fixture_test_harness_command_roundtrips_and_validates() {
+    let envelope = CommandEnvelope::from_json(COMMAND_TEST_HARNESS).unwrap();
+    envelope.validate(&EnvelopeLimits::default()).unwrap();
+    let payload = envelope.test_harness_binding_payload().unwrap();
+    payload.validate().unwrap();
+    assert_eq!(payload.program, "C:\\Agents\\acp-agent.exe");
+    assert_eq!(payload.args, vec!["--acp"]);
+    assert_eq!(payload.env_keys, vec!["PATH"]);
+    assert_eq!(payload.secret_refs, vec!["sec_ref_openai_01"]);
+    assert_eq!(payload.label.as_deref(), Some("Local ACP Agent"));
+    assert_eq!(envelope.to_json().unwrap(), COMMAND_TEST_HARNESS.trim());
 }
 
 #[test]

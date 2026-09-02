@@ -10,7 +10,7 @@ export type TestHarnessBindingCommand = {
 /**
  * Existing harness binding ID, if probing an already saved binding.
  */
-harness_binding_id: string | null,
+harness_binding_id?: string | null,
 /**
  * Program executable path (bounded to 4096 bytes).
  */
@@ -30,4 +30,4 @@ secret_refs: Array<string>,
 /**
  * Optional label for the binding.
  */
-label: string | null, };
+label?: string | null, };

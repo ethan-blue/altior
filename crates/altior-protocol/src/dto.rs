@@ -11,10 +11,13 @@
 use serde::{Deserialize, Serialize};
 
 use altior_domain::{
-    AcpHarnessBinding, AgentProfile, DeliveryState, EventId, HarnessBindingId, OperationId,
-    Permission, ProjectId, Thread, ThreadCursor, ThreadId, ThreadState, Turn, TurnCursor, TurnId,
-    TurnState, UnixMillis,
+    AcpHarnessBinding, AgentProfile, AgentProfileId, BoundedPath, DeliveryState, DisplayName,
+    EventId, HarnessArg, HarnessBindingId, HarnessEnvKey, HarnessSecretRef, MAX_HARNESS_ARGS_COUNT,
+    MAX_HARNESS_ENV_KEYS_COUNT, MAX_HARNESS_SECRET_REFS_COUNT, OperationId, Permission, ProjectId,
+    Thread, ThreadCursor, ThreadId, ThreadState, Turn, TurnCursor, TurnId, TurnState, UnixMillis,
 };
+
+use crate::error::ProtocolError;
 
 fn thread_state_to_str(s: ThreadState) -> &'static str {
     match s {
@@ -274,9 +277,13 @@ impl From<&AcpHarnessBinding> for HarnessBindingDto {
             id: b.id.clone(),
             agent_profile_id: b.agent_profile_id.clone(),
             program: b.command.as_str().to_owned(),
-            args: Vec::new(),
-            env_keys: Vec::new(),
-            secret_refs: Vec::new(),
+            args: b.args.iter().map(|a| a.as_str().to_owned()).collect(),
+            env_keys: b.env_keys.iter().map(|k| k.as_str().to_owned()).collect(),
+            secret_refs: b
+                .secret_refs
+                .iter()
+                .map(|r| r.as_str().to_owned())
+                .collect(),
             label: b.label.as_str().to_owned(),
             created_at: b.created_at,
         }
@@ -286,6 +293,138 @@ impl From<&AcpHarnessBinding> for HarnessBindingDto {
 impl From<AcpHarnessBinding> for HarnessBindingDto {
     fn from(b: AcpHarnessBinding) -> Self {
         Self::from(&b)
+    }
+}
+
+/// Serializable configuration for creating or updating a harness launch binding.
+///
+/// NOTE: In accordance with ADR 0006 / ADR 0014, plaintext secrets are NEVER
+/// stored or transferred. `secret_refs` holds only opaque reference keys.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(
+    feature = "dto-export",
+    derive(ts_rs::TS),
+    ts(export, export_to = "../../../apps/desktop/src/ipc/dto/")
+)]
+pub struct HarnessBindingConfigDto {
+    /// Identity of this harness binding, if updating an existing binding.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "dto-export", ts(as = "Option<String>"))]
+    pub harness_binding_id: Option<HarnessBindingId>,
+    /// Associated agent profile, if scoped.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "dto-export", ts(as = "Option<String>"))]
+    pub agent_profile_id: Option<AgentProfileId>,
+    /// Executable program path (bounded).
+    pub program: String,
+    /// Command-line arguments.
+    #[serde(default)]
+    pub args: Vec<String>,
+    /// Environment variable keys to pass.
+    #[serde(default)]
+    pub env_keys: Vec<String>,
+    /// Opaque secret references (NEVER plaintext values).
+    #[serde(default)]
+    pub secret_refs: Vec<String>,
+    /// Human-readable label.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+}
+
+impl HarnessBindingConfigDto {
+    /// Validates the harness binding configuration against domain bounds and invariants.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ProtocolError`] if program path, label, args, env keys, or secret refs
+    /// exceed domain bounds, or if the number of environment keys does not match the
+    /// number of secret references.
+    pub fn validate(&self) -> Result<(), ProtocolError> {
+        let _ = BoundedPath::try_from(self.program.as_str())?;
+        if let Some(label) = &self.label {
+            let _ = DisplayName::try_from(label.as_str())?;
+        }
+        if self.args.len() > MAX_HARNESS_ARGS_COUNT {
+            return Err(altior_domain::EntityError::HarnessArgsCountExceeded {
+                count: self.args.len(),
+                max: MAX_HARNESS_ARGS_COUNT,
+            }
+            .into());
+        }
+        for arg in &self.args {
+            let _ = HarnessArg::try_from(arg.as_str())?;
+        }
+        if self.env_keys.len() > MAX_HARNESS_ENV_KEYS_COUNT {
+            return Err(altior_domain::EntityError::HarnessEnvKeysCountExceeded {
+                count: self.env_keys.len(),
+                max: MAX_HARNESS_ENV_KEYS_COUNT,
+            }
+            .into());
+        }
+        for key in &self.env_keys {
+            let _ = HarnessEnvKey::try_from(key.as_str())?;
+        }
+        if self.secret_refs.len() > MAX_HARNESS_SECRET_REFS_COUNT {
+            return Err(altior_domain::EntityError::HarnessSecretRefsCountExceeded {
+                count: self.secret_refs.len(),
+                max: MAX_HARNESS_SECRET_REFS_COUNT,
+            }
+            .into());
+        }
+        for r in &self.secret_refs {
+            let _ = HarnessSecretRef::try_from(r.as_str())?;
+        }
+        if self.env_keys.len() != self.secret_refs.len() {
+            return Err(ProtocolError::HarnessEnvSecretMismatch {
+                env_keys_count: self.env_keys.len(),
+                secret_refs_count: self.secret_refs.len(),
+            });
+        }
+        Ok(())
+    }
+}
+
+impl From<&AcpHarnessBinding> for HarnessBindingConfigDto {
+    fn from(b: &AcpHarnessBinding) -> Self {
+        Self {
+            harness_binding_id: Some(b.id.clone()),
+            agent_profile_id: Some(b.agent_profile_id.clone()),
+            program: b.command.as_str().to_owned(),
+            args: b.args.iter().map(|a| a.as_str().to_owned()).collect(),
+            env_keys: b.env_keys.iter().map(|k| k.as_str().to_owned()).collect(),
+            secret_refs: b
+                .secret_refs
+                .iter()
+                .map(|r| r.as_str().to_owned())
+                .collect(),
+            label: Some(b.label.as_str().to_owned()),
+        }
+    }
+}
+
+impl From<AcpHarnessBinding> for HarnessBindingConfigDto {
+    fn from(b: AcpHarnessBinding) -> Self {
+        Self::from(&b)
+    }
+}
+
+impl From<&HarnessBindingDto> for HarnessBindingConfigDto {
+    fn from(dto: &HarnessBindingDto) -> Self {
+        Self {
+            harness_binding_id: Some(dto.id.clone()),
+            agent_profile_id: Some(dto.agent_profile_id.clone()),
+            program: dto.program.clone(),
+            args: dto.args.clone(),
+            env_keys: dto.env_keys.clone(),
+            secret_refs: dto.secret_refs.clone(),
+            label: Some(dto.label.clone()),
+        }
+    }
+}
+
+impl From<HarnessBindingDto> for HarnessBindingConfigDto {
+    fn from(dto: HarnessBindingDto) -> Self {
+        Self::from(&dto)
     }
 }
 
@@ -501,6 +640,9 @@ mod tests {
             id: "hsb_fixture000000004".parse().unwrap(),
             agent_profile_id: "agp_fixture000000003".parse().unwrap(),
             command: BoundedPath::try_from("C:\\bin\\agent.exe").unwrap(),
+            args: vec![HarnessArg::try_from("--stdio").unwrap()],
+            env_keys: vec![HarnessEnvKey::try_from("ANTHROPIC_API_KEY").unwrap()],
+            secret_refs: vec![HarnessSecretRef::try_from("sec_ref_openai_01").unwrap()],
             label: DisplayName::try_from("Local ACP").unwrap(),
             created_at: UnixMillis::from_millis(1_700_000_000_000),
         };
@@ -511,5 +653,43 @@ mod tests {
         assert!(json.contains("sec_ref_openai_01"));
         let decoded: HarnessBindingDto = serde_json::from_str(&json).unwrap();
         assert_eq!(decoded, dto);
+    }
+
+    #[test]
+    fn harness_binding_config_dto_validates_and_roundtrips() {
+        let config = HarnessBindingConfigDto {
+            harness_binding_id: Some("hsb_fixture000000004".parse().unwrap()),
+            agent_profile_id: Some("agp_fixture000000003".parse().unwrap()),
+            program: "C:\\bin\\agent.exe".to_string(),
+            args: vec!["--stdio".to_string()],
+            env_keys: vec!["ANTHROPIC_API_KEY".to_string()],
+            secret_refs: vec!["sec_ref_openai_01".to_string()],
+            label: Some("Local ACP".to_string()),
+        };
+        config.validate().unwrap();
+        let json = serde_json::to_string(&config).unwrap();
+        assert!(!json.contains("sk-"));
+        let decoded: HarnessBindingConfigDto = serde_json::from_str(&json).unwrap();
+        assert_eq!(decoded, config);
+    }
+
+    #[test]
+    fn harness_binding_config_dto_rejects_env_secret_mismatch() {
+        let config = HarnessBindingConfigDto {
+            harness_binding_id: None,
+            agent_profile_id: None,
+            program: "agent.exe".to_string(),
+            args: vec![],
+            env_keys: vec!["KEY1".to_string(), "KEY2".to_string()],
+            secret_refs: vec!["sec_ref_1".to_string()],
+            label: None,
+        };
+        assert!(matches!(
+            config.validate(),
+            Err(ProtocolError::HarnessEnvSecretMismatch {
+                env_keys_count: 2,
+                secret_refs_count: 1,
+            })
+        ));
     }
 }

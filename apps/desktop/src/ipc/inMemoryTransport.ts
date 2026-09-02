@@ -7,6 +7,8 @@ import type { DiagnosticsCommand } from "./dto/DiagnosticsCommand";
 import type { EventBody } from "./dto/EventBody";
 import type { EventEnvelope } from "./dto/EventEnvelope";
 import type { GetHistoryCommand } from "./dto/GetHistoryCommand";
+import type { HarnessBindingConfigDto } from "./dto/HarnessBindingConfigDto";
+import type { HarnessBindingDto } from "./dto/HarnessBindingDto";
 import type { NegotiatedHandshake } from "./dto/NegotiatedHandshake";
 import type { OpenThreadCommand } from "./dto/OpenThreadCommand";
 import type { PermissionDto } from "./dto/PermissionDto";
@@ -15,6 +17,7 @@ import type { SearchThreadsCommand } from "./dto/SearchThreadsCommand";
 import type { Sequence } from "./dto/Sequence";
 import type { SnapshotEnvelope } from "./dto/SnapshotEnvelope";
 import type { StartTurnCommand } from "./dto/StartTurnCommand";
+import type { TestHarnessBindingCommand } from "./dto/TestHarnessBindingCommand";
 import type { ThreadDto } from "./dto/ThreadDto";
 import type { ThreadHistoryResponseDto } from "./dto/ThreadHistoryResponseDto";
 import type { ThreadListResponseDto } from "./dto/ThreadListResponseDto";
@@ -43,6 +46,8 @@ export interface InMemoryTransportOptions {
   readonly initialThreads?: readonly ThreadFixture[];
   /** Initial agent profile fixtures. */
   readonly initialAgents?: readonly AgentProfileDto[];
+  /** Initial harness bindings. */
+  readonly initialBindings?: readonly HarnessBindingDto[];
   /** Include 100k row huge thread in default fixtures. */
   readonly includeHugeThread?: boolean;
   /** Automatically stream reply deltas on start_turn. Defaults to true. */
@@ -68,6 +73,29 @@ const DEFAULT_AGENTS_DTO: AgentProfileDto[] = [
   },
 ];
 
+const DEFAULT_BINDINGS_DTO: HarnessBindingDto[] = [
+  {
+    id: "bin_alpha_01",
+    agent_profile_id: "agent-alpha",
+    program: "/usr/local/bin/acp-alpha",
+    args: ["--mode", "server"],
+    env_keys: ["ANTHROPIC_API_KEY"],
+    secret_refs: ["vault://acp-alpha"],
+    label: "Alpha ACP",
+    created_at: 1700000000000,
+  },
+  {
+    id: "bin_beta_01",
+    agent_profile_id: "agent-beta",
+    program: "/usr/local/bin/acp-beta",
+    args: ["--mode", "server"],
+    env_keys: ["ANTHROPIC_API_KEY"],
+    secret_refs: ["vault://acp-beta"],
+    label: "Beta ACP",
+    created_at: 1700000000000,
+  },
+];
+
 /**
  * In-memory `CoreTransport` for tests and the fixture shell.
  *
@@ -84,10 +112,13 @@ export class InMemoryTransport implements CoreTransport {
   #status: TransportStatus;
   #commandHandler?: (command: CommandEnvelope) => Promise<unknown> | unknown;
   #nextSeq: number;
+  #threadSeq = 0;
+  #bindingSeq = 0;
   readonly #autoStreamReplies: boolean;
 
   #threadFixtures: ThreadFixture[];
   #agents: AgentProfileDto[];
+  #bindings = new Map<string, HarnessBindingDto>();
 
   constructor(options: InMemoryTransportOptions = {}) {
     this.#negotiated = options.negotiated ?? negotiatedFixture;
@@ -105,6 +136,11 @@ export class InMemoryTransport implements CoreTransport {
     this.#agents = options.initialAgents
       ? [...options.initialAgents]
       : [...DEFAULT_AGENTS_DTO];
+
+    const bindingsToSeed = options.initialBindings ?? DEFAULT_BINDINGS_DTO;
+    for (const binding of bindingsToSeed) {
+      this.#bindings.set(binding.id, structuredClone(binding));
+    }
   }
 
   /** Commands sent through `send` or `command`, in dispatch order. */
@@ -120,6 +156,11 @@ export class InMemoryTransport implements CoreTransport {
   /** Active agent profiles in memory. */
   get agents(): readonly AgentProfileDto[] {
     return this.#agents;
+  }
+
+  /** Active harness bindings in memory. */
+  get bindings(): ReadonlyMap<string, HarnessBindingDto> {
+    return this.#bindings;
   }
 
   /** Active threads in memory. */
@@ -272,12 +313,12 @@ export class InMemoryTransport implements CoreTransport {
 
   #getThreadSummaries(): ThreadSummaryDto[] {
     return this.#threadFixtures.map((fixture) => {
+      const matchingAgent =
+        this.#agents.find((a) => a.display_name === fixture.agent || a.id === fixture.agent) ??
+        this.#agents[0];
       const thread: ThreadDto = {
         id: fixture.id,
-        agent_profile_id:
-          this.#agents.find((a) => a.display_name === fixture.agent)?.id ??
-          this.#agents[0]?.id ??
-          "agent-alpha",
+        agent_profile_id: matchingAgent?.id ?? "agent-alpha",
         title: fixture.title,
         state: fixture.pinned ? "pinned" : "open",
         project_id: null,
@@ -384,12 +425,13 @@ export class InMemoryTransport implements CoreTransport {
           allThreads(true).find((t) => t.id === threadId) ??
           this.#threadFixtures[0];
 
+        const matchingAgent =
+          this.#agents.find((a) => a.display_name === fixture?.agent || a.id === fixture?.agent) ??
+          this.#agents[0];
+
         const threadDto: ThreadDto = {
           id: fixture?.id ?? threadId,
-          agent_profile_id:
-            this.#agents.find((a) => a.display_name === fixture?.agent)?.id ??
-            this.#agents[0]?.id ??
-            "agent-alpha",
+          agent_profile_id: matchingAgent?.id ?? "agent-alpha",
           title: fixture?.title ?? "Conversation",
           state: fixture?.pinned ? "pinned" : "open",
           project_id: null,
@@ -397,10 +439,7 @@ export class InMemoryTransport implements CoreTransport {
           updated_at: 1700000000000,
         };
 
-        const agentProfile =
-          this.#agents.find((a) => a.id === threadDto.agent_profile_id) ??
-          this.#agents[0] ??
-          null;
+        const agentProfile = matchingAgent ?? null;
 
         const turns: TurnDto[] = (fixture?.rows ?? [])
           .filter((r) => r.kind === "user-message" || r.kind === "assistant-message")
@@ -481,7 +520,7 @@ export class InMemoryTransport implements CoreTransport {
 
       case "create_thread": {
         const payload = command.payload as CreateThreadCommand | null;
-        const newId = `thread-${Date.now()}`;
+        const newId = `thread-${++this.#threadSeq}_${Date.now()}`;
         const agentName =
           this.#agents.find((a) => a.id === payload?.agent_profile_id)?.display_name ??
           payload?.agent_profile_id ??
@@ -511,22 +550,60 @@ export class InMemoryTransport implements CoreTransport {
 
       case "configure_agent": {
         const payload = command.payload as ConfigureAgentCommand | null;
+        const agentId =
+          payload?.agent_profile_id ??
+          `agent-${(payload?.display_name ?? "agent").toLowerCase().replace(/[^a-z0-9]+/g, "-")}-${Date.now().toString(36)}`;
+
         const profile: AgentProfileDto = {
-          id:
-            payload?.agent_profile_id ??
-            `agent-${(payload?.display_name ?? "agent").toLowerCase().replace(/[^a-z0-9]+/g, "-")}-${Date.now().toString(36)}`,
+          id: agentId,
           display_name: payload?.display_name ?? "Custom Agent",
           preferred_harness: payload?.preferred_harness ?? "acp",
           memory_mode: payload?.memory_mode ?? "session",
           created_at: Date.now(),
           updated_at: Date.now(),
         };
-        this.#agents.push(profile);
-        return { ok: true, profile };
+
+        const existingIdx = this.#agents.findIndex((a) => a.id === agentId);
+        if (existingIdx >= 0) {
+          this.#agents[existingIdx] = profile;
+        } else {
+          this.#agents.push(profile);
+        }
+
+        let warning: string | null = null;
+        let bindingDto: HarnessBindingDto | null = null;
+        if (payload?.binding) {
+          const bindingConfig: HarnessBindingConfigDto = payload.binding;
+          const bindingId =
+            bindingConfig.harness_binding_id ?? `bin_${++this.#bindingSeq}_${Date.now().toString(36)}`;
+          bindingDto = {
+            id: bindingId,
+            agent_profile_id: bindingConfig.agent_profile_id ?? agentId,
+            program: bindingConfig.program,
+            args: [...bindingConfig.args],
+            env_keys: [...bindingConfig.env_keys],
+            secret_refs: [...bindingConfig.secret_refs],
+            label: bindingConfig.label ?? profile.display_name,
+            created_at: Date.now(),
+          };
+          this.#bindings.set(bindingId, bindingDto);
+        } else {
+          warning = "Legacy configuration without harness binding";
+        }
+
+        return { ok: true, profile, binding: bindingDto, warning };
       }
 
       case "test_harness_binding": {
-        return { ok: true, diagnostics: null };
+        const payload = command.payload as TestHarnessBindingCommand | null;
+        if (!payload?.program && !payload?.harness_binding_id) {
+          throw new Error("Missing required harness binding program executable");
+        }
+        return {
+          ok: true,
+          diagnostics: null,
+          probed_binding_id: payload?.harness_binding_id ?? null,
+        };
       }
 
       case "start_turn": {

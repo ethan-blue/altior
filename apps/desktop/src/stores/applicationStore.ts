@@ -30,6 +30,7 @@ import type { CreateThreadCommand } from "../ipc/dto/CreateThreadCommand";
 import type { DiagnosticsCommand } from "../ipc/dto/DiagnosticsCommand";
 import type { EventEnvelope } from "../ipc/dto/EventEnvelope";
 import type { GetHistoryCommand } from "../ipc/dto/GetHistoryCommand";
+import type { HarnessBindingConfigDto } from "../ipc/dto/HarnessBindingConfigDto";
 import type { ListThreadsCommand } from "../ipc/dto/ListThreadsCommand";
 import type { NegotiatedHandshake } from "../ipc/dto/NegotiatedHandshake";
 import type { OpenThreadCommand } from "../ipc/dto/OpenThreadCommand";
@@ -55,8 +56,36 @@ export interface AgentProfile {
   readonly model: string;
   /** OPAQUE REFERENCE ONLY (e.g. vault://key-1, env:OPENAI_API_KEY). Plaintext is never stored. */
   readonly secretRef?: string;
+  readonly program?: string;
+  readonly args?: readonly string[];
+  readonly envKeys?: readonly string[];
+  readonly label?: string;
+  readonly bindingId?: string;
   readonly status: "ready" | "testing" | "error";
   readonly latencyMs?: number;
+}
+
+export interface OnboardAgentParams {
+  readonly name: string;
+  readonly provider?: string;
+  readonly model?: string;
+  readonly program?: string;
+  readonly args?: readonly string[] | string;
+  readonly envKeys?: readonly string[] | string;
+  readonly secretRef?: string;
+  readonly label?: string;
+  readonly bindingId?: string;
+}
+
+export interface TestAgentParams {
+  readonly provider?: string;
+  readonly model?: string;
+  readonly program?: string;
+  readonly args?: readonly string[] | string;
+  readonly envKeys?: readonly string[] | string;
+  readonly secretRef?: string;
+  readonly label?: string;
+  readonly bindingId?: string;
 }
 
 export type StreamStatus = "idle" | "live" | "replaying" | "ready";
@@ -82,6 +111,7 @@ export interface ApplicationState {
   readonly onboardingStatus: {
     readonly isTesting: boolean;
     readonly testResult: { success: boolean; latencyMs?: number; error?: string } | null;
+    readonly bindingId?: string;
   };
 
   readonly threads: readonly ThreadFixture[];
@@ -111,17 +141,8 @@ export interface ApplicationStore {
   // Agent Operations
   selectAgent(agentId: string): void;
   openOnboarding(open: boolean): void;
-  onboardAgent(params: {
-    name: string;
-    provider: string;
-    model: string;
-    secretRef?: string;
-  }): Promise<AgentProfile>;
-  testAgent(params: {
-    provider: string;
-    model: string;
-    secretRef?: string;
-  }): Promise<{ success: boolean; latencyMs?: number; error?: string }>;
+  onboardAgent(params: OnboardAgentParams): Promise<AgentProfile>;
+  testAgent(params: TestAgentParams): Promise<{ success: boolean; latencyMs?: number; error?: string }>;
 
   // Thread Operations
   selectThread(threadId: string): Promise<void>;
@@ -148,6 +169,11 @@ const DEFAULT_AGENTS: AgentProfile[] = [
     name: "alpha (ACP)",
     provider: "acp",
     model: "claude-3-7-sonnet",
+    program: "/usr/local/bin/acp-alpha",
+    args: ["--mode", "server"],
+    envKeys: ["ANTHROPIC_API_KEY"],
+    label: "Alpha ACP",
+    bindingId: "bin_alpha_01",
     secretRef: "vault://acp-alpha",
     status: "ready",
     latencyMs: 18,
@@ -157,6 +183,11 @@ const DEFAULT_AGENTS: AgentProfile[] = [
     name: "beta (ACP)",
     provider: "acp",
     model: "claude-3-5-sonnet",
+    program: "/usr/local/bin/acp-beta",
+    args: ["--mode", "server"],
+    envKeys: ["ANTHROPIC_API_KEY"],
+    label: "Beta ACP",
+    bindingId: "bin_beta_01",
     secretRef: "vault://acp-beta",
     status: "ready",
     latencyMs: 24,
@@ -164,6 +195,18 @@ const DEFAULT_AGENTS: AgentProfile[] = [
 ];
 
 const MAX_STREAM_LOG = 50;
+
+export function parseStringList(input?: readonly string[] | string): string[] {
+  if (!input) return [];
+  if (Array.isArray(input)) return [...input];
+  if (typeof input === "string") {
+    return input
+      .split(/[,\s]+/)
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0);
+  }
+  return [];
+}
 
 /**
  * Validates and converts raw secret input to an opaque reference token if necessary.
@@ -201,14 +244,18 @@ function isSnapshotEnvelope(data: unknown): data is SnapshotEnvelope {
 
 function threadSummaryToFixture(
   summary: ThreadSummaryDto,
+  agents: readonly AgentProfile[],
   existingRows: readonly TimelineRow[] = [],
 ): ThreadFixture {
   const status: ThreadStatus =
     summary.active_turn?.state === "active" ? "running" : "completed";
+  const agentProfile = agents.find(
+    (a) => a.id === summary.thread.agent_profile_id || a.name === summary.thread.agent_profile_id,
+  );
   return {
     id: summary.thread.id,
     title: summary.thread.title,
-    agent: summary.thread.agent_profile_id,
+    agent: agentProfile?.name ?? summary.thread.agent_profile_id,
     status,
     pinned: summary.thread.state === "pinned",
     rows: existingRows,
@@ -261,8 +308,12 @@ export function createApplicationStore(
     streamLog: [],
   };
 
-  let sendCounter = 0;
+  let opCounter = 0;
+  let promptCounter = 0;
+  let threadCounter = 0;
   let unsubscribeTransport: (() => void) | null = null;
+  let isRecovering = false;
+  let recoveryQueued = false;
 
   const notify = (): void => {
     for (const listener of listeners) {
@@ -486,6 +537,9 @@ export function createApplicationStore(
           activeTurn: null,
         }));
       }
+    } else if (body.kind === "stream.gap" || body.kind === "core.greeting" || body.kind === "core.restarted") {
+      // Automatic full snapshot recovery on stream gap or Core restart (ADR 0008, P1.3)
+      void triggerSnapshotRecovery();
     } else if (body.kind === "command.error") {
       const errBody = body as {
         kind: "command.error";
@@ -500,10 +554,34 @@ export function createApplicationStore(
     }
   };
 
+  const triggerSnapshotRecovery = async (): Promise<void> => {
+    if (isRecovering) {
+      recoveryQueued = true;
+      return;
+    }
+    isRecovering = true;
+    try {
+      await listThreadsFromCore();
+      const currentSelected = state.selectedThreadId;
+      if (currentSelected) {
+        await openThread(currentSelected);
+        await getHistory(currentSelected);
+      }
+    } catch {
+      // Retain fallback state on recovery error, avoid retry loop
+    } finally {
+      isRecovering = false;
+      if (recoveryQueued) {
+        recoveryQueued = false;
+        void triggerSnapshotRecovery();
+      }
+    }
+  };
+
   const listThreadsFromCore = async (): Promise<void> => {
     const envelope: CommandEnvelope = {
       protocol_version: state.negotiated?.selected_version ?? 1,
-      operation_id: `op_list_threads_${Date.now()}`,
+      operation_id: `op_list_threads_${++opCounter}_${Date.now()}`,
       kind: "list_threads",
       payload: { cursor: null, limit: 50 } as ListThreadsCommand,
       issued_at: Date.now(),
@@ -516,7 +594,7 @@ export function createApplicationStore(
         if (Array.isArray(listData.threads)) {
           const updatedThreads = listData.threads.map((s) => {
             const existing = state.threads.find((t) => t.id === s.thread.id);
-            return threadSummaryToFixture(s, existing?.rows ?? []);
+            return threadSummaryToFixture(s, state.agents, existing?.rows ?? []);
           });
           const existingExtras = state.threads.filter(
             (t) => !updatedThreads.some((u) => u.id === t.id),
@@ -540,7 +618,7 @@ export function createApplicationStore(
   const getRuntimeStatusFromCore = async (): Promise<void> => {
     const envelope: CommandEnvelope = {
       protocol_version: state.negotiated?.selected_version ?? 1,
-      operation_id: `op_runtime_status_${Date.now()}`,
+      operation_id: `op_runtime_status_${++opCounter}_${Date.now()}`,
       kind: "runtime_status",
       payload: { include_diagnostics: true } as RuntimeStatusCommand,
       issued_at: Date.now(),
@@ -556,7 +634,7 @@ export function createApplicationStore(
   const openThread = async (threadId: string): Promise<void> => {
     const envelope: CommandEnvelope = {
       protocol_version: state.negotiated?.selected_version ?? 1,
-      operation_id: `op_open_thread_${Date.now()}`,
+      operation_id: `op_open_thread_${++opCounter}_${Date.now()}`,
       kind: "open_thread",
       payload: { thread_id: threadId, history_limit: 100 } as OpenThreadCommand,
       issued_at: Date.now(),
@@ -579,7 +657,7 @@ export function createApplicationStore(
   ): Promise<void> => {
     const envelope: CommandEnvelope = {
       protocol_version: state.negotiated?.selected_version ?? 1,
-      operation_id: `op_get_history_${Date.now()}`,
+      operation_id: `op_get_history_${++opCounter}_${Date.now()}`,
       kind: "get_history",
       payload: {
         thread_id: threadId,
@@ -617,7 +695,7 @@ export function createApplicationStore(
   ): Promise<RuntimeDiagnosticsDto | null> => {
     const envelope: CommandEnvelope = {
       protocol_version: state.negotiated?.selected_version ?? 1,
-      operation_id: `op_diagnostics_${Date.now()}`,
+      operation_id: `op_diagnostics_${++opCounter}_${Date.now()}`,
       kind: "diagnostics",
       payload: {
         thread_id: threadId ?? null,
@@ -721,34 +799,52 @@ export function createApplicationStore(
     updateState((prev) => ({
       ...prev,
       isOnboardingOpen: open,
-      onboardingStatus: { isTesting: false, testResult: null },
+      onboardingStatus: { isTesting: false, testResult: null, bindingId: undefined },
     }));
   };
 
-  const onboardAgent = async (params: {
-    name: string;
-    provider: string;
-    model: string;
-    secretRef?: string;
-  }): Promise<AgentProfile> => {
+  const onboardAgent = async (params: OnboardAgentParams): Promise<AgentProfile> => {
     const sanitizedRef = sanitizeSecretRef(params.secretRef);
     const agentId = `agent-${params.name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}-${Date.now().toString(36)}`;
+    const provider = params.provider ?? "acp";
+    const model = params.model ?? "claude-3-7-sonnet";
+    const program = (params.program ?? provider).trim();
+    const args = parseStringList(params.args);
+    const envKeys = parseStringList(params.envKeys);
+    const label = (params.label ?? params.name).trim();
 
-    const preferredHarness = params.provider.toLowerCase().includes("acp")
-      ? "acp"
-      : params.provider.toLowerCase().includes("terminal")
-        ? "terminal"
-        : "native";
+    const preferredHarness = provider.toLowerCase().includes("terminal")
+      ? "terminal"
+      : provider.toLowerCase().includes("native")
+        ? "native"
+        : "acp";
+
+    // Reuse tested binding ID if available, otherwise generate new one
+    const bindingId =
+      params.bindingId ??
+      state.onboardingStatus.bindingId ??
+      `bin_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+
+    const bindingConfig: HarnessBindingConfigDto = {
+      harness_binding_id: bindingId,
+      agent_profile_id: agentId,
+      program,
+      args,
+      env_keys: envKeys,
+      secret_refs: sanitizedRef ? [sanitizedRef] : [],
+      label: label || params.name,
+    };
 
     const configureEnvelope: CommandEnvelope = {
       protocol_version: state.negotiated?.selected_version ?? 1,
-      operation_id: `op_configure_agent_${Date.now()}`,
+      operation_id: `op_configure_agent_${++opCounter}_${Date.now()}`,
       kind: "configure_agent",
       payload: {
         agent_profile_id: agentId,
         display_name: params.name,
         preferred_harness: preferredHarness,
         memory_mode: "session",
+        binding: bindingConfig,
       } as ConfigureAgentCommand,
       issued_at: Date.now(),
     };
@@ -758,8 +854,13 @@ export function createApplicationStore(
     const newAgent: AgentProfile = {
       id: agentId,
       name: params.name,
-      provider: params.provider,
-      model: params.model,
+      provider,
+      model,
+      program,
+      args,
+      envKeys,
+      label,
+      bindingId,
       secretRef: sanitizedRef,
       status: "ready",
     };
@@ -769,33 +870,53 @@ export function createApplicationStore(
       agents: [...prev.agents, newAgent],
       selectedAgentId: newAgent.id,
       isOnboardingOpen: false,
+      onboardingStatus: { isTesting: false, testResult: null, bindingId: undefined },
     }));
 
     return newAgent;
   };
 
-  const testAgent = async (params: {
-    provider: string;
-    model: string;
-    secretRef?: string;
-  }): Promise<{ success: boolean; latencyMs?: number; error?: string }> => {
+  const testAgent = async (
+    params: TestAgentParams,
+  ): Promise<{ success: boolean; latencyMs?: number; error?: string }> => {
     updateState((prev) => ({
       ...prev,
-      onboardingStatus: { isTesting: true, testResult: null },
+      onboardingStatus: { ...prev.onboardingStatus, isTesting: true, testResult: null },
     }));
 
+    const program = (params.program ?? params.provider ?? "").trim();
+    if (!program) {
+      const errorMsg = "Harness binding program is required";
+      const result = { success: false, error: errorMsg };
+      updateState((prev) => ({
+        ...prev,
+        error: `[INVALID_BINDING] ${errorMsg}`,
+        onboardingStatus: { ...prev.onboardingStatus, isTesting: false, testResult: result },
+      }));
+      return result;
+    }
+
     const sanitizedRef = sanitizeSecretRef(params.secretRef);
+    const args = parseStringList(params.args);
+    const envKeys = parseStringList(params.envKeys);
+    const label = (params.label ?? params.model ?? params.provider ?? "").trim() || null;
+
+    const bindingId =
+      params.bindingId ??
+      state.onboardingStatus.bindingId ??
+      `bin_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+
     const envelope: CommandEnvelope = {
       protocol_version: state.negotiated?.selected_version ?? 1,
-      operation_id: `op_test_harness_${Date.now()}`,
+      operation_id: `op_test_harness_${++opCounter}_${Date.now()}`,
       kind: "test_harness_binding",
       payload: {
-        harness_binding_id: null,
-        program: params.provider,
-        args: [],
-        env_keys: [],
+        harness_binding_id: bindingId,
+        program,
+        args,
+        env_keys: envKeys,
         secret_refs: sanitizedRef ? [sanitizedRef] : [],
-        label: params.model,
+        label,
       } as TestHarnessBindingCommand,
       issued_at: Date.now(),
     };
@@ -807,7 +928,7 @@ export function createApplicationStore(
       const result = { success: true, latencyMs };
       updateState((prev) => ({
         ...prev,
-        onboardingStatus: { isTesting: false, testResult: result },
+        onboardingStatus: { isTesting: false, testResult: result, bindingId },
       }));
       return result;
     } catch (err) {
@@ -815,7 +936,7 @@ export function createApplicationStore(
       const result = { success: false, error: errorMsg };
       updateState((prev) => ({
         ...prev,
-        onboardingStatus: { isTesting: false, testResult: result },
+        onboardingStatus: { isTesting: false, testResult: result, bindingId },
       }));
       return result;
     }
@@ -833,7 +954,7 @@ export function createApplicationStore(
     if (query) {
       const envelope: CommandEnvelope = {
         protocol_version: state.negotiated?.selected_version ?? 1,
-        operation_id: `op_search_threads_${Date.now()}`,
+        operation_id: `op_search_threads_${++opCounter}_${Date.now()}`,
         kind: "search_threads",
         payload: { query, limit: 50 } as SearchThreadsCommand,
         issued_at: Date.now(),
@@ -845,7 +966,7 @@ export function createApplicationStore(
           const listData = res.data as ThreadListResponseDto;
           const filtered = listData.threads.map((s) => {
             const existing = state.threads.find((t) => t.id === s.thread.id);
-            return threadSummaryToFixture(s, existing?.rows ?? []);
+            return threadSummaryToFixture(s, state.agents, existing?.rows ?? []);
           });
           updateState((prev) => ({ ...prev, threads: filtered }));
         }
@@ -868,7 +989,7 @@ export function createApplicationStore(
 
     const envelope: CommandEnvelope = {
       protocol_version: state.negotiated?.selected_version ?? 1,
-      operation_id: `op_create_thread_${Date.now()}`,
+      operation_id: `op_create_thread_${++opCounter}_${Date.now()}`,
       kind: "create_thread",
       payload: {
         agent_profile_id: targetAgentId,
@@ -878,7 +999,7 @@ export function createApplicationStore(
       issued_at: Date.now(),
     };
 
-    let threadId = `thread-${Date.now()}`;
+    let threadId = `thread-${++threadCounter}_${Date.now()}`;
     let finalTitle = title.trim() || "New conversation";
 
     try {
@@ -886,6 +1007,9 @@ export function createApplicationStore(
       if (res && "id" in res) {
         threadId = res.id;
         finalTitle = res.title;
+      } else if (res && "thread" in res && res.thread) {
+        threadId = res.thread.id;
+        finalTitle = res.thread.title;
       }
     } catch {
       // Fallback in-memory creation
@@ -918,8 +1042,8 @@ export function createApplicationStore(
     const trimmed = text.trim();
     if (!trimmed) return;
 
-    sendCounter += 1;
-    const turnIndex = sendCounter;
+    promptCounter += 1;
+    const turnIndex = promptCounter;
     const currentThreadId = state.selectedThreadId;
     const threadStore = getTimelineStore(currentThreadId);
 
@@ -997,7 +1121,7 @@ export function createApplicationStore(
 
     const envelope: CommandEnvelope = {
       protocol_version: state.negotiated?.selected_version ?? 1,
-      operation_id: `op_cancel_turn_${Date.now()}`,
+      operation_id: `op_cancel_turn_${++opCounter}_${Date.now()}`,
       kind: "cancel_turn",
       payload: {
         thread_id: active.threadId,
@@ -1031,7 +1155,7 @@ export function createApplicationStore(
 
     const envelope: CommandEnvelope = {
       protocol_version: state.negotiated?.selected_version ?? 1,
-      operation_id: `op_respond_permission_${Date.now()}`,
+      operation_id: `op_respond_permission_${++opCounter}_${Date.now()}`,
       kind: "respond_permission",
       payload: {
         event_id: rowId,

@@ -175,6 +175,9 @@ fn fixture_binding(id: &str, profile_id: &str) -> AcpHarnessBinding {
         agent_profile_id: AgentProfileId::from_str(profile_id).unwrap(),
         label: DisplayName::try_from("test-agent").unwrap(),
         command: altior_domain::BoundedPath::try_from("mock_agent").unwrap(),
+        args: Vec::new(),
+        env_keys: Vec::new(),
+        secret_refs: Vec::new(),
         created_at: now,
     }
 }

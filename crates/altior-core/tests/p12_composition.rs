@@ -178,6 +178,9 @@ fn setup_domain_records(
         agent_profile_id: agp_id.clone(),
         label: DisplayName::try_from("Mock ACP Binding").unwrap(),
         command: BoundedPath::try_from(exe_path).unwrap(),
+        args: Vec::new(),
+        env_keys: Vec::new(),
+        secret_refs: Vec::new(),
         created_at: UnixMillis::from_millis(BASE_MILLIS),
     };
     store.create_harness_binding(&binding).unwrap();

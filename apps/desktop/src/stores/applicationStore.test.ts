@@ -1,10 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { approvalThread, standardThread } from "../fixtures/timeline";
+import type { AgentProfileDto } from "../ipc/dto/AgentProfileDto";
+import type { CommandEnvelope } from "../ipc/dto/CommandEnvelope";
 import type { ConfigureAgentCommand } from "../ipc/dto/ConfigureAgentCommand";
 import type { CreateThreadCommand } from "../ipc/dto/CreateThreadCommand";
 import type { EventEnvelope } from "../ipc/dto/EventEnvelope";
 import type { OpenThreadCommand } from "../ipc/dto/OpenThreadCommand";
 import type { RespondPermissionCommand } from "../ipc/dto/RespondPermissionCommand";
+import type { Sequence } from "../ipc/dto/Sequence";
 import type { StartTurnCommand } from "../ipc/dto/StartTurnCommand";
 import type { TestHarnessBindingCommand } from "../ipc/dto/TestHarnessBindingCommand";
 import { InMemoryTransport } from "../ipc/inMemoryTransport";
@@ -124,6 +127,146 @@ describe("ApplicationStore", () => {
       const payload = testCmd?.payload as TestHarnessBindingCommand;
       expect(payload.program).toBe("/path/to/acp-binary");
       expect(payload.secret_refs).toEqual(["vault://test-key"]);
+    });
+
+    it("configures dual agents sequentially with full binding DTOs and retains tested binding ID", async () => {
+      const transport = new InMemoryTransport();
+      const store = createApplicationStore(transport);
+      await store.init();
+
+      // 1. Probe Agent A with test_harness_binding
+      const testResultA = await store.testAgent({
+        provider: "acp",
+        model: "claude-3-7-sonnet",
+        program: "/opt/bin/agent-alpha",
+        args: ["--mode", "server", "--port", "8001"],
+        envKeys: ["ANTHROPIC_API_KEY", "DEBUG"],
+        secretRef: "vault://sec-alpha-01",
+        label: "Alpha Primary Binding",
+      });
+      expect(testResultA.success).toBe(true);
+
+      const testCmdA = transport.sentCommands.find((c) => c.kind === "test_harness_binding");
+      expect(testCmdA).toBeDefined();
+      const testPayloadA = testCmdA?.payload as TestHarnessBindingCommand;
+      expect(testPayloadA.program).toBe("/opt/bin/agent-alpha");
+      expect(testPayloadA.args).toEqual(["--mode", "server", "--port", "8001"]);
+      expect(testPayloadA.env_keys).toEqual(["ANTHROPIC_API_KEY", "DEBUG"]);
+      expect(testPayloadA.secret_refs).toEqual(["vault://sec-alpha-01"]);
+      expect(testPayloadA.label).toBe("Alpha Primary Binding");
+      const probedBindingIdA = testPayloadA.harness_binding_id;
+      expect(probedBindingIdA).toBeTruthy();
+
+      // Save Agent A -> should use the exact same binding ID
+      const agentA = await store.onboardAgent({
+        name: "Agent Alpha Custom",
+        provider: "acp",
+        model: "claude-3-7-sonnet",
+        program: "/opt/bin/agent-alpha",
+        args: ["--mode", "server", "--port", "8001"],
+        envKeys: ["ANTHROPIC_API_KEY", "DEBUG"],
+        secretRef: "vault://sec-alpha-01",
+        label: "Alpha Primary Binding",
+      });
+
+      const configCmdA = transport.sentCommands.find((c) => c.kind === "configure_agent");
+      expect(configCmdA).toBeDefined();
+      const configPayloadA = configCmdA?.payload as ConfigureAgentCommand;
+      expect(configPayloadA.display_name).toBe("Agent Alpha Custom");
+      expect(configPayloadA.preferred_harness).toBe("acp");
+      expect(configPayloadA.binding).toBeDefined();
+      expect(configPayloadA.binding?.harness_binding_id).toBe(probedBindingIdA);
+      expect(configPayloadA.binding?.program).toBe("/opt/bin/agent-alpha");
+      expect(configPayloadA.binding?.args).toEqual(["--mode", "server", "--port", "8001"]);
+      expect(configPayloadA.binding?.env_keys).toEqual(["ANTHROPIC_API_KEY", "DEBUG"]);
+      expect(configPayloadA.binding?.secret_refs).toEqual(["vault://sec-alpha-01"]);
+      expect(configPayloadA.binding?.label).toBe("Alpha Primary Binding");
+
+      // 2. Configure Agent B (terminal harness)
+      const agentB = await store.onboardAgent({
+        name: "Agent Beta Custom",
+        provider: "terminal",
+        model: "gpt-4o",
+        program: "/opt/bin/agent-beta",
+        args: ["--interactive"],
+        envKeys: ["OPENAI_API_KEY"],
+        secretRef: "env:OPENAI_API_KEY",
+        label: "Beta Terminal Binding",
+      });
+
+      const configCmds = transport.sentCommands.filter((c) => c.kind === "configure_agent");
+      expect(configCmds).toHaveLength(2);
+      const configPayloadB = configCmds[1]?.payload as ConfigureAgentCommand;
+      expect(configPayloadB.display_name).toBe("Agent Beta Custom");
+      expect(configPayloadB.preferred_harness).toBe("terminal");
+      expect(configPayloadB.binding?.program).toBe("/opt/bin/agent-beta");
+      expect(configPayloadB.binding?.args).toEqual(["--interactive"]);
+      expect(configPayloadB.binding?.secret_refs).toEqual(["env:OPENAI_API_KEY"]);
+
+      // Verify both agents exist in application store state
+      const state = store.getState();
+      expect(state.agents.some((a) => a.id === agentA.id)).toBe(true);
+      expect(state.agents.some((a) => a.id === agentB.id)).toBe(true);
+      expect(state.selectedAgentId).toBe(agentB.id);
+
+      // Verify transport in-memory bindings map has both bindings
+      expect(transport.bindings.has(configPayloadA.binding!.harness_binding_id!)).toBe(true);
+      expect(transport.bindings.has(configPayloadB.binding!.harness_binding_id!)).toBe(true);
+    });
+
+    it("supports configure_agent without binding for backward compatibility", async () => {
+      const transport = new InMemoryTransport();
+      const store = createApplicationStore(transport);
+      await store.init();
+
+      const configureEnvelope: CommandEnvelope = {
+        protocol_version: 1,
+        operation_id: "op_legacy_config",
+        kind: "configure_agent",
+        payload: {
+          agent_profile_id: "agent-legacy",
+          display_name: "Legacy Agent",
+          preferred_harness: "acp",
+          memory_mode: "session",
+          binding: null,
+        } as ConfigureAgentCommand,
+        issued_at: Date.now(),
+      };
+
+      const res = await transport.command<{ ok: boolean; profile: AgentProfileDto; warning: string | null }>(
+        configureEnvelope,
+      );
+      expect(res.ok).toBe(true);
+      expect(res.profile.id).toBe("agent-legacy");
+      expect(res.warning).toContain("Legacy configuration without harness binding");
+      expect(transport.agents.some((a) => a.id === "agent-legacy")).toBe(true);
+    });
+
+    it("displays error notice when testing without required binding program", async () => {
+      const transport = new InMemoryTransport();
+      const store = createApplicationStore(transport);
+      await store.init();
+
+      const result = await store.testAgent({
+        provider: "",
+        program: "",
+        model: "claude-3-7-sonnet",
+      });
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("Harness binding program is required");
+      expect(store.getState().error).toContain("[INVALID_BINDING]");
+      expect(store.getState().onboardingStatus.testResult?.success).toBe(false);
+    });
+
+    it("shows onboarding modal when initialized on a clean profile with 0 agents", async () => {
+      const transport = new InMemoryTransport({ initialAgents: [] });
+      const store = createApplicationStore(transport, { initialAgents: [] });
+
+      await store.init();
+
+      expect(store.getState().agents).toHaveLength(0);
+      expect(store.getState().isOnboardingOpen).toBe(true);
     });
   });
 
@@ -427,7 +570,7 @@ describe("ApplicationStore", () => {
         operation_id: "op_err_1",
         thread_id: null,
         turn_id: null,
-        sequence: 40 as any,
+        sequence: 40 as Sequence,
         occurred_at: Date.now(),
         body: {
           kind: "command.error",
@@ -438,6 +581,96 @@ describe("ApplicationStore", () => {
       });
 
       expect(store.getState().error).toBe("[AGENT_NOT_FOUND] The requested agent does not exist");
+    });
+
+    it("automatically triggers list_threads and open_thread snapshot recovery when stream.gap is received", async () => {
+      const transport = new InMemoryTransport();
+      const store = createApplicationStore(transport);
+      await store.init();
+
+      // Clear previous commands count
+      const initialCount = transport.sentCommands.length;
+
+      // Deliver stream.gap event
+      store._handleEvent({
+        protocol_version: 1,
+        event_id: "evt_gap_1",
+        operation_id: null,
+        thread_id: null,
+        turn_id: null,
+        sequence: 50 as Sequence,
+        occurred_at: Date.now(),
+        body: {
+          kind: "stream.gap",
+          from: 45,
+        },
+      });
+
+      await new Promise((resolve) => setTimeout(resolve, 10));
+
+      const newCommands = transport.sentCommands.slice(initialCount);
+      const newKinds = newCommands.map((c) => c.kind);
+      expect(newKinds).toContain("list_threads");
+      expect(newKinds).toContain("open_thread");
+    });
+
+    it("refreshes threads and snapshot when core restarted greeting event arrives", async () => {
+      const transport = new InMemoryTransport();
+      const store = createApplicationStore(transport);
+      await store.init();
+
+      const initialCount = transport.sentCommands.length;
+
+      // Deliver core.greeting event
+      store._handleEvent({
+        protocol_version: 1,
+        event_id: "evt_greeting_restart",
+        operation_id: null,
+        thread_id: null,
+        turn_id: null,
+        sequence: 60 as Sequence,
+        occurred_at: Date.now(),
+        body: {
+          kind: "core.greeting",
+          diagnostic: "Core daemon restarted",
+        },
+      });
+
+      await new Promise((resolve) => setTimeout(resolve, 10));
+
+      const newCommands = transport.sentCommands.slice(initialCount);
+      const newKinds = newCommands.map((c) => c.kind);
+      expect(newKinds).toContain("list_threads");
+      expect(newKinds).toContain("open_thread");
+    });
+  });
+
+  describe("Thread and Agent Association", () => {
+    it("binds created thread to selected agent and updates displayed agent on thread switch", async () => {
+      const transport = new InMemoryTransport();
+      const store = createApplicationStore(transport);
+      await store.init();
+
+      // 1. Select Agent Alpha and create Thread 1
+      store.selectAgent("agent-alpha");
+      const thread1 = await store.createThread("Alpha Task", "agent-alpha");
+      expect(thread1.agent).toBe("alpha (ACP)");
+
+      // 2. Select Agent Beta and create Thread 2
+      store.selectAgent("agent-beta");
+      const thread2 = await store.createThread("Beta Task", "agent-beta");
+      expect(thread2.agent).toBe("beta (ACP)");
+
+      // 3. Switch between threads
+      await store.selectThread(thread1.id);
+      expect(store.getState().selectedThreadId).toBe(thread1.id);
+      const activeThread1 = store.getState().threads.find((t) => t.id === thread1.id);
+      expect(activeThread1?.agent).toBe("alpha (ACP)");
+
+      await store.selectThread(thread2.id);
+      expect(store.getState().selectedThreadId).toBe(thread2.id);
+      const activeThread2 = store.getState().threads.find((t) => t.id === thread2.id);
+      expect(activeThread2?.agent).toBe("beta (ACP)");
     });
   });
 });

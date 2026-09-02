@@ -105,6 +105,15 @@ pub enum ProtocolError {
         /// The maximum allowed size in bytes.
         limit_bytes: usize,
     },
+    /// The number of harness environment keys does not match the number of secret references.
+    HarnessEnvSecretMismatch {
+        /// The number of environment variable keys.
+        env_keys_count: usize,
+        /// The number of secret references.
+        secret_refs_count: usize,
+    },
+    /// A domain entity validation failure.
+    Entity(altior_domain::EntityError),
     /// An envelope that could not be decoded or violates its contract.
     MalformedEnvelope {
         /// The underlying decoding failure.
@@ -175,6 +184,14 @@ impl fmt::Display for ProtocolError {
                 f,
                 "text is {size_bytes} bytes, limit is {limit_bytes} bytes"
             ),
+            Self::HarnessEnvSecretMismatch {
+                env_keys_count,
+                secret_refs_count,
+            } => write!(
+                f,
+                "harness binding has {env_keys_count} env keys but {secret_refs_count} secret refs"
+            ),
+            Self::Entity(err) => write!(f, "{err}"),
             Self::MalformedEnvelope { source } => write!(f, "malformed envelope: {source}"),
         }
     }
@@ -184,8 +201,15 @@ impl std::error::Error for ProtocolError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             Self::MalformedEnvelope { source } => Some(source),
+            Self::Entity(source) => Some(source),
             _ => None,
         }
+    }
+}
+
+impl From<altior_domain::EntityError> for ProtocolError {
+    fn from(err: altior_domain::EntityError) -> Self {
+        Self::Entity(err)
     }
 }
 

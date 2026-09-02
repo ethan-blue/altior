@@ -8,7 +8,7 @@
 //! transport (Windows named pipes / Unix domain sockets), publishing an atomic
 //! discovery file with a cryptographically secure per-launch capability token.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::str::FromStr;
 
 use altior_core::application::daemon::CoreDaemonConfig;
@@ -105,25 +105,66 @@ fn resolve_endpoint(config: &CoreDaemonConfig) -> Result<Endpoint, String> {
     }
 }
 
+fn sanitize_user(user: &str) -> String {
+    user.chars()
+        .map(|c| {
+            if c.is_ascii_uppercase() {
+                c.to_ascii_lowercase()
+            } else if c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-' {
+                c
+            } else {
+                '-'
+            }
+        })
+        .collect()
+}
+
+fn derive_default_discovery_path() -> PathBuf {
+    if let Ok(custom) = std::env::var("ALTIOR_TOKEN_FILE") {
+        return PathBuf::from(custom);
+    }
+
+    let user = std::env::var("USERNAME")
+        .or_else(|_| std::env::var("USER"))
+        .unwrap_or_else(|_| "default-user".to_string());
+    let sanitized_user = sanitize_user(&user);
+    let token_filename = format!("altior-core-{sanitized_user}.token");
+
+    if cfg!(windows) {
+        if let Ok(local_app_data) = std::env::var("LOCALAPPDATA") {
+            let dir = PathBuf::from(local_app_data).join("altior");
+            let _ = std::fs::create_dir_all(&dir);
+            return dir.join(token_filename);
+        }
+        let temp_dir = std::env::temp_dir().join("altior");
+        let _ = std::fs::create_dir_all(&temp_dir);
+        temp_dir.join(token_filename)
+    } else {
+        if let Ok(runtime_dir) = std::env::var("XDG_RUNTIME_DIR") {
+            let dir = PathBuf::from(runtime_dir).join("altior");
+            let _ = std::fs::create_dir_all(&dir);
+            return dir.join(token_filename);
+        }
+        PathBuf::from("/tmp").join(token_filename)
+    }
+}
+
 fn publish_discovery(
-    discovery_path: Option<&Path>,
+    discovery_path: &Path,
     credentials: &LaunchCredentials,
     endpoint: &Endpoint,
 ) -> Result<(), String> {
-    if let Some(discovery_file) = discovery_path {
-        let discovery = EndpointDiscovery {
-            instance_id: credentials.instance_id.clone(),
-            endpoint: endpoint.clone(),
-            launch_token: credentials.launch_token.clone(),
-        };
-        write_discovery_file(discovery_file, &discovery).map_err(|err| {
-            format!(
-                "Failed to write atomic discovery file {}: {err}",
-                discovery_file.display()
-            )
-        })?;
-    }
-    Ok(())
+    let discovery = EndpointDiscovery {
+        instance_id: credentials.instance_id.clone(),
+        endpoint: endpoint.clone(),
+        launch_token: credentials.launch_token.clone(),
+    };
+    write_discovery_file(discovery_path, &discovery).map_err(|err| {
+        format!(
+            "Failed to write atomic discovery file {}: {err}",
+            discovery_path.display()
+        )
+    })
 }
 
 fn run_daemon(config: &CoreDaemonConfig, _core_version: ProductVersion) -> Result<(), String> {
@@ -156,8 +197,12 @@ fn run_daemon(config: &CoreDaemonConfig, _core_version: ProductVersion) -> Resul
         )
     })?;
 
-    // 5. Atomically publish discovery file if path provided
-    publish_discovery(config.discovery_path.as_deref(), &credentials, &endpoint)?;
+    // 5. Derive discovery path and atomically publish discovery file
+    let discovery_path = match config.discovery_path {
+        Some(ref p) => p.clone(),
+        None => derive_default_discovery_path(),
+    };
+    publish_discovery(&discovery_path, &credentials, &endpoint)?;
 
     println!(
         "Altior Core daemon started: instance={}, endpoint={}",
@@ -169,9 +214,7 @@ fn run_daemon(config: &CoreDaemonConfig, _core_version: ProductVersion) -> Resul
     let mut daemon = CoreDaemon::new(app, listener);
     let loop_res = daemon.run_loop(std::time::Duration::from_millis(20));
 
-    if let Some(ref discovery_file) = config.discovery_path {
-        let _ = cleanup_stale_discovery(discovery_file);
-    }
+    let _ = cleanup_stale_discovery(&discovery_path);
 
     loop_res.map_err(|err| format!("Core daemon loop exited with error: {err:?}"))
 }

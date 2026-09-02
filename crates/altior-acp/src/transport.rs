@@ -38,6 +38,21 @@ pub trait ProcessTransport: Send {
     /// [`AcpError::LineNotUtf8`] on invalid UTF-8, or [`AcpError::IoError`].
     fn read_line(&mut self) -> Result<Option<String>, AcpError>;
 
+    /// Reads the next line, waiting at most `timeout` for it to arrive.
+    ///
+    /// Returns `Ok(Some(Some(line)))` on success, `Ok(Some(None))` on EOF, and
+    /// `Ok(None)` when no line arrived before the timeout elapsed (the stream
+    /// stays readable, so cancellation signals can be observed while the
+    /// child produces no output).
+    ///
+    /// # Errors
+    ///
+    /// Same as [`ProcessTransport::read_line`].
+    fn read_line_timeout(
+        &mut self,
+        timeout: std::time::Duration,
+    ) -> Result<Option<Option<String>>, AcpError>;
+
     /// Returns a snapshot of the captured stderr output (bounded).
     fn captured_stderr(&self) -> String;
 
@@ -66,11 +81,15 @@ pub trait ProcessTransport: Send {
     fn pid(&self) -> u32;
 }
 
+/// One pumped stdout line: `Ok(Some(line))`, `Ok(None)` on EOF, or an error.
+type LineOutcome = Result<Option<String>, AcpError>;
+
 /// A running ACP agent child process.
 pub struct AcpChild {
     child: Child,
     stdin: Option<std::process::ChildStdin>,
-    stdout_reader: Option<BufReader<std::process::ChildStdout>>,
+    stdout_rx: Option<std::sync::mpsc::Receiver<LineOutcome>>,
+    stdout_thread: Option<JoinHandle<()>>,
     stderr_buffer: Arc<Mutex<Vec<u8>>>,
     stderr_thread: Option<JoinHandle<()>>,
     pid: u32,
@@ -108,7 +127,9 @@ impl AcpChild {
         let stdout = child.stdout.take();
         let stderr = child.stderr.take();
 
-        let stdout_reader = stdout.map(BufReader::new);
+        let (stdout_tx, stdout_rx) = std::sync::mpsc::channel::<LineOutcome>();
+        let stdout_thread =
+            stdout.map(|stream| std::thread::spawn(move || pump_stdout_lines(stream, &stdout_tx)));
 
         let stderr_buffer = Arc::new(Mutex::new(Vec::new()));
         let stderr_thread = stderr.map(|mut stderr_stream| {
@@ -140,12 +161,84 @@ impl AcpChild {
         Ok(Self {
             child,
             stdin,
-            stdout_reader,
+            stdout_rx: Some(stdout_rx),
+            stdout_thread,
             stderr_buffer,
             stderr_thread,
             pid,
         })
     }
+}
+
+/// Pumps bounded newline-delimited lines from a child stdout stream into a
+/// channel so readers can poll with timeouts instead of blocking forever.
+fn pump_stdout_lines(stream: std::process::ChildStdout, tx: &std::sync::mpsc::Sender<LineOutcome>) {
+    let mut reader = BufReader::new(stream);
+    loop {
+        match read_bounded_line(&mut reader) {
+            Ok(Some(line)) => {
+                if tx.send(Ok(Some(line))).is_err() {
+                    return;
+                }
+            }
+            Ok(None) => {
+                let _ = tx.send(Ok(None));
+                return;
+            }
+            Err(err) => {
+                let _ = tx.send(Err(err));
+                return;
+            }
+        }
+    }
+}
+
+fn read_bounded_line(
+    reader: &mut BufReader<std::process::ChildStdout>,
+) -> Result<Option<String>, AcpError> {
+    let mut line_bytes = Vec::new();
+    let mut total_read = 0;
+
+    loop {
+        let mut byte_buf = [0u8; 1];
+        match reader.read(&mut byte_buf) {
+            Ok(0) => {
+                if line_bytes.is_empty() {
+                    return Ok(None);
+                }
+                break;
+            }
+            Ok(1) => {
+                let b = byte_buf[0];
+                total_read += 1;
+                if total_read > MAX_LINE_BYTES {
+                    return Err(AcpError::LineTooLarge {
+                        size_bytes: total_read,
+                        limit_bytes: MAX_LINE_BYTES,
+                    });
+                }
+                if b == b'\n' {
+                    break;
+                }
+                line_bytes.push(b);
+            }
+            Ok(_) => unreachable!(),
+            Err(err) if err.kind() == std::io::ErrorKind::Interrupted => {}
+            Err(err) => {
+                return Err(AcpError::IoError {
+                    diagnostic: format!("failed to read line from child stdout: {err}"),
+                });
+            }
+        }
+    }
+
+    // Strip trailing \r if on Windows CRLF stream
+    if line_bytes.last() == Some(&b'\r') {
+        line_bytes.pop();
+    }
+
+    let line = String::from_utf8(line_bytes).map_err(|_| AcpError::LineNotUtf8)?;
+    Ok(Some(line))
 }
 
 impl ProcessTransport for AcpChild {
@@ -173,56 +266,33 @@ impl ProcessTransport for AcpChild {
     }
 
     fn read_line(&mut self) -> Result<Option<String>, AcpError> {
-        let reader = self
-            .stdout_reader
-            .as_mut()
+        let rx = self
+            .stdout_rx
+            .as_ref()
             .ok_or_else(|| AcpError::ProcessExited {
                 status: "stdout pipe already closed".to_owned(),
             })?;
-
-        let mut line_bytes = Vec::new();
-        let mut total_read = 0;
-
-        loop {
-            let mut byte_buf = [0u8; 1];
-            match reader.read(&mut byte_buf) {
-                Ok(0) => {
-                    if line_bytes.is_empty() {
-                        return Ok(None);
-                    }
-                    break;
-                }
-                Ok(1) => {
-                    let b = byte_buf[0];
-                    total_read += 1;
-                    if total_read > MAX_LINE_BYTES {
-                        return Err(AcpError::LineTooLarge {
-                            size_bytes: total_read,
-                            limit_bytes: MAX_LINE_BYTES,
-                        });
-                    }
-                    if b == b'\n' {
-                        break;
-                    }
-                    line_bytes.push(b);
-                }
-                Ok(_) => unreachable!(),
-                Err(err) if err.kind() == std::io::ErrorKind::Interrupted => {}
-                Err(err) => {
-                    return Err(AcpError::IoError {
-                        diagnostic: format!("failed to read line from child stdout: {err}"),
-                    });
-                }
-            }
+        match rx.recv() {
+            Ok(outcome) => outcome,
+            Err(_) => Ok(None),
         }
+    }
 
-        // Strip trailing \r if on Windows CRLF stream
-        if line_bytes.last() == Some(&b'\r') {
-            line_bytes.pop();
+    fn read_line_timeout(
+        &mut self,
+        timeout: std::time::Duration,
+    ) -> Result<Option<Option<String>>, AcpError> {
+        let rx = self
+            .stdout_rx
+            .as_ref()
+            .ok_or_else(|| AcpError::ProcessExited {
+                status: "stdout pipe already closed".to_owned(),
+            })?;
+        match rx.recv_timeout(timeout) {
+            Ok(outcome) => Ok(Some(outcome?)),
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => Ok(None),
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => Ok(Some(None)),
         }
-
-        let line = String::from_utf8(line_bytes).map_err(|_| AcpError::LineNotUtf8)?;
-        Ok(Some(line))
     }
 
     fn captured_stderr(&self) -> String {
@@ -241,9 +311,12 @@ impl ProcessTransport for AcpChild {
 
     fn terminate(&mut self) -> Result<(), AcpError> {
         let _ = self.stdin.take();
-        let _ = self.stdout_reader.take();
+        let _ = self.stdout_rx.take();
         let _ = self.child.kill();
         let _ = self.child.wait();
+        if let Some(thread) = self.stdout_thread.take() {
+            let _ = thread.join();
+        }
         if let Some(thread) = self.stderr_thread.take() {
             let _ = thread.join();
         }
@@ -253,7 +326,10 @@ impl ProcessTransport for AcpChild {
     fn close(&mut self) -> Result<Option<ExitStatus>, AcpError> {
         let _ = self.stdin.take(); // Drops stdin handle, closing the pipe.
         let status_res = self.child.wait();
-        let _ = self.stdout_reader.take();
+        let _ = self.stdout_rx.take();
+        if let Some(thread) = self.stdout_thread.take() {
+            let _ = thread.join();
+        }
         if let Some(thread) = self.stderr_thread.take() {
             let _ = thread.join();
         }

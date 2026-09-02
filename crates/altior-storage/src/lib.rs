@@ -22,12 +22,13 @@ use altior_domain::{
     AcpHarnessBinding, AgentProfile, AgentProfileCursor, AgentProfileId, AgentProfileListLimit,
     BoundaryKind, BoundedLabel, BoundedPath, CHECKPOINT_LIST_LIMIT_MAX, CheckpointCursor,
     CheckpointListLimit, CheckpointState, DiagnosticSummary, DisplayName, DomainEvent,
-    DomainEventKind, EntityError, EventId, EventPayload, HarnessBindingCursor, HarnessBindingId,
-    HarnessBindingListLimit, HarnessKind, HistoryLimit, MemoryMode, OpaqueSessionId, OperationId,
-    Permission, PermissionCursor, PermissionDecision, PermissionDescription, PermissionKind,
-    PermissionListLimit, ProjectId, ProjectRef, ProjectRefCursor, ProjectRefListLimit,
-    RemoteRequestId, RuntimeCheckpoint, RuntimeCheckpointId, SearchQuery, SessionBinding, ThreadId,
-    ThreadListLimit, ThreadState, TurnCursor, TurnId, TurnListLimit, UnixMillis,
+    DomainEventKind, EntityError, EventId, EventPayload, HarnessArg, HarnessBindingCursor,
+    HarnessBindingId, HarnessBindingListLimit, HarnessEnvKey, HarnessKind, HarnessSecretRef,
+    HistoryLimit, MemoryMode, OpaqueSessionId, OperationId, Permission, PermissionCursor,
+    PermissionDecision, PermissionDescription, PermissionKind, PermissionListLimit, ProjectId,
+    ProjectRef, ProjectRefCursor, ProjectRefListLimit, RemoteRequestId, RuntimeCheckpoint,
+    RuntimeCheckpointId, SearchQuery, SessionBinding, ThreadId, ThreadListLimit, ThreadState,
+    TurnCursor, TurnId, TurnListLimit, UnixMillis,
 };
 use altior_protocol::EventEnvelope;
 pub use error::StorageError;
@@ -1475,6 +1476,12 @@ impl Store {
         &mut self,
         binding: &AcpHarnessBinding,
     ) -> Result<(), StorageError> {
+        binding
+            .validate()
+            .map_err(|e| StorageError::InvalidEntityData {
+                detail: format!("invalid harness binding: {e}"),
+            })?;
+
         let tx = self
             .conn
             .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
@@ -1501,15 +1508,33 @@ impl Store {
             }
         })?;
 
+        let args_json =
+            serde_json::to_string(&binding.args).map_err(|e| StorageError::InvalidEntityData {
+                detail: format!("failed to serialize args_json: {e}"),
+            })?;
+        let env_keys_json = serde_json::to_string(&binding.env_keys).map_err(|e| {
+            StorageError::InvalidEntityData {
+                detail: format!("failed to serialize env_keys_json: {e}"),
+            }
+        })?;
+        let secret_refs_json = serde_json::to_string(&binding.secret_refs).map_err(|e| {
+            StorageError::InvalidEntityData {
+                detail: format!("failed to serialize secret_refs_json: {e}"),
+            }
+        })?;
+
         let res = tx.execute(
             "INSERT INTO harness_binding
-                 (harness_binding_id, agent_profile_id, label, command, created_at)
-             VALUES (?1, ?2, ?3, ?4, ?5)",
+                 (harness_binding_id, agent_profile_id, label, command, args_json, env_keys_json, secret_refs_json, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
             params![
                 binding.id.as_str(),
                 binding.agent_profile_id.as_str(),
                 binding.label.as_str(),
                 binding.command.as_str(),
+                &args_json,
+                &env_keys_json,
+                &secret_refs_json,
                 created_at,
             ],
         );
@@ -1523,7 +1548,7 @@ impl Store {
             Err(ref err) if is_unique_constraint_violation(err) => {
                 let mut stmt = tx
                     .prepare(
-                        "SELECT harness_binding_id, agent_profile_id, label, command, created_at
+                        "SELECT harness_binding_id, agent_profile_id, label, command, args_json, env_keys_json, secret_refs_json, created_at
                          FROM harness_binding WHERE harness_binding_id = ?1",
                     )
                     .map_err(|e| StorageError::from_sqlite("create_harness_binding", e))?;
@@ -1563,6 +1588,12 @@ impl Store {
         &mut self,
         binding: &AcpHarnessBinding,
     ) -> Result<(), StorageError> {
+        binding
+            .validate()
+            .map_err(|e| StorageError::InvalidEntityData {
+                detail: format!("invalid harness binding: {e}"),
+            })?;
+
         let tx = self
             .conn
             .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
@@ -1588,14 +1619,33 @@ impl Store {
                 detail: format!("created_at {} exceeds i64", binding.created_at.as_millis()),
             }
         })?;
+
+        let args_json =
+            serde_json::to_string(&binding.args).map_err(|e| StorageError::InvalidEntityData {
+                detail: format!("failed to serialize args_json: {e}"),
+            })?;
+        let env_keys_json = serde_json::to_string(&binding.env_keys).map_err(|e| {
+            StorageError::InvalidEntityData {
+                detail: format!("failed to serialize env_keys_json: {e}"),
+            }
+        })?;
+        let secret_refs_json = serde_json::to_string(&binding.secret_refs).map_err(|e| {
+            StorageError::InvalidEntityData {
+                detail: format!("failed to serialize secret_refs_json: {e}"),
+            }
+        })?;
+
         let affected = tx
             .execute(
                 "INSERT INTO harness_binding
-                     (harness_binding_id, agent_profile_id, label, command, created_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5)
+                     (harness_binding_id, agent_profile_id, label, command, args_json, env_keys_json, secret_refs_json, created_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
                  ON CONFLICT(harness_binding_id) DO UPDATE SET
                      label = excluded.label,
-                     command = excluded.command
+                     command = excluded.command,
+                     args_json = excluded.args_json,
+                     env_keys_json = excluded.env_keys_json,
+                     secret_refs_json = excluded.secret_refs_json
                  WHERE harness_binding.agent_profile_id = excluded.agent_profile_id
                    AND harness_binding.created_at = excluded.created_at",
                 params![
@@ -1603,6 +1653,9 @@ impl Store {
                     binding.agent_profile_id.as_str(),
                     binding.label.as_str(),
                     binding.command.as_str(),
+                    &args_json,
+                    &env_keys_json,
+                    &secret_refs_json,
                     created_at,
                 ],
             )
@@ -1632,7 +1685,7 @@ impl Store {
         let mut stmt = self
             .conn
             .prepare(
-                "SELECT harness_binding_id, agent_profile_id, label, command, created_at
+                "SELECT harness_binding_id, agent_profile_id, label, command, args_json, env_keys_json, secret_refs_json, created_at
                  FROM harness_binding WHERE harness_binding_id = ?1",
             )
             .map_err(|error| StorageError::from_sqlite("harness_binding_by_id", error))?;
@@ -1670,7 +1723,7 @@ impl Store {
         let mut statement = self
             .conn
             .prepare(
-                "SELECT harness_binding_id, agent_profile_id, label, command, created_at
+                "SELECT harness_binding_id, agent_profile_id, label, command, args_json, env_keys_json, secret_refs_json, created_at
                  FROM harness_binding
                  WHERE agent_profile_id = ?1
                    AND (created_at > ?2 OR (created_at = ?2 AND harness_binding_id > ?3))
@@ -2848,8 +2901,17 @@ fn row_to_harness_binding(row: &rusqlite::Row<'_>) -> Result<AcpHarnessBinding, 
     let command_raw: String = row
         .get(3)
         .map_err(|e| StorageError::from_sqlite("read command", e))?;
-    let created_at_raw: i64 = row
+    let args_json: String = row
         .get(4)
+        .map_err(|e| StorageError::from_sqlite("read args_json", e))?;
+    let env_keys_json: String = row
+        .get(5)
+        .map_err(|e| StorageError::from_sqlite("read env_keys_json", e))?;
+    let secret_refs_json: String = row
+        .get(6)
+        .map_err(|e| StorageError::from_sqlite("read secret_refs_json", e))?;
+    let created_at_raw: i64 = row
+        .get(7)
         .map_err(|e| StorageError::from_sqlite("read created_at", e))?;
 
     let id = id_raw
@@ -2872,18 +2934,64 @@ fn row_to_harness_binding(row: &rusqlite::Row<'_>) -> Result<AcpHarnessBinding, 
             detail: format!("invalid command {command_raw}: {e}"),
         }
     })?;
+
+    let raw_args: Vec<String> =
+        serde_json::from_str(&args_json).map_err(|e| StorageError::InvalidEntityData {
+            detail: format!("invalid args_json: {e}"),
+        })?;
+    let args = raw_args
+        .into_iter()
+        .map(|s| {
+            HarnessArg::try_from(s.as_str()).map_err(|e| StorageError::InvalidEntityData {
+                detail: format!("invalid harness arg '{s}': {e}"),
+            })
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+
+    let raw_env_keys: Vec<String> =
+        serde_json::from_str(&env_keys_json).map_err(|e| StorageError::InvalidEntityData {
+            detail: format!("invalid env_keys_json: {e}"),
+        })?;
+    let env_keys = raw_env_keys
+        .into_iter()
+        .map(|s| {
+            HarnessEnvKey::try_from(s.as_str()).map_err(|e| StorageError::InvalidEntityData {
+                detail: format!("invalid harness env key '{s}': {e}"),
+            })
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+
+    let raw_secret_refs: Vec<String> =
+        serde_json::from_str(&secret_refs_json).map_err(|e| StorageError::InvalidEntityData {
+            detail: format!("invalid secret_refs_json: {e}"),
+        })?;
+    let secret_refs = raw_secret_refs
+        .into_iter()
+        .map(|s| {
+            HarnessSecretRef::try_from(s.as_str()).map_err(|e| StorageError::InvalidEntityData {
+                detail: format!("invalid harness secret ref '{s}': {e}"),
+            })
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+
     let created_at = UnixMillis::from_millis(u64::try_from(created_at_raw).map_err(|_| {
         StorageError::InvalidEntityData {
             detail: format!("negative created_at {created_at_raw}"),
         }
     })?);
 
-    Ok(AcpHarnessBinding {
+    AcpHarnessBinding::new(
         id,
         agent_profile_id,
         label,
         command,
+        args,
+        env_keys,
+        secret_refs,
         created_at,
+    )
+    .map_err(|e| StorageError::InvalidEntityData {
+        detail: format!("invalid harness binding entity: {e}"),
     })
 }
 

@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+#### P1.4 Acceptance Journey, Binding v5 & Journey-Hardened Runtime (ADR 0016)
+- **Durable harness bindings over IPC**: `AcpHarnessBinding` gains `args`, `env_keys`, and `secret_refs` with domain bounds; `configure_agent` persists bindings (storage schema v5, forward-only migration) and `env_keys.len() == secret_refs.len()` is enforced at the DTO boundary.
+- **Default binding auto-selection on `open_thread`**: explicit binding > persisted session binding > first binding for the agent, with a typed `MissingHarnessBinding` error; sessions and no-auto-resend invariants persist across daemon restarts.
+- **Eight-step acceptance journey test**: a real `altior-core --daemon` process on a real named pipe with persistent SQLite and two mock ACP agent binaries — configure/probe dual agents, auto-bound thread sessions, permission request/approval, cooperative cancel, disconnect + `Subscribe(since)` replay with `stream.replayed`, agent crash → Indeterminate, daemon restart → automatic resend strictly forbidden, and offline FTS5 search/history. PID-level RAII guards, zero sleeps, captured daemon logs for diagnostics.
+- **Daemon connection-close observability**: abnormal connection closes (frame, dispatch, or send errors) now log the cause before closing instead of failing silently.
+
+### Fixed
+
+- **Known wire events**: `permission.requested`, `turn.cancelled`, and `turn.failed` now serialize as typed `KnownEvent` variants instead of `Unknown` provider events, so typed clients (Desktop) can parse them.
+- **Cancellation of silent agents**: ACP child stdout is pumped through a reader thread; the prompt loop polls the cancel signal every 100 ms while the child produces no output, so quiet agents can be cancelled (and `close()` can no longer deadlock on a full stdout pipe buffer).
+
 #### P1.3 Desktop MVP & Core Local IPC (ADR 0015)
 - **Protocol P1.3 contracts & TypeScript DTOs (`altior-protocol`)**: 12 command kinds (`create_thread`, `open_thread`, `list_threads`, `search_threads`, `get_history`, `start_turn`, `cancel_turn`, `respond_permission`, `configure_agent`, `test_harness_binding`, `runtime_status`, `diagnostics`), 12 DTOs (`ThreadDto`, `TurnDto`, `PermissionDto`, `AgentProfileDto`, `HarnessBindingDto`, `ThreadCursorDto`, `TurnCursorDto`, `ThreadSummaryDto`, `ThreadSnapshotDto`, `ThreadListResponseDto`, `ThreadHistoryResponseDto`, `RuntimeDiagnosticsDto`), snapshots, and stream events (`TurnStarted`, `MessageDelta`, `ToolCallStarted`, `ToolCallFinished`, `PermissionRequested`, `PermissionDecided`, `TurnCompleted`, `TurnCancelled`, `TurnFailed`, `StreamReplayed`, `StreamReady`, `StreamGap`, `RawUnknown`). All TypeScript DTO bindings are exported and deterministically formatted via ts-rs.
 - **Physical OS local IPC transport (`altior-ipc`)**: Implements Windows Named Pipes (`\\.\pipe\altior-ipc-...`, ≤ 256 bytes) and Unix Domain Sockets (`.sock`, ≤ 104 bytes) with `LocalListener` and `LocalStream` abstractions. Enforces 256 KiB frame bounds (`MAX_FRAME_BYTES`) with zero unbounded reads, 5-second slow handshake timeouts (`DEFAULT_HANDSHAKE_TIMEOUT`), and 32 concurrent session limits.

@@ -53,6 +53,17 @@ pub use session::{CoreServerPort, FakeConnection};
 use crate::operations::OperationRegistry;
 use crate::runtime::adapters::acp::AcpHarnessAdapter;
 use crate::runtime::adapters::storage::StoreCheckpointAdapter;
+
+/// Returns the statically-valid fallback harness binding id used in error
+/// payloads when a derived id cannot be parsed.
+///
+/// # Panics
+///
+/// Panics if the fixed constant form fails to parse, which cannot occur.
+fn hsb_fallback() -> HarnessBindingId {
+    HarnessBindingId::from_str("hsb_0000000000000000")
+        .expect("static fallback harness binding id is valid")
+}
 use crate::runtime::coordinator::AgentRuntimeSupervisor;
 use crate::runtime::ports::{AgentRuntime, HarnessRuntimePort, RuntimeCheckpointPort};
 use crate::runtime::state::{
@@ -343,7 +354,7 @@ where
             self.supervisor
                 .checkpoint_mut()
                 .store_mut()
-                .create_harness_binding(binding)?;
+                .upsert_harness_binding(binding)?;
         }
         Ok(())
     }
@@ -527,18 +538,36 @@ where
             .store()
             .get_session_binding(thread_id)?;
 
-        let effective_binding = binding.cloned().or_else(|| {
-            if let Some(ref sb) = session_binding {
-                self.supervisor
-                    .checkpoint()
-                    .store()
-                    .harness_binding_by_id(&sb.harness_binding_id)
-                    .ok()
-                    .flatten()
-            } else {
-                None
-            }
-        });
+        let effective_binding = if let Some(b) = binding {
+            Some(b.clone())
+        } else if let Some(ref sb) = session_binding {
+            self.supervisor
+                .checkpoint()
+                .store()
+                .harness_binding_by_id(&sb.harness_binding_id)?
+        } else {
+            let limit1 = HarnessBindingListLimit::try_new(1)
+                .map_err(|e| CoreAppError::Other(e.to_string()))?;
+            let agent_profile_id =
+                AgentProfileId::from_str(&thread.agent_profile_id).map_err(CoreAppError::Id)?;
+            self.supervisor
+                .checkpoint()
+                .store()
+                .harness_bindings_for_agent(&agent_profile_id, None, limit1)?
+                .into_iter()
+                .next()
+        };
+
+        let effective_binding = effective_binding.ok_or_else(|| {
+            let agent_body = thread
+                .agent_profile_id
+                .as_str()
+                .strip_prefix("agp_")
+                .unwrap_or(thread.agent_profile_id.as_str());
+            let fallback_hsb =
+                HarnessBindingId::from_str(&format!("hsb_{agent_body}")).unwrap_or(hsb_fallback());
+            CoreAppError::HarnessBindingNotFound(fallback_hsb)
+        })?;
 
         let current_state = self
             .supervisor
@@ -548,11 +577,11 @@ where
         if matches!(
             current_state,
             SupervisorState::Idle | SupervisorState::Closed
-        ) && let Some(ref b) = effective_binding
-        {
+        ) {
             let resume_res = if let Some(ref sb) = session_binding {
                 if let Ok(sess_id) = HarnessSessionId::new(sb.opaque_session_id.as_str()) {
-                    self.supervisor.resume_session(b, thread_id, &sess_id)
+                    self.supervisor
+                        .resume_session(&effective_binding, thread_id, &sess_id)
                 } else {
                     Err(RuntimeError::InvalidSessionId("opaque session id".into()))
                 }
@@ -563,7 +592,9 @@ where
             };
 
             if resume_res.is_err() {
-                let _ = self.supervisor.create_session(b, thread_id, None);
+                let _ = self
+                    .supervisor
+                    .create_session(&effective_binding, thread_id, None);
             }
         }
 
@@ -813,6 +844,7 @@ where
     /// # Errors
     ///
     /// Returns [`CoreAppError`] on state mismatch, resend violation, or harness error.
+    #[allow(clippy::too_many_lines)]
     pub fn start_prompt_envelope(
         &mut self,
         operation_id: OperationId,
@@ -827,6 +859,69 @@ where
             .store()
             .thread_by_id(&thread_id)?
             .ok_or_else(|| CoreAppError::ThreadNotFound(thread_id.clone()))?;
+
+        // Query persistent turns across restarts
+        let turn_limit = TurnListLimit::try_new(TURN_LIST_LIMIT_MAX)
+            .map_err(|e| CoreAppError::Other(e.to_string()))?;
+        let existing_turns = self
+            .supervisor
+            .checkpoint()
+            .store()
+            .turns_for_thread(&thread_id, None, turn_limit)?;
+
+        for turn_row in existing_turns {
+            if turn_row.turn_id == turn_id.as_str() {
+                let delivery = match turn_row.delivery.as_str() {
+                    "confirmed" => DeliveryState::Confirmed,
+                    "indeterminate" => DeliveryState::Indeterminate,
+                    "rejected" => DeliveryState::Rejected,
+                    _ => DeliveryState::Absent,
+                };
+                let is_terminal = matches!(
+                    turn_row.state.as_str(),
+                    "completed" | "cancelled" | "failed"
+                );
+                if is_terminal
+                    || delivery == DeliveryState::Confirmed
+                    || delivery == DeliveryState::Indeterminate
+                {
+                    return Err(CoreAppError::AutomaticResendForbidden {
+                        thread_id: thread_id.clone(),
+                        turn_id: turn_id.clone(),
+                        delivery,
+                    });
+                }
+            }
+        }
+
+        // Query persistent checkpoints across restarts
+        let chk_limit = CheckpointListLimit::try_new(CHECKPOINT_LIST_LIMIT_MAX)
+            .map_err(|e| CoreAppError::Other(e.to_string()))?;
+        let existing_checkpoints = self.supervisor.checkpoint().store().runtime_checkpoints(
+            Some(&thread_id),
+            None,
+            chk_limit,
+        )?;
+
+        for cp in existing_checkpoints {
+            if cp.turn_id.as_ref() == Some(&turn_id)
+                && (cp.state == CheckpointState::Confirmed
+                    || cp.state == CheckpointState::Indeterminate
+                    || cp.state.is_terminal())
+            {
+                let delivery = match cp.state {
+                    CheckpointState::Confirmed => DeliveryState::Confirmed,
+                    CheckpointState::Indeterminate => DeliveryState::Indeterminate,
+                    CheckpointState::Rejected => DeliveryState::Rejected,
+                    CheckpointState::Intent => DeliveryState::Absent,
+                };
+                return Err(CoreAppError::AutomaticResendForbidden {
+                    thread_id: thread_id.clone(),
+                    turn_id: turn_id.clone(),
+                    delivery,
+                });
+            }
+        }
 
         let admission = self
             .supervisor

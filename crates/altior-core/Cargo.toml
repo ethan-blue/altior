@@ -53,5 +53,9 @@ path = "tests/p13_local_ipc.rs"
 name = "p13_daemon_process"
 path = "tests/p13_daemon_process.rs"
 
+[[test]]
+name = "p14_acceptance_journey"
+path = "tests/p14_acceptance_journey.rs"
+
 [lints]
 workspace = true

@@ -187,6 +187,9 @@ fn sample_binding(id_num: u32) -> AcpHarnessBinding {
         agent_profile_id: altior_domain::AgentProfileId::from_str("agp_fixture000000001").unwrap(),
         label: DisplayName::try_from("Test Agent").unwrap(),
         command: BoundedPath::try_from("npx -y @modelcontextprotocol/server-everything").unwrap(),
+        args: Vec::new(),
+        env_keys: Vec::new(),
+        secret_refs: Vec::new(),
         created_at: UnixMillis::from_millis(0),
     }
 }

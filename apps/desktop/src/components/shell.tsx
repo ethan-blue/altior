@@ -178,7 +178,9 @@ export interface ThreadHeaderProps {
   readonly title: string;
   readonly agent: string;
   readonly agents?: readonly AgentProfile[];
+  readonly selectedAgentId?: string;
   readonly onSelectAgent?: (agentId: string) => void;
+  readonly onAddAgent?: () => void;
   readonly theme: "light" | "dark";
   readonly onToggleTheme: () => void;
   readonly inspectorOpen: boolean;
@@ -191,7 +193,9 @@ export function ThreadHeader({
   title,
   agent,
   agents,
+  selectedAgentId,
   onSelectAgent,
+  onAddAgent,
   theme,
   onToggleTheme,
   inspectorOpen,
@@ -204,19 +208,36 @@ export function ThreadHeader({
       <h1 className={shell.threadTitleMain}>{title}</h1>
 
       {agents && onSelectAgent ? (
-        <select
-          className={shell.agentSelect}
-          value={agents.find((a) => a.name === agent)?.id ?? agents[0]?.id}
-          onChange={(e) => onSelectAgent(e.target.value)}
-          aria-label="Select agent"
-          data-testid="agent-selector"
-        >
-          {agents.map((a) => (
-            <option key={a.id} value={a.id}>
-              {a.name} ({a.model})
-            </option>
-          ))}
-        </select>
+        <div style={{ display: "flex", gap: "var(--spacing-8)", alignItems: "center" }}>
+          <select
+            className={shell.agentSelect}
+            value={
+              selectedAgentId ??
+              agents.find((a) => a.name === agent || a.id === agent)?.id ??
+              agents[0]?.id
+            }
+            onChange={(e) => onSelectAgent(e.target.value)}
+            aria-label="Select agent"
+            data-testid="agent-selector"
+          >
+            {agents.map((a) => (
+              <option key={a.id} value={a.id}>
+                {a.name} ({a.model})
+              </option>
+            ))}
+          </select>
+          {onAddAgent ? (
+            <button
+              type="button"
+              className={shell.reconnectBtn}
+              onClick={onAddAgent}
+              data-testid="add-agent-btn"
+              title="Add agent"
+            >
+              + Agent
+            </button>
+          ) : null}
+        </div>
       ) : (
         <span className={shell.threadAgent}>{agent}</span>
       )}
@@ -397,6 +418,24 @@ function InspectorDetails({
             <dd className={shell.mono}>{activeAgent.model}</dd>
             <dt>Provider</dt>
             <dd>{activeAgent.provider}</dd>
+            {activeAgent.program ? (
+              <>
+                <dt>Program</dt>
+                <dd className={shell.mono}>{activeAgent.program}</dd>
+              </>
+            ) : null}
+            {activeAgent.label ? (
+              <>
+                <dt>Binding Label</dt>
+                <dd>{activeAgent.label}</dd>
+              </>
+            ) : null}
+            {activeAgent.bindingId ? (
+              <>
+                <dt>Binding ID</dt>
+                <dd className={shell.mono}>{activeAgent.bindingId}</dd>
+              </>
+            ) : null}
             <dt>Secret Ref</dt>
             <dd className={shell.mono}>
               {activeAgent.secretRef ? activeAgent.secretRef : "none"}
@@ -520,12 +559,20 @@ export interface AgentOnboardingModalProps {
     name: string;
     provider: string;
     model: string;
+    program?: string;
+    args?: string[] | string;
+    envKeys?: string[] | string;
     secretRef?: string;
+    label?: string;
   }) => Promise<void>;
   readonly onTest: (data: {
-    provider: string;
-    model: string;
+    provider?: string;
+    model?: string;
+    program?: string;
+    args?: string[] | string;
+    envKeys?: string[] | string;
     secretRef?: string;
+    label?: string;
   }) => Promise<{ success: boolean; latencyMs?: number; error?: string }>;
   readonly isTesting: boolean;
   readonly testResult: { success: boolean; latencyMs?: number; error?: string } | null;
@@ -543,7 +590,11 @@ export function AgentOnboardingModal({
   const [name, setName] = useState("");
   const [provider, setProvider] = useState("acp");
   const [model, setModel] = useState("claude-3-7-sonnet");
+  const [program, setProgram] = useState("");
+  const [args, setArgs] = useState("");
+  const [envKeys, setEnvKeys] = useState("");
   const [secretRef, setSecretRef] = useState("");
+  const [label, setLabel] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
   if (!isOpen) return null;
@@ -557,7 +608,11 @@ export function AgentOnboardingModal({
         name: name.trim(),
         provider: provider.trim(),
         model: model.trim(),
+        program: program.trim() || provider.trim(),
+        args: args.trim() ? args.trim().split(/\s+/) : [],
+        envKeys: envKeys.trim() ? envKeys.trim().split(/[,\s]+/) : [],
         secretRef: secretRef.trim() || undefined,
+        label: label.trim() || name.trim() || undefined,
       });
       onClose();
     } finally {
@@ -569,7 +624,11 @@ export function AgentOnboardingModal({
     await onTest({
       provider: provider.trim(),
       model: model.trim(),
+      program: program.trim() || provider.trim(),
+      args: args.trim() ? args.trim().split(/\s+/) : [],
+      envKeys: envKeys.trim() ? envKeys.trim().split(/[,\s]+/) : [],
       secretRef: secretRef.trim() || undefined,
+      label: label.trim() || name.trim() || undefined,
     });
   };
 
@@ -602,7 +661,7 @@ export function AgentOnboardingModal({
               className={shell.formInput}
               value={provider}
               onChange={(e) => setProvider(e.target.value)}
-              placeholder="acp / anthropic / openai"
+              placeholder="acp / terminal / native"
               required
               data-testid="agent-provider-input"
             />
@@ -616,6 +675,46 @@ export function AgentOnboardingModal({
               placeholder="claude-3-7-sonnet"
               required
               data-testid="agent-model-input"
+            />
+
+            <label htmlFor="agent-program">Program</label>
+            <input
+              id="agent-program"
+              className={shell.formInput}
+              value={program}
+              onChange={(e) => setProgram(e.target.value)}
+              placeholder="/usr/local/bin/acp-agent or command"
+              data-testid="agent-program-input"
+            />
+
+            <label htmlFor="agent-args">Args</label>
+            <input
+              id="agent-args"
+              className={shell.formInput}
+              value={args}
+              onChange={(e) => setArgs(e.target.value)}
+              placeholder="--mode server --verbose"
+              data-testid="agent-args-input"
+            />
+
+            <label htmlFor="agent-env-keys">Env Keys</label>
+            <input
+              id="agent-env-keys"
+              className={shell.formInput}
+              value={envKeys}
+              onChange={(e) => setEnvKeys(e.target.value)}
+              placeholder="ANTHROPIC_API_KEY, DEBUG"
+              data-testid="agent-env-keys-input"
+            />
+
+            <label htmlFor="agent-label">Label</label>
+            <input
+              id="agent-label"
+              className={shell.formInput}
+              value={label}
+              onChange={(e) => setLabel(e.target.value)}
+              placeholder="Primary ACP Binding"
+              data-testid="agent-label-input"
             />
 
             <label htmlFor="agent-secret">Secret Ref</label>

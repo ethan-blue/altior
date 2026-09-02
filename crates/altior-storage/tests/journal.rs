@@ -63,18 +63,18 @@ fn unknown(provider: &str) -> EventBody {
 #[test]
 fn fresh_database_migrates_to_latest_and_reopens_unchanged() {
     let store = Store::open_in_memory().expect("fresh in-memory store");
-    assert_eq!(store.schema_version().expect("schema version"), 4);
+    assert_eq!(store.schema_version().expect("schema version"), 5);
     assert_eq!(store.journal_len().expect("count"), 0);
 
     let dir = tempfile::tempdir().expect("tempdir");
     let path = dir.path().join("journal.db");
     {
         let file_store = Store::open(&path).expect("open fresh file");
-        assert_eq!(file_store.schema_version().expect("read version"), 4);
+        assert_eq!(file_store.schema_version().expect("read version"), 5);
     }
     // Reopening an already-migrated file applies nothing and succeeds.
     let reopened = Store::open(&path).expect("reopen migrated file");
-    assert_eq!(reopened.schema_version().expect("read version"), 4);
+    assert_eq!(reopened.schema_version().expect("read version"), 5);
     assert_eq!(reopened.journal_len().expect("count"), 0);
 }
 
@@ -94,7 +94,7 @@ fn newer_schema_is_refused_not_downgraded() {
     let StorageError::SchemaTooNew { found, supported } = error else {
         panic!("expected SchemaTooNew, got {error:?}");
     };
-    assert_eq!((found, supported), (99, 4));
+    assert_eq!((found, supported), (99, 5));
 
     // The file is untouched: still stamped 99.
     let raw = rusqlite::Connection::open(&path).expect("raw open");

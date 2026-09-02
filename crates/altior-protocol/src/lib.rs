@@ -32,9 +32,9 @@ pub use command::{
     TestHarnessBindingCommand,
 };
 pub use dto::{
-    AgentProfileDto, HarnessBindingDto, PermissionDto, RuntimeDiagnosticsDto, ThreadCursorDto,
-    ThreadDto, ThreadHistoryResponseDto, ThreadListResponseDto, ThreadSnapshotDto,
-    ThreadSummaryDto, TurnCursorDto, TurnDto,
+    AgentProfileDto, HarnessBindingConfigDto, HarnessBindingDto, PermissionDto,
+    RuntimeDiagnosticsDto, ThreadCursorDto, ThreadDto, ThreadHistoryResponseDto,
+    ThreadListResponseDto, ThreadSnapshotDto, ThreadSummaryDto, TurnCursorDto, TurnDto,
 };
 pub use error::ProtocolError;
 pub use event::{EventBody, EventEnvelope, KnownEvent, Sequence};

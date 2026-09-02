@@ -35,6 +35,10 @@ pub(crate) const MIGRATIONS: &[Migration] = &[
         version: 4,
         sql: SCHEMA_V4,
     },
+    Migration {
+        version: 5,
+        sql: SCHEMA_V5,
+    },
 ];
 
 /// The highest schema version this build understands.
@@ -324,4 +328,11 @@ CREATE TABLE thread_session_binding (
     opaque_session_id TEXT NOT NULL,
     updated_at INTEGER NOT NULL
 );
+";
+
+/// P1.2 ACP harness launch parameters: arguments, environment variable keys, and secret references (ADR 0013, ADR 0014).
+const SCHEMA_V5: &str = r"
+ALTER TABLE harness_binding ADD COLUMN args_json TEXT NOT NULL DEFAULT '[]';
+ALTER TABLE harness_binding ADD COLUMN env_keys_json TEXT NOT NULL DEFAULT '[]';
+ALTER TABLE harness_binding ADD COLUMN secret_refs_json TEXT NOT NULL DEFAULT '[]';
 ";

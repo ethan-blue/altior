@@ -7,12 +7,12 @@ use altior_domain::{
     AGENT_PROFILE_LIST_LIMIT_MAX, AcpHarnessBinding, AgentProfile, AgentProfileCursor,
     AgentProfileId, AgentProfileListLimit, BoundedLabel, BoundedPath, DisplayName, DomainEvent,
     DomainEventKind, EntityError, EventId, EventPayload, HARNESS_BINDING_LIST_LIMIT_MAX,
-    HISTORY_LIMIT_MAX, HarnessBindingCursor, HarnessBindingId, HarnessBindingListLimit,
-    HarnessKind, HistoryLimit, MemoryMode, OperationId, PERMISSION_LIST_LIMIT_MAX,
-    PROJECT_REF_LIST_LIMIT_MAX, PermissionCursor, PermissionDecision, PermissionKind,
-    PermissionListLimit, ProjectId, ProjectRef, ProjectRefCursor, ProjectRefListLimit, SearchQuery,
-    THREAD_LIST_LIMIT_MAX, TURN_LIST_LIMIT_MAX, ThreadCursor, ThreadId, ThreadListLimit,
-    ThreadState, TurnCursor, TurnId, TurnListLimit, UnixMillis,
+    HISTORY_LIMIT_MAX, HarnessArg, HarnessBindingCursor, HarnessBindingId, HarnessBindingListLimit,
+    HarnessEnvKey, HarnessKind, HarnessSecretRef, HistoryLimit, MemoryMode, OperationId,
+    PERMISSION_LIST_LIMIT_MAX, PROJECT_REF_LIST_LIMIT_MAX, PermissionCursor, PermissionDecision,
+    PermissionKind, PermissionListLimit, ProjectId, ProjectRef, ProjectRefCursor,
+    ProjectRefListLimit, SearchQuery, THREAD_LIST_LIMIT_MAX, TURN_LIST_LIMIT_MAX, ThreadCursor,
+    ThreadId, ThreadListLimit, ThreadState, TurnCursor, TurnId, TurnListLimit, UnixMillis,
 };
 use altior_storage::{AppendOutcome, JournalLimit, StorageError, Store, domain_projection_digest};
 
@@ -155,7 +155,7 @@ fn ensure_project_ref(store: &mut Store, name: &str) -> ProjectId {
 #[test]
 fn v3_migration_adds_domain_tables() {
     let store = Store::open_in_memory().expect("store");
-    assert_eq!(store.schema_version().expect("version"), 4);
+    assert_eq!(store.schema_version().expect("version"), 5);
     assert_eq!(store.domain_journal_len().expect("count"), 0);
 }
 
@@ -182,9 +182,9 @@ fn v3_migration_preserves_v1_journal() {
         store.append_event(&env).expect("append");
     }
 
-    // Reopen — v3 migration applied, v1 data intact.
+    // Reopen — v5 migration applied, v1 data intact.
     let store = Store::open(&path).expect("reopen");
-    assert_eq!(store.schema_version().expect("version"), 4);
+    assert_eq!(store.schema_version().expect("version"), 5);
     assert_eq!(store.journal_len().expect("v1 count"), 1);
     assert_eq!(store.domain_journal_len().expect("domain count"), 0);
 }
@@ -204,7 +204,7 @@ fn newer_schema_refused() {
         error,
         StorageError::SchemaTooNew {
             found: 99,
-            supported: 4
+            supported: 5
         }
     ));
 }
@@ -2015,6 +2015,9 @@ fn harness_binding_requires_agent_profile_fk() {
         agent_profile_id: agp_id.clone(),
         label: DisplayName::try_from("Local Claude").expect("label"),
         command: BoundedPath::try_from("/usr/local/bin/claude").expect("path"),
+        args: vec![],
+        env_keys: vec![],
+        secret_refs: vec![],
         created_at: UnixMillis::from_millis(BASE_MILLIS + 100),
     };
 
@@ -2057,6 +2060,15 @@ fn harness_binding_create_duplicate_get_delete_and_list() {
         agent_profile_id: agp_id.clone(),
         label: DisplayName::try_from("Claude Stdio").expect("label"),
         command: BoundedPath::try_from("/usr/bin/claude-stdio").expect("cmd"),
+        args: vec![
+            HarnessArg::try_from("--verbose").expect("arg"),
+            HarnessArg::try_from("--mode=fast").expect("arg"),
+        ],
+        env_keys: vec![
+            HarnessEnvKey::try_from("ANTHROPIC_API_KEY").expect("env"),
+            HarnessEnvKey::try_from("RUST_LOG").expect("env"),
+        ],
+        secret_refs: vec![HarnessSecretRef::try_from("vault:secret:claude_key").expect("sec")],
         created_at: UnixMillis::from_millis(BASE_MILLIS + 100),
     };
 
@@ -2069,7 +2081,7 @@ fn harness_binding_create_duplicate_get_delete_and_list() {
         .create_harness_binding(&binding1)
         .expect("same-id same-content idempotent");
 
-    // Same-ID conflicting content duplicate create fails closed
+    // Same-ID conflicting content duplicate create fails closed (different label)
     let mut conflicting_binding = binding1.clone();
     conflicting_binding.label = DisplayName::try_from("Different Label").expect("label");
     let err_dup = store
@@ -2077,6 +2089,34 @@ fn harness_binding_create_duplicate_get_delete_and_list() {
         .unwrap_err();
     assert!(matches!(
         err_dup,
+        StorageError::HarnessBindingAlreadyExists { harness_binding_id } if harness_binding_id == hnb_id1.as_str()
+    ));
+
+    // Same-ID conflicting content duplicate create fails closed (different args)
+    let mut conflicting_args = binding1.clone();
+    conflicting_args.args = vec![HarnessArg::try_from("--different").expect("arg")];
+    let err_dup_args = store.create_harness_binding(&conflicting_args).unwrap_err();
+    assert!(matches!(
+        err_dup_args,
+        StorageError::HarnessBindingAlreadyExists { harness_binding_id } if harness_binding_id == hnb_id1.as_str()
+    ));
+
+    // Same-ID conflicting content duplicate create fails closed (different env_keys)
+    let mut conflicting_env = binding1.clone();
+    conflicting_env.env_keys = vec![HarnessEnvKey::try_from("OTHER_KEY").expect("env")];
+    let err_dup_env = store.create_harness_binding(&conflicting_env).unwrap_err();
+    assert!(matches!(
+        err_dup_env,
+        StorageError::HarnessBindingAlreadyExists { harness_binding_id } if harness_binding_id == hnb_id1.as_str()
+    ));
+
+    // Same-ID conflicting content duplicate create fails closed (different secret_refs)
+    let mut conflicting_sec = binding1.clone();
+    conflicting_sec.secret_refs =
+        vec![HarnessSecretRef::try_from("vault:other_secret").expect("sec")];
+    let err_dup_sec = store.create_harness_binding(&conflicting_sec).unwrap_err();
+    assert!(matches!(
+        err_dup_sec,
         StorageError::HarnessBindingAlreadyExists { harness_binding_id } if harness_binding_id == hnb_id1.as_str()
     ));
 
@@ -2123,6 +2163,9 @@ fn harness_binding_create_duplicate_get_delete_and_list() {
         agent_profile_id: agp_id.clone(),
         label: DisplayName::try_from("Claude Pipe").expect("label"),
         command: BoundedPath::try_from("/usr/bin/claude-pipe").expect("cmd"),
+        args: vec![],
+        env_keys: vec![],
+        secret_refs: vec![],
         created_at: UnixMillis::from_millis(BASE_MILLIS + 100),
     };
     store
@@ -2174,6 +2217,9 @@ fn harness_binding_reopen_equivalence() {
         agent_profile_id: agp_id.clone(),
         label: DisplayName::try_from("Claude Stdio").expect("label"),
         command: BoundedPath::try_from("/usr/bin/claude-stdio").expect("cmd"),
+        args: vec![HarnessArg::try_from("--flag").expect("arg")],
+        env_keys: vec![HarnessEnvKey::try_from("FOO_ENV").expect("env")],
+        secret_refs: vec![HarnessSecretRef::try_from("vault:sec1").expect("sec")],
         created_at: UnixMillis::from_millis(BASE_MILLIS + 100),
     };
 
@@ -3859,6 +3905,7 @@ fn permission_decision_second_decision_and_cross_context_rejection() {
 }
 
 #[test]
+#[allow(clippy::too_many_lines)]
 fn harness_binding_upsert_atomic_and_rejects_immutable_modifications() {
     let mut store = Store::open_in_memory().expect("store");
     let agp_id1 = agent_id("agentone00000000");
@@ -3895,6 +3942,9 @@ fn harness_binding_upsert_atomic_and_rejects_immutable_modifications() {
         agent_profile_id: non_existent_agent,
         label: DisplayName::try_from("Binding 1").expect("label"),
         command: BoundedPath::try_from("/bin/cmd1").expect("cmd"),
+        args: vec![],
+        env_keys: vec![],
+        secret_refs: vec![],
         created_at: UnixMillis::from_millis(BASE_MILLIS + 100),
     };
     let err_agent = store
@@ -3911,6 +3961,9 @@ fn harness_binding_upsert_atomic_and_rejects_immutable_modifications() {
         agent_profile_id: agp_id1.clone(),
         label: DisplayName::try_from("Binding Initial").expect("label"),
         command: BoundedPath::try_from("/bin/initial").expect("cmd"),
+        args: vec![HarnessArg::try_from("--init-flag").expect("arg")],
+        env_keys: vec![HarnessEnvKey::try_from("INIT_ENV").expect("env")],
+        secret_refs: vec![HarnessSecretRef::try_from("vault:sec_init").expect("sec")],
         created_at: UnixMillis::from_millis(BASE_MILLIS + 100),
     };
     store
@@ -3923,13 +3976,22 @@ fn harness_binding_upsert_atomic_and_rejects_immutable_modifications() {
         .expect("found");
     assert_eq!(fetched.label.as_str(), "Binding Initial");
     assert_eq!(fetched.command.as_str(), "/bin/initial");
+    assert_eq!(fetched.args, binding.args);
+    assert_eq!(fetched.env_keys, binding.env_keys);
+    assert_eq!(fetched.secret_refs, binding.secret_refs);
 
-    // Valid upsert updates label and command
+    // Valid upsert updates label, command, args, env_keys, secret_refs
     let updated_binding = AcpHarnessBinding {
         id: hnb_id.clone(),
         agent_profile_id: agp_id1.clone(),
         label: DisplayName::try_from("Binding Updated").expect("label"),
         command: BoundedPath::try_from("/bin/updated").expect("cmd"),
+        args: vec![
+            HarnessArg::try_from("--updated-flag").expect("arg"),
+            HarnessArg::try_from("--another-flag").expect("arg"),
+        ],
+        env_keys: vec![HarnessEnvKey::try_from("UPDATED_ENV").expect("env")],
+        secret_refs: vec![HarnessSecretRef::try_from("vault:sec_updated").expect("sec")],
         created_at: UnixMillis::from_millis(BASE_MILLIS + 100),
     };
     store
@@ -3942,6 +4004,9 @@ fn harness_binding_upsert_atomic_and_rejects_immutable_modifications() {
         .expect("found");
     assert_eq!(fetched_up.label.as_str(), "Binding Updated");
     assert_eq!(fetched_up.command.as_str(), "/bin/updated");
+    assert_eq!(fetched_up.args, updated_binding.args);
+    assert_eq!(fetched_up.env_keys, updated_binding.env_keys);
+    assert_eq!(fetched_up.secret_refs, updated_binding.secret_refs);
 
     // Upsert attempting to change agent_profile_id fails with InvalidEntityData
     let mut bad_agent_mod = updated_binding.clone();
@@ -4102,4 +4167,515 @@ fn project_ref_upsert_and_delete_atomic() {
         err_ref,
         StorageError::ProjectReferencedByThreads { .. }
     ));
+}
+
+#[test]
+fn harness_binding_launch_params_roundtrip_and_upsert_update() {
+    let mut store = Store::open_in_memory().expect("store");
+    let agp_id = agent_id("agentroundtrip01");
+
+    store
+        .create_agent_profile(&AgentProfile {
+            id: agp_id.clone(),
+            display_name: DisplayName::try_from("Roundtrip Agent").expect("name"),
+            preferred_harness: HarnessKind::Acp,
+            memory_mode: MemoryMode::Off,
+            created_at: UnixMillis::from_millis(BASE_MILLIS + 10),
+            updated_at: UnixMillis::from_millis(BASE_MILLIS + 10),
+        })
+        .expect("create agent");
+
+    let hnb_id = binding_id("bindingroundtrip");
+    let initial_binding = AcpHarnessBinding {
+        id: hnb_id.clone(),
+        agent_profile_id: agp_id.clone(),
+        label: DisplayName::try_from("Initial Harness").expect("label"),
+        command: BoundedPath::try_from("/usr/local/bin/agent-harness").expect("cmd"),
+        args: vec![
+            HarnessArg::try_from("--port=8080").expect("arg"),
+            HarnessArg::try_from("--log-level=debug").expect("arg"),
+        ],
+        env_keys: vec![
+            HarnessEnvKey::try_from("API_SECRET_KEY").expect("env"),
+            HarnessEnvKey::try_from("HOST_IP").expect("env"),
+        ],
+        secret_refs: vec![
+            HarnessSecretRef::try_from("vault:credentials:key1").expect("sec"),
+            HarnessSecretRef::try_from("vault:credentials:key2").expect("sec"),
+        ],
+        created_at: UnixMillis::from_millis(BASE_MILLIS + 100),
+    };
+
+    // Create binding
+    store
+        .create_harness_binding(&initial_binding)
+        .expect("create harness binding");
+
+    // Fetch by ID
+    let fetched = store
+        .harness_binding_by_id(&hnb_id)
+        .expect("query")
+        .expect("must exist");
+    assert_eq!(fetched, initial_binding);
+    assert_eq!(fetched.args.len(), 2);
+    assert_eq!(fetched.args[0].as_str(), "--port=8080");
+    assert_eq!(fetched.args[1].as_str(), "--log-level=debug");
+    assert_eq!(fetched.env_keys.len(), 2);
+    assert_eq!(fetched.env_keys[0].as_str(), "API_SECRET_KEY");
+    assert_eq!(fetched.env_keys[1].as_str(), "HOST_IP");
+    assert_eq!(fetched.secret_refs.len(), 2);
+    assert_eq!(fetched.secret_refs[0].as_str(), "vault:credentials:key1");
+    assert_eq!(fetched.secret_refs[1].as_str(), "vault:credentials:key2");
+
+    // Fetch via list
+    let list = store
+        .harness_bindings_for_agent(
+            &agp_id,
+            None,
+            HarnessBindingListLimit::try_new(10).expect("limit"),
+        )
+        .expect("list");
+    assert_eq!(list.len(), 1);
+    assert_eq!(list[0], initial_binding);
+
+    // Idempotent create with exact same content succeeds
+    store
+        .create_harness_binding(&initial_binding)
+        .expect("idempotent create");
+
+    // Conflicting create fails
+    let mut conflict = initial_binding.clone();
+    conflict.args = vec![HarnessArg::try_from("--different").expect("arg")];
+    let err_conflict = store.create_harness_binding(&conflict).unwrap_err();
+    assert!(matches!(
+        err_conflict,
+        StorageError::HarnessBindingAlreadyExists { .. }
+    ));
+
+    // Upsert update changes args, env_keys, secret_refs, label, command
+    let updated_binding = AcpHarnessBinding {
+        id: hnb_id.clone(),
+        agent_profile_id: agp_id.clone(),
+        label: DisplayName::try_from("Updated Harness").expect("label"),
+        command: BoundedPath::try_from("/usr/local/bin/agent-harness-v2").expect("cmd"),
+        args: vec![HarnessArg::try_from("--production").expect("arg")],
+        env_keys: vec![HarnessEnvKey::try_from("PROD_ENV").expect("env")],
+        secret_refs: vec![HarnessSecretRef::try_from("vault:prod:sec").expect("sec")],
+        created_at: UnixMillis::from_millis(BASE_MILLIS + 100),
+    };
+    store
+        .upsert_harness_binding(&updated_binding)
+        .expect("upsert update");
+
+    let fetched_updated = store
+        .harness_binding_by_id(&hnb_id)
+        .expect("query")
+        .expect("must exist");
+    assert_eq!(fetched_updated, updated_binding);
+}
+
+#[test]
+fn harness_binding_launch_params_reopen_equivalence() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("hnb_reopen.db");
+
+    let agp_id = agent_id("agentlaunchreopen");
+    let hnb_id = binding_id("bindingreopen01");
+    let binding = AcpHarnessBinding {
+        id: hnb_id.clone(),
+        agent_profile_id: agp_id.clone(),
+        label: DisplayName::try_from("Persistent Harness").expect("label"),
+        command: BoundedPath::try_from("/opt/agent/bin").expect("cmd"),
+        args: vec![
+            HarnessArg::try_from("--arg1").expect("arg"),
+            HarnessArg::try_from("--arg2").expect("arg"),
+        ],
+        env_keys: vec![
+            HarnessEnvKey::try_from("ENV_ONE").expect("env"),
+            HarnessEnvKey::try_from("ENV_TWO").expect("env"),
+        ],
+        secret_refs: vec![
+            HarnessSecretRef::try_from("vault:ref1").expect("sec"),
+            HarnessSecretRef::try_from("vault:ref2").expect("sec"),
+        ],
+        created_at: UnixMillis::from_millis(BASE_MILLIS + 100),
+    };
+
+    {
+        let mut store = Store::open(&path).expect("open");
+        store
+            .create_agent_profile(&AgentProfile {
+                id: agp_id.clone(),
+                display_name: DisplayName::try_from("Reopen Agent").expect("name"),
+                preferred_harness: HarnessKind::Acp,
+                memory_mode: MemoryMode::Off,
+                created_at: UnixMillis::from_millis(BASE_MILLIS + 50),
+                updated_at: UnixMillis::from_millis(BASE_MILLIS + 50),
+            })
+            .expect("create agent");
+        store
+            .create_harness_binding(&binding)
+            .expect("create binding");
+    }
+
+    let store = Store::open(&path).expect("reopen");
+    let fetched = store
+        .harness_binding_by_id(&hnb_id)
+        .expect("get")
+        .expect("must exist");
+    assert_eq!(fetched, binding);
+
+    let list = store
+        .harness_bindings_for_agent(
+            &agp_id,
+            None,
+            HarnessBindingListLimit::try_new(5).expect("limit"),
+        )
+        .expect("list");
+    assert_eq!(list.len(), 1);
+    assert_eq!(list[0], binding);
+}
+
+#[test]
+#[allow(clippy::too_many_lines)]
+fn harness_binding_v4_schema_migration_defaults_empty_vectors() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("v4_migration_test.db");
+
+    let legacy_agp_id = agent_id("v4legacyagent1");
+    let legacy_hnb_id = binding_id("v4legacybinding1");
+
+    // Manually create a schema v4 database using rusqlite
+    {
+        let raw = rusqlite::Connection::open(&path).expect("raw open");
+        // Apply V1
+        raw.execute_batch(
+            r"
+            CREATE TABLE journal (
+                seq INTEGER PRIMARY KEY AUTOINCREMENT,
+                event_id TEXT NOT NULL UNIQUE,
+                thread_id TEXT,
+                turn_id TEXT,
+                stream_sequence INTEGER NOT NULL,
+                kind TEXT NOT NULL,
+                payload BLOB NOT NULL,
+                occurred_at INTEGER NOT NULL
+            );
+            CREATE INDEX journal_thread_seq ON journal(thread_id, seq);
+            CREATE TABLE thread_projection (
+                thread_id TEXT PRIMARY KEY,
+                event_count INTEGER NOT NULL,
+                first_seq INTEGER NOT NULL,
+                last_seq INTEGER NOT NULL,
+                last_event_id TEXT NOT NULL,
+                last_kind TEXT NOT NULL,
+                updated_at INTEGER NOT NULL
+            );
+            CREATE TABLE projection_state (
+                id INTEGER PRIMARY KEY CHECK (id = 1),
+                journal_max_seq INTEGER NOT NULL,
+                projection_version INTEGER NOT NULL,
+                rebuilt_at INTEGER NOT NULL
+            );
+        ",
+        )
+        .expect("v1");
+
+        // Apply V2
+        raw.execute_batch(
+            r"
+            CREATE TABLE domain_journal (
+                seq INTEGER PRIMARY KEY AUTOINCREMENT,
+                event_id TEXT NOT NULL UNIQUE,
+                thread_id TEXT,
+                turn_id TEXT,
+                operation_id TEXT,
+                kind TEXT NOT NULL,
+                payload BLOB NOT NULL,
+                occurred_at INTEGER NOT NULL
+            );
+            CREATE INDEX domain_journal_thread_seq ON domain_journal(thread_id, seq);
+            CREATE INDEX domain_journal_turn_seq ON domain_journal(turn_id, seq);
+            CREATE TABLE thread (
+                thread_id TEXT PRIMARY KEY,
+                agent_profile_id TEXT NOT NULL,
+                title TEXT NOT NULL DEFAULT '',
+                state TEXT NOT NULL DEFAULT 'open',
+                project_id TEXT,
+                event_count INTEGER NOT NULL DEFAULT 0,
+                first_event_seq INTEGER,
+                last_event_seq INTEGER,
+                last_event_id TEXT,
+                last_event_kind TEXT,
+                created_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL
+            );
+            CREATE TABLE turn (
+                turn_id TEXT PRIMARY KEY,
+                thread_id TEXT NOT NULL,
+                operation_id TEXT,
+                state TEXT NOT NULL DEFAULT 'active',
+                delivery TEXT NOT NULL DEFAULT 'absent',
+                event_count INTEGER NOT NULL DEFAULT 0,
+                started_at INTEGER NOT NULL,
+                ended_at INTEGER
+            );
+            CREATE TABLE permission (
+                event_id TEXT PRIMARY KEY,
+                turn_id TEXT NOT NULL,
+                thread_id TEXT NOT NULL,
+                kind TEXT NOT NULL,
+                description TEXT NOT NULL DEFAULT '',
+                decision TEXT NOT NULL DEFAULT 'pending',
+                requested_at INTEGER NOT NULL,
+                decided_at INTEGER
+            );
+            CREATE TABLE agent_profile (
+                agent_profile_id TEXT PRIMARY KEY,
+                display_name TEXT NOT NULL,
+                preferred_harness TEXT NOT NULL DEFAULT 'acp',
+                memory_mode TEXT NOT NULL DEFAULT 'long_term',
+                created_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL
+            );
+            CREATE TABLE harness_binding (
+                harness_binding_id TEXT PRIMARY KEY,
+                agent_profile_id TEXT NOT NULL,
+                label TEXT NOT NULL,
+                command TEXT NOT NULL,
+                created_at INTEGER NOT NULL
+            );
+            CREATE INDEX harness_binding_agent ON harness_binding(agent_profile_id);
+            CREATE TABLE project_ref (
+                project_id TEXT PRIMARY KEY,
+                label TEXT NOT NULL,
+                path TEXT NOT NULL,
+                created_at INTEGER NOT NULL
+            );
+            CREATE TABLE domain_projection_state (
+                id INTEGER PRIMARY KEY CHECK (id = 1),
+                journal_max_seq INTEGER NOT NULL,
+                projection_version INTEGER NOT NULL,
+                rebuilt_at INTEGER NOT NULL
+            );
+            CREATE VIRTUAL TABLE thread_search USING fts5(
+                thread_id UNINDEXED,
+                title,
+                content='thread',
+                content_rowid='rowid'
+            );
+        ",
+        )
+        .expect("v2");
+
+        // Apply V3
+        raw.execute_batch(
+            r"
+            ALTER TABLE domain_projection_state ADD COLUMN projection_digest TEXT NOT NULL DEFAULT '';
+        ",
+        )
+        .expect("v3");
+
+        // Apply V4
+        raw.execute_batch(
+            r"
+            CREATE TABLE runtime_checkpoint (
+                id TEXT PRIMARY KEY,
+                thread_id TEXT NOT NULL,
+                turn_id TEXT,
+                operation_id TEXT NOT NULL,
+                boundary_kind TEXT NOT NULL,
+                state TEXT NOT NULL,
+                remote_request_id TEXT,
+                diagnostic_summary TEXT,
+                created_at INTEGER NOT NULL,
+                settled_at INTEGER
+            );
+            CREATE TABLE thread_session_binding (
+                thread_id TEXT PRIMARY KEY,
+                harness_binding_id TEXT NOT NULL,
+                opaque_session_id TEXT NOT NULL,
+                updated_at INTEGER NOT NULL
+            );
+        ",
+        )
+        .expect("v4");
+
+        raw.pragma_update(None, "user_version", 4)
+            .expect("stamp v4");
+
+        // Insert legacy data into v4 tables
+        raw.execute(
+            "INSERT INTO agent_profile (agent_profile_id, display_name, preferred_harness, memory_mode, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            rusqlite::params![
+                legacy_agp_id.as_str(),
+                "Legacy Agent",
+                "acp",
+                "long_term",
+                1_700_000_000_050_i64,
+                1_700_000_000_050_i64,
+            ],
+        )
+        .expect("insert agent");
+
+        raw.execute(
+            "INSERT INTO harness_binding (harness_binding_id, agent_profile_id, label, command, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+            rusqlite::params![
+                legacy_hnb_id.as_str(),
+                legacy_agp_id.as_str(),
+                "Legacy Binding",
+                "/usr/bin/legacy-agent",
+                1_700_000_000_100_i64,
+            ],
+        )
+        .expect("insert harness binding");
+    }
+
+    // Now open with Store (which applies v5 migration)
+    let mut store = Store::open(&path).expect("open and migrate to v5");
+    assert_eq!(store.schema_version().expect("version"), 5);
+
+    // Read back the legacy binding
+    let legacy_binding = store
+        .harness_binding_by_id(&legacy_hnb_id)
+        .expect("get legacy binding")
+        .expect("must exist");
+
+    assert_eq!(legacy_binding.label.as_str(), "Legacy Binding");
+    assert_eq!(legacy_binding.command.as_str(), "/usr/bin/legacy-agent");
+    assert!(legacy_binding.args.is_empty());
+    assert!(legacy_binding.env_keys.is_empty());
+    assert!(legacy_binding.secret_refs.is_empty());
+
+    // Create a new binding with non-empty parameters in migrated DB
+    let new_hnb_id = binding_id("v5newbinding01");
+    let new_binding = AcpHarnessBinding {
+        id: new_hnb_id.clone(),
+        agent_profile_id: legacy_agp_id.clone(),
+        label: DisplayName::try_from("New Binding").expect("label"),
+        command: BoundedPath::try_from("/usr/bin/new-agent").expect("cmd"),
+        args: vec![HarnessArg::try_from("--v5").expect("arg")],
+        env_keys: vec![HarnessEnvKey::try_from("V5_KEY").expect("env")],
+        secret_refs: vec![HarnessSecretRef::try_from("vault:v5_secret").expect("sec")],
+        created_at: UnixMillis::from_millis(BASE_MILLIS + 200),
+    };
+    store
+        .create_harness_binding(&new_binding)
+        .expect("create new");
+
+    // List should return both legacy and new bindings
+    let all = store
+        .harness_bindings_for_agent(
+            &legacy_agp_id,
+            None,
+            HarnessBindingListLimit::try_new(10).expect("limit"),
+        )
+        .expect("list");
+    assert_eq!(all.len(), 2);
+    assert_eq!(all[0].id, legacy_hnb_id);
+    assert_eq!(all[1].id, new_hnb_id);
+}
+
+#[test]
+fn harness_binding_corrupt_json_rejects_with_invalid_entity_data() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("corrupt_json_test.db");
+
+    let agp_id = agent_id("corruptagent1");
+    let hnb_id = binding_id("corruptbinding1");
+
+    {
+        let mut store = Store::open(&path).expect("open");
+        store
+            .create_agent_profile(&AgentProfile {
+                id: agp_id.clone(),
+                display_name: DisplayName::try_from("Corrupt Test Agent").expect("name"),
+                preferred_harness: HarnessKind::Acp,
+                memory_mode: MemoryMode::Off,
+                created_at: UnixMillis::from_millis(BASE_MILLIS + 50),
+                updated_at: UnixMillis::from_millis(BASE_MILLIS + 50),
+            })
+            .expect("create agent");
+
+        let valid_binding = AcpHarnessBinding {
+            id: hnb_id.clone(),
+            agent_profile_id: agp_id.clone(),
+            label: DisplayName::try_from("Valid Label").expect("label"),
+            command: BoundedPath::try_from("/usr/bin/valid").expect("cmd"),
+            args: vec![],
+            env_keys: vec![],
+            secret_refs: vec![],
+            created_at: UnixMillis::from_millis(BASE_MILLIS + 100),
+        };
+        store
+            .create_harness_binding(&valid_binding)
+            .expect("create");
+    }
+
+    // Corrupt args_json with malformed JSON
+    {
+        let raw = rusqlite::Connection::open(&path).expect("raw open");
+        raw.execute(
+            "UPDATE harness_binding SET args_json = '{not_valid_json' WHERE harness_binding_id = ?1",
+            rusqlite::params![hnb_id.as_str()],
+        )
+        .expect("corrupt args_json");
+    }
+
+    let store = Store::open(&path).expect("reopen");
+    let err = store.harness_binding_by_id(&hnb_id).unwrap_err();
+    assert!(matches!(err, StorageError::InvalidEntityData { .. }));
+
+    let err_list = store
+        .harness_bindings_for_agent(
+            &agp_id,
+            None,
+            HarnessBindingListLimit::try_new(10).expect("limit"),
+        )
+        .unwrap_err();
+    assert!(matches!(err_list, StorageError::InvalidEntityData { .. }));
+
+    // Corrupt env_keys_json with non-array JSON (e.g. integer or object)
+    {
+        let raw = rusqlite::Connection::open(&path).expect("raw open");
+        raw.execute(
+            "UPDATE harness_binding SET args_json = '[]', env_keys_json = '{\"not\":\"an_array\"}' WHERE harness_binding_id = ?1",
+            rusqlite::params![hnb_id.as_str()],
+        )
+        .expect("corrupt env_keys_json non-array");
+    }
+
+    let store = Store::open(&path).expect("reopen");
+    let err = store.harness_binding_by_id(&hnb_id).unwrap_err();
+    assert!(matches!(err, StorageError::InvalidEntityData { .. }));
+
+    // Corrupt env_keys_json with invalid identifier
+    {
+        let raw = rusqlite::Connection::open(&path).expect("raw open");
+        raw.execute(
+            "UPDATE harness_binding SET env_keys_json = '[\"123_INVALID_IDENTIFIER\"]' WHERE harness_binding_id = ?1",
+            rusqlite::params![hnb_id.as_str()],
+        )
+        .expect("corrupt env_keys_json invalid identifier");
+    }
+
+    let store = Store::open(&path).expect("reopen");
+    let err = store.harness_binding_by_id(&hnb_id).unwrap_err();
+    assert!(matches!(err, StorageError::InvalidEntityData { .. }));
+
+    // Corrupt secret_refs_json with control character
+    {
+        let raw = rusqlite::Connection::open(&path).expect("raw open");
+        raw.execute(
+            "UPDATE harness_binding SET env_keys_json = '[]', secret_refs_json = '[\"invalid\\u0000secret\"]' WHERE harness_binding_id = ?1",
+            rusqlite::params![hnb_id.as_str()],
+        )
+        .expect("corrupt secret_refs_json control char");
+    }
+
+    let store = Store::open(&path).expect("reopen");
+    let err = store.harness_binding_by_id(&hnb_id).unwrap_err();
+    assert!(matches!(err, StorageError::InvalidEntityData { .. }));
 }

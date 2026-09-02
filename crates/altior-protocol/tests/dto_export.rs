@@ -18,12 +18,13 @@ use altior_protocol::{
     AgentProfileDto, BoundedPayload, CancelTurnCommand, CapabilityId, CapabilitySet,
     CapabilitySupport, CommandEnvelope, CommandKind, ConfigureAgentCommand, CoreGreeting,
     CoreHello, CreateThreadCommand, DesktopHello, DiagnosticsCommand, EventBody, EventEnvelope,
-    GetHistoryCommand, HarnessBindingDto, KnownEvent, LaunchToken, ListThreadsCommand,
-    NegotiatedHandshake, OpenThreadCommand, PermissionDto, ProductVersion, ProtocolVersion,
-    ProtocolVersionRange, RespondPermissionCommand, RetainedWindow, RuntimeDiagnosticsDto,
-    RuntimeStatusCommand, SearchThreadsCommand, Sequence, SnapshotEnvelope, StartTurnCommand,
-    TestHarnessBindingCommand, ThreadCursorDto, ThreadDto, ThreadHistoryResponseDto,
-    ThreadListResponseDto, ThreadSnapshotDto, ThreadSummaryDto, TurnCursorDto, TurnDto,
+    GetHistoryCommand, HarnessBindingConfigDto, HarnessBindingDto, KnownEvent, LaunchToken,
+    ListThreadsCommand, NegotiatedHandshake, OpenThreadCommand, PermissionDto, ProductVersion,
+    ProtocolVersion, ProtocolVersionRange, RespondPermissionCommand, RetainedWindow,
+    RuntimeDiagnosticsDto, RuntimeStatusCommand, SearchThreadsCommand, Sequence, SnapshotEnvelope,
+    StartTurnCommand, TestHarnessBindingCommand, ThreadCursorDto, ThreadDto,
+    ThreadHistoryResponseDto, ThreadListResponseDto, ThreadSnapshotDto, ThreadSummaryDto,
+    TurnCursorDto, TurnDto,
 };
 
 fn dto_export_dir() -> PathBuf {
@@ -58,6 +59,7 @@ fn export_all_types() {
     TurnDto::export_all(&cfg).expect("export TurnDto");
     PermissionDto::export_all(&cfg).expect("export PermissionDto");
     AgentProfileDto::export_all(&cfg).expect("export AgentProfileDto");
+    HarnessBindingConfigDto::export_all(&cfg).expect("export HarnessBindingConfigDto");
     HarnessBindingDto::export_all(&cfg).expect("export HarnessBindingDto");
     ThreadCursorDto::export_all(&cfg).expect("export ThreadCursorDto");
     TurnCursorDto::export_all(&cfg).expect("export TurnCursorDto");

@@ -83,6 +83,7 @@ export function App({
   const store = appStore.getTimelineStore(currentThread.id);
   const focusedRow = focusedRowId == null ? null : store.getRow(focusedRowId);
   const activeAgent =
+    appState.agents.find((a) => a.name === currentThread.agent || a.id === currentThread.agent) ??
     appState.agents.find((a) => a.id === appState.selectedAgentId) ??
     appState.agents[0];
 
@@ -131,13 +132,14 @@ export function App({
   );
 
   const onCreateThread = useCallback(async () => {
+    const targetAgentId = appState.selectedAgentId || activeAgent?.id;
     const newThread = await appStore.createThread(
       `Thread ${appState.threads.length + 1}`,
-      activeAgent?.id,
+      targetAgentId,
     );
     uiStore.selectThread(newThread.id);
     setFocusedRowId(null);
-  }, [activeAgent?.id, appState.threads.length, appStore, uiStore]);
+  }, [activeAgent?.id, appState.selectedAgentId, appState.threads.length, appStore, uiStore]);
 
   const onActivityNavigate = useCallback(
     (dest: string) => {
@@ -197,7 +199,12 @@ export function App({
           title={currentThread.title}
           agent={currentThread.agent}
           agents={appState.agents}
+          selectedAgentId={
+            appState.agents.find((a) => a.name === currentThread.agent || a.id === currentThread.agent)?.id ??
+            appState.selectedAgentId
+          }
           onSelectAgent={(agentId) => appStore.selectAgent(agentId)}
+          onAddAgent={() => appStore.openOnboarding(true)}
           theme={ui.theme}
           onToggleTheme={uiStore.toggleTheme}
           inspectorOpen={ui.inspectorOpen}
