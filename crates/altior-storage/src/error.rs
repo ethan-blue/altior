@@ -162,6 +162,21 @@ pub enum StorageError {
         /// The actual thread ID the turn belongs to.
         actual_thread_id: String,
     },
+    /// The specified memory was not found.
+    MemoryNotFound {
+        /// The missing memory ID.
+        memory_id: String,
+    },
+    /// Content matched a secret-shaped pattern and was refused before any
+    /// durable write (ADR memory policy; AGENTS.md "Memory").
+    SecretShapedContent,
+    /// A list or search page limit exceeded its bounded cap.
+    LimitOutOfRange {
+        /// The rejected unsigned value.
+        value: u32,
+        /// The maximum accepted value.
+        max: u32,
+    },
     /// A SQLite failure not classified above.
     Sqlite {
         /// The operation context, e.g. `"append_event"`.
@@ -278,6 +293,15 @@ impl fmt::Display for StorageError {
                     "turn {turn_id} belongs to thread {actual_thread_id}, expected {expected_thread_id}"
                 )
             }
+            Self::MemoryNotFound { memory_id } => {
+                write!(f, "memory {memory_id} not found")
+            }
+            Self::SecretShapedContent => {
+                f.write_str("content matches a secret-shaped pattern; refusing durable write")
+            }
+            Self::LimitOutOfRange { value, max } => {
+                write!(f, "page limit {value} exceeds the maximum {max}")
+            }
             Self::Sqlite { context, .. } => write!(f, "SQLite failure during {context}"),
         }
     }
@@ -309,7 +333,10 @@ impl std::error::Error for StorageError {
             | Self::CheckpointSettlementConflict { .. }
             | Self::InvalidCheckpointTransition { .. }
             | Self::TurnNotFound { .. }
-            | Self::TurnThreadMismatch { .. } => None,
+            | Self::TurnThreadMismatch { .. }
+            | Self::MemoryNotFound { .. }
+            | Self::SecretShapedContent
+            | Self::LimitOutOfRange { .. } => None,
         }
     }
 }

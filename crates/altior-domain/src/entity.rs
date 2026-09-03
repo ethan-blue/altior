@@ -10,8 +10,8 @@ use std::fmt;
 use serde::{Deserialize, Serialize};
 
 use crate::id::{
-    AgentProfileId, EventId, HarnessBindingId, OperationId, ProjectId, RuntimeCheckpointId,
-    ThreadId, TurnId,
+    AgentProfileId, EventId, HarnessBindingId, MemoryId, OperationId, ProjectId,
+    RuntimeCheckpointId, ThreadId, TurnId,
 };
 use crate::time::UnixMillis;
 use crate::{DeliveryState, HarnessKind, MemoryMode};
@@ -1390,6 +1390,18 @@ pub enum DomainEventKind {
     PermissionRequested,
     /// A permission decision was recorded.
     PermissionDecided,
+    /// A candidate memory was proposed.
+    MemoryProposed,
+    /// A memory was confirmed.
+    MemoryConfirmed,
+    /// A candidate memory was rejected.
+    MemoryRejected,
+    /// A confirmed memory was superseded by a newer memory record.
+    MemorySuperseded,
+    /// A confirmed memory was forgotten (tombstone).
+    MemoryForgotten,
+    /// A memory record expired.
+    MemoryExpired,
     /// An event that does not match any known domain kind; the string
     /// is preserved for forward compatibility.
     Other(String),
@@ -1413,6 +1425,12 @@ impl DomainEventKind {
             Self::TurnFailed => "turn.failed",
             Self::PermissionRequested => "permission.requested",
             Self::PermissionDecided => "permission.decided",
+            Self::MemoryProposed => "memory.proposed",
+            Self::MemoryConfirmed => "memory.confirmed",
+            Self::MemoryRejected => "memory.rejected",
+            Self::MemorySuperseded => "memory.superseded",
+            Self::MemoryForgotten => "memory.forgotten",
+            Self::MemoryExpired => "memory.expired",
             Self::Other(s) => s,
         }
     }
@@ -1445,6 +1463,12 @@ impl DomainEventKind {
             "turn.failed" => Self::TurnFailed,
             "permission.requested" => Self::PermissionRequested,
             "permission.decided" => Self::PermissionDecided,
+            "memory.proposed" => Self::MemoryProposed,
+            "memory.confirmed" => Self::MemoryConfirmed,
+            "memory.rejected" => Self::MemoryRejected,
+            "memory.superseded" => Self::MemorySuperseded,
+            "memory.forgotten" => Self::MemoryForgotten,
+            "memory.expired" => Self::MemoryExpired,
             other => Self::Other(other.to_owned()),
         })
     }
@@ -1508,6 +1532,747 @@ pub struct DomainEvent {
     pub payload: EventPayload,
     /// When the event occurred.
     pub occurred_at: UnixMillis,
+}
+
+// ── Memory domain model (P2.1, ADR 0017) ───────────────────────────
+
+/// Maximum length of memory content in bytes (8 KiB).
+pub const MEMORY_CONTENT_MAX_BYTES: usize = 8192;
+
+/// Maximum length of a memory provenance excerpt in bytes (1 KiB).
+pub const MEMORY_EXCERPT_MAX_BYTES: usize = 1024;
+
+/// A bounded memory content text validated at construction.
+#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[serde(try_from = "String", into = "String")]
+pub struct MemoryContent(String);
+
+impl MemoryContent {
+    /// The byte-cap of memory content.
+    #[must_use]
+    pub const fn capacity() -> usize {
+        MEMORY_CONTENT_MAX_BYTES
+    }
+
+    /// Returns the content as a string slice.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl TryFrom<&str> for MemoryContent {
+    type Error = EntityError;
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        let trimmed = value.trim();
+        if trimmed.is_empty() {
+            return Err(EntityError::EmptyMemoryContent);
+        }
+        if trimmed.len() > MEMORY_CONTENT_MAX_BYTES {
+            return Err(EntityError::MemoryContentTooLong {
+                length: trimmed.len(),
+                max: MEMORY_CONTENT_MAX_BYTES,
+            });
+        }
+        Ok(Self(trimmed.to_owned()))
+    }
+}
+
+impl TryFrom<String> for MemoryContent {
+    type Error = EntityError;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        Self::try_from(value.as_str())
+    }
+}
+
+impl From<MemoryContent> for String {
+    fn from(value: MemoryContent) -> Self {
+        value.0
+    }
+}
+
+impl fmt::Display for MemoryContent {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+/// A bounded memory provenance excerpt validated at construction.
+#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[serde(try_from = "String", into = "String")]
+pub struct MemoryExcerpt(String);
+
+impl MemoryExcerpt {
+    /// The byte-cap of a memory excerpt.
+    #[must_use]
+    pub const fn capacity() -> usize {
+        MEMORY_EXCERPT_MAX_BYTES
+    }
+
+    /// Returns the excerpt as a string slice.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    /// Whether the excerpt is empty.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+}
+
+impl TryFrom<&str> for MemoryExcerpt {
+    type Error = EntityError;
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        let trimmed = value.trim();
+        if trimmed.len() > MEMORY_EXCERPT_MAX_BYTES {
+            return Err(EntityError::MemoryExcerptTooLong {
+                length: trimmed.len(),
+                max: MEMORY_EXCERPT_MAX_BYTES,
+            });
+        }
+        Ok(Self(trimmed.to_owned()))
+    }
+}
+
+impl TryFrom<String> for MemoryExcerpt {
+    type Error = EntityError;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        Self::try_from(value.as_str())
+    }
+}
+
+impl From<MemoryExcerpt> for String {
+    fn from(value: MemoryExcerpt) -> Self {
+        value.0
+    }
+}
+
+impl fmt::Display for MemoryExcerpt {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+/// Scope of applicability for a memory.
+#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
+pub enum MemoryScope {
+    /// Universally applicable memory.
+    Global,
+    /// Scoped to a specific person.
+    Person(BoundedLabel),
+    /// Scoped to a specific project.
+    Project(BoundedLabel),
+    /// Scoped to a specific thread.
+    Thread(BoundedLabel),
+}
+
+impl MemoryScope {
+    /// Returns the canonical scope kind string.
+    #[must_use]
+    pub const fn kind_str(&self) -> &'static str {
+        match self {
+            Self::Global => "global",
+            Self::Person(_) => "person",
+            Self::Project(_) => "project",
+            Self::Thread(_) => "thread",
+        }
+    }
+
+    /// Returns the target identifier or name, if non-global.
+    #[must_use]
+    pub fn target_str(&self) -> Option<&str> {
+        match self {
+            Self::Global => None,
+            Self::Person(t) | Self::Project(t) | Self::Thread(t) => Some(t.as_str()),
+        }
+    }
+
+    /// Parses a memory scope from kind and optional target strings.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`EntityError`] if kind is unknown or non-global scope has empty/missing target.
+    pub fn try_from_parts(kind: &str, target: Option<&str>) -> Result<Self, EntityError> {
+        match kind {
+            "global" => {
+                if target.is_some() && target != Some("") {
+                    return Err(EntityError::InvalidMemoryScopeKind);
+                }
+                Ok(Self::Global)
+            }
+            "person" => {
+                let target_str = target.ok_or(EntityError::EmptyLabel)?;
+                let label = BoundedLabel::try_from(target_str)?;
+                Ok(Self::Person(label))
+            }
+            "project" => {
+                let target_str = target.ok_or(EntityError::EmptyLabel)?;
+                let label = BoundedLabel::try_from(target_str)?;
+                Ok(Self::Project(label))
+            }
+            "thread" => {
+                let target_str = target.ok_or(EntityError::EmptyLabel)?;
+                let label = BoundedLabel::try_from(target_str)?;
+                Ok(Self::Thread(label))
+            }
+            _ => Err(EntityError::InvalidMemoryScopeKind),
+        }
+    }
+
+    /// Checks whether this scope matches a filter scope.
+    #[must_use]
+    pub fn matches_scope(&self, filter: &Self) -> bool {
+        match (self, filter) {
+            (Self::Global, _) => true,
+            (Self::Person(a), Self::Person(b))
+            | (Self::Project(a), Self::Project(b))
+            | (Self::Thread(a), Self::Thread(b)) => a == b,
+            _ => false,
+        }
+    }
+}
+
+/// Semantic classification of a memory record.
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[serde(try_from = "String", into = "String")]
+pub enum MemoryKind {
+    /// An established fact about the world, user, or project.
+    Fact,
+    /// A user preference or stylistic choice.
+    Preference,
+    /// An explicit user instruction or constraint.
+    Instruction,
+    /// A conversation or session summary.
+    Summary,
+}
+
+impl MemoryKind {
+    /// Returns the canonical string identifier.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Fact => "fact",
+            Self::Preference => "preference",
+            Self::Instruction => "instruction",
+            Self::Summary => "summary",
+        }
+    }
+
+    /// Parses a memory kind from a string slice.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`EntityError::InvalidMemoryKind`] if `s` is not recognized.
+    pub fn try_from_str(s: &str) -> Result<Self, EntityError> {
+        match s {
+            "fact" => Ok(Self::Fact),
+            "preference" => Ok(Self::Preference),
+            "instruction" => Ok(Self::Instruction),
+            "summary" => Ok(Self::Summary),
+            _ => Err(EntityError::InvalidMemoryKind),
+        }
+    }
+}
+
+impl TryFrom<&str> for MemoryKind {
+    type Error = EntityError;
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        Self::try_from_str(value)
+    }
+}
+
+impl TryFrom<String> for MemoryKind {
+    type Error = EntityError;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        Self::try_from_str(&value)
+    }
+}
+
+impl std::str::FromStr for MemoryKind {
+    type Err = EntityError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Self::try_from_str(s)
+    }
+}
+
+impl From<MemoryKind> for String {
+    fn from(kind: MemoryKind) -> Self {
+        kind.as_str().to_owned()
+    }
+}
+
+impl fmt::Display for MemoryKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+/// Lifecycle state of a durable memory record.
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[serde(try_from = "String", into = "String")]
+pub enum MemoryState {
+    /// Inferred candidate awaiting confirmation or rejection.
+    Candidate,
+    /// Confirmed active memory eligible for retrieval.
+    Confirmed,
+    /// Rejected candidate; excluded from retrieval.
+    Rejected,
+    /// Explicitly forgotten memory (tombstone); excluded from retrieval.
+    Forgotten,
+    /// Expired memory past its expiration time; excluded from retrieval.
+    Expired,
+}
+
+impl MemoryState {
+    /// Returns the canonical string identifier.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Candidate => "candidate",
+            Self::Confirmed => "confirmed",
+            Self::Rejected => "rejected",
+            Self::Forgotten => "forgotten",
+            Self::Expired => "expired",
+        }
+    }
+
+    /// Parses a memory state from a string slice.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`EntityError::InvalidMemoryState`] if `s` is not recognized.
+    pub fn try_from_str(s: &str) -> Result<Self, EntityError> {
+        match s {
+            "candidate" => Ok(Self::Candidate),
+            "confirmed" => Ok(Self::Confirmed),
+            "rejected" => Ok(Self::Rejected),
+            "forgotten" => Ok(Self::Forgotten),
+            "expired" => Ok(Self::Expired),
+            _ => Err(EntityError::InvalidMemoryState),
+        }
+    }
+
+    /// Returns whether this state is active and retrievable given superseded and expiration status.
+    #[must_use]
+    pub fn is_retrievable(
+        self,
+        superseded_by: Option<&MemoryId>,
+        expires_at: Option<UnixMillis>,
+        now: UnixMillis,
+    ) -> bool {
+        matches!(self, Self::Confirmed)
+            && superseded_by.is_none()
+            && expires_at.is_none_or(|exp| exp > now)
+    }
+
+    /// Validates whether a state transition from `self` to `next` is allowed.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`EntityError::InvalidMemoryTransition`] on illegal transition.
+    pub fn validate_transition(self, next: Self) -> Result<(), EntityError> {
+        match (self, next) {
+            (Self::Candidate, Self::Confirmed | Self::Rejected)
+            | (Self::Confirmed, Self::Forgotten | Self::Expired) => Ok(()),
+            (from, to) if from == to => Ok(()),
+            (from, to) => Err(EntityError::InvalidMemoryTransition {
+                from: from.as_str().to_owned(),
+                to: to.as_str().to_owned(),
+            }),
+        }
+    }
+}
+
+impl TryFrom<&str> for MemoryState {
+    type Error = EntityError;
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        Self::try_from_str(value)
+    }
+}
+
+impl TryFrom<String> for MemoryState {
+    type Error = EntityError;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        Self::try_from_str(&value)
+    }
+}
+
+impl std::str::FromStr for MemoryState {
+    type Err = EntityError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Self::try_from_str(s)
+    }
+}
+
+impl From<MemoryState> for String {
+    fn from(state: MemoryState) -> Self {
+        state.as_str().to_owned()
+    }
+}
+
+impl fmt::Display for MemoryState {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+/// Sensitivity level for a memory record.
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[serde(try_from = "String", into = "String")]
+pub enum MemorySensitivity {
+    /// Standard memory.
+    Normal,
+    /// Sensitive personal or operational data.
+    Sensitive,
+}
+
+impl MemorySensitivity {
+    /// Returns the canonical string identifier.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Normal => "normal",
+            Self::Sensitive => "sensitive",
+        }
+    }
+
+    /// Parses a memory sensitivity from a string slice.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`EntityError::InvalidMemorySensitivity`] if `s` is not recognized.
+    pub fn try_from_str(s: &str) -> Result<Self, EntityError> {
+        match s {
+            "normal" => Ok(Self::Normal),
+            "sensitive" => Ok(Self::Sensitive),
+            _ => Err(EntityError::InvalidMemorySensitivity),
+        }
+    }
+}
+
+impl TryFrom<&str> for MemorySensitivity {
+    type Error = EntityError;
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        Self::try_from_str(value)
+    }
+}
+
+impl TryFrom<String> for MemorySensitivity {
+    type Error = EntityError;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        Self::try_from_str(&value)
+    }
+}
+
+impl std::str::FromStr for MemorySensitivity {
+    type Err = EntityError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Self::try_from_str(s)
+    }
+}
+
+impl From<MemorySensitivity> for String {
+    fn from(sens: MemorySensitivity) -> Self {
+        sens.as_str().to_owned()
+    }
+}
+
+impl fmt::Display for MemorySensitivity {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+/// Provenance source kind for a memory record.
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[serde(try_from = "String", into = "String")]
+pub enum MemorySource {
+    /// Explicitly stated or requested by the user.
+    Explicit,
+    /// Inferred by model from conversation context.
+    Inferred,
+}
+
+impl MemorySource {
+    /// Returns the canonical string identifier.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Explicit => "explicit",
+            Self::Inferred => "inferred",
+        }
+    }
+
+    /// Whether this source is explicit user statement.
+    #[must_use]
+    pub const fn is_explicit(self) -> bool {
+        matches!(self, Self::Explicit)
+    }
+
+    /// Parses a memory source from a string slice.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`EntityError::InvalidMemorySource`] if `s` is not recognized.
+    pub fn try_from_str(s: &str) -> Result<Self, EntityError> {
+        match s {
+            "explicit" => Ok(Self::Explicit),
+            "inferred" => Ok(Self::Inferred),
+            _ => Err(EntityError::InvalidMemorySource),
+        }
+    }
+}
+
+impl TryFrom<&str> for MemorySource {
+    type Error = EntityError;
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        Self::try_from_str(value)
+    }
+}
+
+impl TryFrom<String> for MemorySource {
+    type Error = EntityError;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        Self::try_from_str(&value)
+    }
+}
+
+impl std::str::FromStr for MemorySource {
+    type Err = EntityError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Self::try_from_str(s)
+    }
+}
+
+impl From<MemorySource> for String {
+    fn from(src: MemorySource) -> Self {
+        src.as_str().to_owned()
+    }
+}
+
+impl fmt::Display for MemorySource {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+/// Provenance context from which a memory was derived.
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+pub struct MemoryProvenance {
+    /// Thread from which this memory originated, if any.
+    pub thread_id: Option<ThreadId>,
+    /// Turn from which this memory originated, if any.
+    pub turn_id: Option<TurnId>,
+    /// Supporting excerpt from conversation transcript, if any.
+    pub excerpt: Option<MemoryExcerpt>,
+}
+
+/// A durable, queryable memory record.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct MemoryRecord {
+    /// Unique identity of this memory record.
+    pub memory_id: MemoryId,
+    /// Bounded memory content.
+    pub content: MemoryContent,
+    /// Scope of applicability.
+    pub scope: MemoryScope,
+    /// Semantic kind.
+    pub kind: MemoryKind,
+    /// Current lifecycle state.
+    pub state: MemoryState,
+    /// Confidence percentage (0..=100).
+    pub confidence: u8,
+    /// Sensitivity level.
+    pub sensitivity: MemorySensitivity,
+    /// Provenance source.
+    pub source: MemorySource,
+    /// Provenance context.
+    pub provenance: MemoryProvenance,
+    /// When the memory was created.
+    pub created_at: UnixMillis,
+    /// When the memory was last updated.
+    pub updated_at: UnixMillis,
+    /// Optional expiration timestamp.
+    pub expires_at: Option<UnixMillis>,
+    /// Optional successor memory ID that superseded this record.
+    pub superseded_by: Option<MemoryId>,
+}
+
+impl MemoryRecord {
+    /// Validates memory record invariants.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`EntityError`] if confidence > 100, `updated_at` < `created_at`,
+    /// or `superseded_by` is set on a non-confirmed record.
+    pub fn validate(&self) -> Result<(), EntityError> {
+        if self.confidence > 100 {
+            return Err(EntityError::InvalidMemoryConfidence {
+                value: self.confidence,
+            });
+        }
+        if self.updated_at < self.created_at {
+            return Err(EntityError::InvalidMemoryTransition {
+                from: "created_at".to_owned(),
+                to: "updated_at earlier than created_at".to_owned(),
+            });
+        }
+        if self.superseded_by.is_some() && self.state != MemoryState::Confirmed {
+            return Err(EntityError::InvalidMemoryTransition {
+                from: self.state.as_str().to_owned(),
+                to: "superseded requires confirmed state".to_owned(),
+            });
+        }
+        Ok(())
+    }
+
+    /// Whether this record is retrievable at time `now`.
+    #[must_use]
+    pub fn is_retrievable(&self, now: UnixMillis) -> bool {
+        self.state
+            .is_retrievable(self.superseded_by.as_ref(), self.expires_at, now)
+    }
+}
+
+/// A draft constructor for inserting or correcting memory records.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct MemoryDraft {
+    /// Optional explicitly specified memory ID.
+    pub id: Option<MemoryId>,
+    /// Bounded content.
+    pub content: MemoryContent,
+    /// Scope.
+    pub scope: MemoryScope,
+    /// Semantic kind.
+    pub kind: MemoryKind,
+    /// Optional explicit initial state.
+    pub state: Option<MemoryState>,
+    /// Confidence percentage (0..=100).
+    pub confidence: u8,
+    /// Sensitivity level.
+    pub sensitivity: MemorySensitivity,
+    /// Provenance source.
+    pub source: MemorySource,
+    /// Provenance context.
+    pub provenance: MemoryProvenance,
+    /// Optional expiration timestamp.
+    pub expires_at: Option<UnixMillis>,
+}
+
+impl MemoryDraft {
+    /// Creates a new default draft with full confidence, normal sensitivity, and explicit source.
+    #[must_use]
+    pub fn new(content: MemoryContent, scope: MemoryScope, kind: MemoryKind) -> Self {
+        Self {
+            id: None,
+            content,
+            scope,
+            kind,
+            state: None,
+            confidence: 100,
+            sensitivity: MemorySensitivity::Normal,
+            source: MemorySource::Explicit,
+            provenance: MemoryProvenance::default(),
+            expires_at: None,
+        }
+    }
+
+    /// Sets an explicit memory ID.
+    #[must_use]
+    pub fn with_id(mut self, id: MemoryId) -> Self {
+        self.id = Some(id);
+        self
+    }
+
+    /// Sets an explicit initial state.
+    #[must_use]
+    pub fn with_state(mut self, state: MemoryState) -> Self {
+        self.state = Some(state);
+        self
+    }
+
+    /// Sets confidence percentage (0..=100).
+    #[must_use]
+    pub fn with_confidence(mut self, confidence: u8) -> Self {
+        self.confidence = confidence;
+        self
+    }
+
+    /// Sets sensitivity level.
+    #[must_use]
+    pub fn with_sensitivity(mut self, sensitivity: MemorySensitivity) -> Self {
+        self.sensitivity = sensitivity;
+        self
+    }
+
+    /// Sets provenance source.
+    #[must_use]
+    pub fn with_source(mut self, source: MemorySource) -> Self {
+        self.source = source;
+        self
+    }
+
+    /// Sets provenance context.
+    #[must_use]
+    pub fn with_provenance(mut self, provenance: MemoryProvenance) -> Self {
+        self.provenance = provenance;
+        self
+    }
+
+    /// Sets expiration timestamp.
+    #[must_use]
+    pub fn with_expires_at(mut self, expires_at: Option<UnixMillis>) -> Self {
+        self.expires_at = expires_at;
+        self
+    }
+}
+
+/// Detailed factor breakdown explaining why a memory record was selected.
+#[derive(Clone, Debug, PartialEq)]
+pub struct MemoryMatchExplanation {
+    /// Query terms that matched.
+    pub matched_terms: Vec<String>,
+    /// Text relevance score derived from FTS5 BM25.
+    pub fts_rank: f64,
+    /// Scope affinity weight.
+    pub scope_weight: f64,
+    /// Confidence factor (confidence / 100.0).
+    pub confidence_score: f64,
+    /// Recency decay factor (0.0..=1.0).
+    pub recency_score: f64,
+    /// Explicitness bonus.
+    pub explicitness_bonus: f64,
+    /// Total combined retrieval score.
+    pub total_score: f64,
+    /// Human-readable explanation string.
+    pub why_selected: String,
+}
+
+/// One retrieval hit containing the memory record and match explanation.
+#[derive(Clone, Debug, PartialEq)]
+pub struct MemoryHit {
+    /// The retrieved memory record.
+    pub record: MemoryRecord,
+    /// Detailed score breakdown and selection rationale.
+    pub explanation: MemoryMatchExplanation,
 }
 
 // ── Query types ────────────────────────────────────────────────────
@@ -1800,6 +2565,84 @@ impl CheckpointListLimit {
     }
 }
 
+/// Default number of memories returned in a search.
+pub const MEMORY_SEARCH_DEFAULT_LIMIT: u32 = 8;
+
+/// Maximum number of memories in a bounded search query.
+pub const MEMORY_SEARCH_LIMIT_MAX: u32 = 64;
+
+/// Maximum number of memories in a bounded list page.
+pub const MEMORY_LIST_LIMIT_MAX: u32 = 200;
+
+/// Validated unsigned search limit for memory queries (1..=64).
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct MemorySearchLimit(u32);
+
+impl MemorySearchLimit {
+    /// Validates an unsigned search limit.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`EntityError::MemorySearchLimitOutOfRange`] if zero or above 64.
+    pub fn try_new(value: u32) -> Result<Self, EntityError> {
+        if value == 0 || value > MEMORY_SEARCH_LIMIT_MAX {
+            return Err(EntityError::MemorySearchLimitOutOfRange {
+                value,
+                max: MEMORY_SEARCH_LIMIT_MAX,
+            });
+        }
+        Ok(Self(value))
+    }
+
+    /// Default search limit of 8.
+    #[must_use]
+    pub const fn default_limit() -> Self {
+        Self(MEMORY_SEARCH_DEFAULT_LIMIT)
+    }
+
+    /// The validated count.
+    #[must_use]
+    pub const fn get(self) -> u32 {
+        self.0
+    }
+}
+
+/// Validated unsigned page size for memory list queries (1..=200).
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct MemoryListLimit(u32);
+
+impl MemoryListLimit {
+    /// Validates an unsigned page size.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`EntityError::MemoryListLimitOutOfRange`] if zero or above 200.
+    pub fn try_new(value: u32) -> Result<Self, EntityError> {
+        if value == 0 || value > MEMORY_LIST_LIMIT_MAX {
+            return Err(EntityError::MemoryListLimitOutOfRange {
+                value,
+                max: MEMORY_LIST_LIMIT_MAX,
+            });
+        }
+        Ok(Self(value))
+    }
+
+    /// The validated count.
+    #[must_use]
+    pub const fn get(self) -> u32 {
+        self.0
+    }
+}
+
+/// Unique cursor for stable newest-first memory pagination.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct MemoryCursor {
+    /// Timestamp of the last row.
+    pub updated_at: UnixMillis,
+    /// Memory identifier tie-breaker of the last row.
+    pub memory_id: MemoryId,
+}
+
 /// Unique cursor for stable newest-first thread pagination.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ThreadCursor {
@@ -2083,6 +2926,58 @@ pub enum EntityError {
     InvalidPermissionKind,
     /// The string does not name a valid permission decision.
     InvalidPermissionDecision,
+    /// Memory content is empty after trimming.
+    EmptyMemoryContent,
+    /// Memory content exceeds the byte cap.
+    MemoryContentTooLong {
+        /// The actual length.
+        length: usize,
+        /// The maximum allowed length.
+        max: usize,
+    },
+    /// Memory provenance excerpt exceeds the byte cap.
+    MemoryExcerptTooLong {
+        /// The actual length.
+        length: usize,
+        /// The maximum allowed length.
+        max: usize,
+    },
+    /// Invalid memory scope kind.
+    InvalidMemoryScopeKind,
+    /// Invalid memory semantic kind.
+    InvalidMemoryKind,
+    /// Invalid memory lifecycle state.
+    InvalidMemoryState,
+    /// Invalid memory sensitivity level.
+    InvalidMemorySensitivity,
+    /// Invalid memory provenance source.
+    InvalidMemorySource,
+    /// Memory confidence exceeds 100%.
+    InvalidMemoryConfidence {
+        /// The rejected value.
+        value: u8,
+    },
+    /// Invalid memory state transition.
+    InvalidMemoryTransition {
+        /// The source state or description.
+        from: String,
+        /// The destination state or description.
+        to: String,
+    },
+    /// Memory search limit is outside 1..=64.
+    MemorySearchLimitOutOfRange {
+        /// The rejected value.
+        value: u32,
+        /// The maximum allowed value.
+        max: u32,
+    },
+    /// Memory list page size is outside 1..=200.
+    MemoryListLimitOutOfRange {
+        /// The rejected value.
+        value: u32,
+        /// The maximum allowed value.
+        max: u32,
+    },
 }
 
 impl fmt::Display for EntityError {
@@ -2199,6 +3094,30 @@ impl fmt::Display for EntityError {
             Self::InvalidMemoryMode => write!(f, "invalid memory mode"),
             Self::InvalidPermissionKind => write!(f, "invalid permission kind"),
             Self::InvalidPermissionDecision => write!(f, "invalid permission decision"),
+            Self::EmptyMemoryContent => write!(f, "memory content is empty"),
+            Self::MemoryContentTooLong { length, max } => {
+                write!(f, "memory content is {length} bytes, limit is {max}")
+            }
+            Self::MemoryExcerptTooLong { length, max } => {
+                write!(f, "memory excerpt is {length} bytes, limit is {max}")
+            }
+            Self::InvalidMemoryScopeKind => write!(f, "invalid memory scope kind"),
+            Self::InvalidMemoryKind => write!(f, "invalid memory kind"),
+            Self::InvalidMemoryState => write!(f, "invalid memory state"),
+            Self::InvalidMemorySensitivity => write!(f, "invalid memory sensitivity"),
+            Self::InvalidMemorySource => write!(f, "invalid memory source"),
+            Self::InvalidMemoryConfidence { value } => {
+                write!(f, "memory confidence {value} exceeds 100")
+            }
+            Self::InvalidMemoryTransition { from, to } => {
+                write!(f, "invalid memory transition from '{from}' to '{to}'")
+            }
+            Self::MemorySearchLimitOutOfRange { value, max } => {
+                write!(f, "memory search limit {value} is outside 1..={max}")
+            }
+            Self::MemoryListLimitOutOfRange { value, max } => {
+                write!(f, "memory list limit {value} is outside 1..={max}")
+            }
         }
     }
 }
@@ -2936,6 +3855,238 @@ mod tests {
                 UnixMillis::from_millis(1_700_000_000_000),
             ),
             Err(EntityError::HarnessSecretRefsCountExceeded { .. })
+        ));
+    }
+
+    #[test]
+    fn memory_content_and_excerpt_bounds() {
+        assert_eq!(
+            MemoryContent::try_from("  User prefers Rust 2024  ")
+                .unwrap()
+                .as_str(),
+            "User prefers Rust 2024"
+        );
+        assert_eq!(
+            MemoryContent::try_from("   "),
+            Err(EntityError::EmptyMemoryContent)
+        );
+        let max_content = "a".repeat(MEMORY_CONTENT_MAX_BYTES);
+        assert!(MemoryContent::try_from(max_content.as_str()).is_ok());
+        let too_long_content = "a".repeat(MEMORY_CONTENT_MAX_BYTES + 1);
+        assert!(matches!(
+            MemoryContent::try_from(too_long_content.as_str()),
+            Err(EntityError::MemoryContentTooLong { .. })
+        ));
+
+        assert_eq!(
+            MemoryExcerpt::try_from("  relevant quote  ")
+                .unwrap()
+                .as_str(),
+            "relevant quote"
+        );
+        let max_excerpt = "a".repeat(MEMORY_EXCERPT_MAX_BYTES);
+        assert!(MemoryExcerpt::try_from(max_excerpt.as_str()).is_ok());
+        let too_long_excerpt = "a".repeat(MEMORY_EXCERPT_MAX_BYTES + 1);
+        assert!(matches!(
+            MemoryExcerpt::try_from(too_long_excerpt.as_str()),
+            Err(EntityError::MemoryExcerptTooLong { .. })
+        ));
+    }
+
+    #[test]
+    fn memory_scope_parts_and_matching() {
+        let global = MemoryScope::try_from_parts("global", None).unwrap();
+        assert_eq!(global.kind_str(), "global");
+        assert_eq!(global.target_str(), None);
+
+        let person = MemoryScope::try_from_parts("person", Some("alice")).unwrap();
+        assert_eq!(person.kind_str(), "person");
+        assert_eq!(person.target_str(), Some("alice"));
+
+        let project = MemoryScope::try_from_parts("project", Some("altior")).unwrap();
+        assert_eq!(project.kind_str(), "project");
+        assert_eq!(project.target_str(), Some("altior"));
+
+        let thread = MemoryScope::try_from_parts("thread", Some("thr_main")).unwrap();
+        assert_eq!(thread.kind_str(), "thread");
+        assert_eq!(thread.target_str(), Some("thr_main"));
+
+        // Global matches all filters
+        assert!(global.matches_scope(&person));
+        assert!(global.matches_scope(&project));
+        assert!(person.matches_scope(&person));
+        assert!(!person.matches_scope(&project));
+
+        // Invalid scope parts
+        assert_eq!(
+            MemoryScope::try_from_parts("invalid", None),
+            Err(EntityError::InvalidMemoryScopeKind)
+        );
+        assert_eq!(
+            MemoryScope::try_from_parts("person", None),
+            Err(EntityError::EmptyLabel)
+        );
+    }
+
+    #[test]
+    fn memory_enums_and_lifecycle_transitions() {
+        for (kind, s) in [
+            (MemoryKind::Fact, "fact"),
+            (MemoryKind::Preference, "preference"),
+            (MemoryKind::Instruction, "instruction"),
+            (MemoryKind::Summary, "summary"),
+        ] {
+            assert_eq!(kind.as_str(), s);
+            assert_eq!(MemoryKind::try_from_str(s).unwrap(), kind);
+        }
+
+        for (state, s) in [
+            (MemoryState::Candidate, "candidate"),
+            (MemoryState::Confirmed, "confirmed"),
+            (MemoryState::Rejected, "rejected"),
+            (MemoryState::Forgotten, "forgotten"),
+            (MemoryState::Expired, "expired"),
+        ] {
+            assert_eq!(state.as_str(), s);
+            assert_eq!(MemoryState::try_from_str(s).unwrap(), state);
+        }
+
+        for (sens, s) in [
+            (MemorySensitivity::Normal, "normal"),
+            (MemorySensitivity::Sensitive, "sensitive"),
+        ] {
+            assert_eq!(sens.as_str(), s);
+            assert_eq!(MemorySensitivity::try_from_str(s).unwrap(), sens);
+        }
+
+        for (src, s) in [
+            (MemorySource::Explicit, "explicit"),
+            (MemorySource::Inferred, "inferred"),
+        ] {
+            assert_eq!(src.as_str(), s);
+            assert_eq!(MemorySource::try_from_str(s).unwrap(), src);
+        }
+
+        // Transitions
+        assert!(
+            MemoryState::Candidate
+                .validate_transition(MemoryState::Confirmed)
+                .is_ok()
+        );
+        assert!(
+            MemoryState::Candidate
+                .validate_transition(MemoryState::Rejected)
+                .is_ok()
+        );
+        assert!(
+            MemoryState::Confirmed
+                .validate_transition(MemoryState::Forgotten)
+                .is_ok()
+        );
+        assert!(
+            MemoryState::Confirmed
+                .validate_transition(MemoryState::Expired)
+                .is_ok()
+        );
+
+        assert!(matches!(
+            MemoryState::Candidate.validate_transition(MemoryState::Forgotten),
+            Err(EntityError::InvalidMemoryTransition { .. })
+        ));
+        assert!(matches!(
+            MemoryState::Rejected.validate_transition(MemoryState::Confirmed),
+            Err(EntityError::InvalidMemoryTransition { .. })
+        ));
+    }
+
+    #[test]
+    fn memory_limits_and_cursor() {
+        assert_eq!(
+            MemorySearchLimit::try_new(0),
+            Err(EntityError::MemorySearchLimitOutOfRange {
+                value: 0,
+                max: MEMORY_SEARCH_LIMIT_MAX
+            })
+        );
+        assert_eq!(
+            MemorySearchLimit::try_new(MEMORY_SEARCH_LIMIT_MAX + 1),
+            Err(EntityError::MemorySearchLimitOutOfRange {
+                value: MEMORY_SEARCH_LIMIT_MAX + 1,
+                max: MEMORY_SEARCH_LIMIT_MAX
+            })
+        );
+        let search_lim = MemorySearchLimit::default_limit();
+        assert_eq!(search_lim.get(), 8);
+
+        assert_eq!(
+            MemoryListLimit::try_new(0),
+            Err(EntityError::MemoryListLimitOutOfRange {
+                value: 0,
+                max: MEMORY_LIST_LIMIT_MAX
+            })
+        );
+        assert_eq!(
+            MemoryListLimit::try_new(MEMORY_LIST_LIMIT_MAX + 1),
+            Err(EntityError::MemoryListLimitOutOfRange {
+                value: MEMORY_LIST_LIMIT_MAX + 1,
+                max: MEMORY_LIST_LIMIT_MAX
+            })
+        );
+        let list_lim = MemoryListLimit::try_new(50).unwrap();
+        assert_eq!(list_lim.get(), 50);
+
+        let cursor = MemoryCursor {
+            updated_at: UnixMillis::from_millis(1_700_000_000_000),
+            memory_id: MemoryId::from_str("mem_fixture000000001").unwrap(),
+        };
+        assert_eq!(cursor.updated_at.as_millis(), 1_700_000_000_000);
+        assert_eq!(cursor.memory_id.as_str(), "mem_fixture000000001");
+    }
+
+    #[test]
+    fn memory_record_validation() {
+        let mem_id = MemoryId::from_str("mem_fixture000000001").unwrap();
+        let record = MemoryRecord {
+            memory_id: mem_id.clone(),
+            content: MemoryContent::try_from("Test memory content").unwrap(),
+            scope: MemoryScope::Global,
+            kind: MemoryKind::Fact,
+            state: MemoryState::Confirmed,
+            confidence: 90,
+            sensitivity: MemorySensitivity::Normal,
+            source: MemorySource::Explicit,
+            provenance: MemoryProvenance::default(),
+            created_at: UnixMillis::from_millis(1_700_000_000_000),
+            updated_at: UnixMillis::from_millis(1_700_000_000_000),
+            expires_at: None,
+            superseded_by: None,
+        };
+        assert!(record.validate().is_ok());
+        assert!(record.is_retrievable(UnixMillis::from_millis(1_700_000_000_000)));
+
+        // Confidence > 100 fails
+        let mut invalid_conf = record.clone();
+        invalid_conf.confidence = 101;
+        assert!(matches!(
+            invalid_conf.validate(),
+            Err(EntityError::InvalidMemoryConfidence { .. })
+        ));
+
+        // updated_at < created_at fails
+        let mut invalid_time = record.clone();
+        invalid_time.updated_at = UnixMillis::from_millis(1_600_000_000_000);
+        assert!(matches!(
+            invalid_time.validate(),
+            Err(EntityError::InvalidMemoryTransition { .. })
+        ));
+
+        // superseded_by on Candidate fails
+        let mut invalid_super = record.clone();
+        invalid_super.state = MemoryState::Candidate;
+        invalid_super.superseded_by = Some(mem_id);
+        assert!(matches!(
+            invalid_super.validate(),
+            Err(EntityError::InvalidMemoryTransition { .. })
         ));
     }
 }

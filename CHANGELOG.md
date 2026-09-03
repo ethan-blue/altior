@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+#### P2.1 Long-Term Memory Lifecycle & Ranked SQLite FTS5 Retrieval (ADR 0017)
+- **Domain memory models & value objects (`altior-domain`)**: Pure models `MemoryRecord`, `MemoryDraft`, `MemoryScope` (Global, Project, Agent, Thread), `MemoryKind` (Fact, Preference, ProjectContext, Decision, SystemDirective), `MemoryState` (Candidate, Confirmed, Rejected, Superseded, Forgotten, Expired), `MemorySensitivity`, `MemorySource`, `MemoryProvenance`, `MemoryHit`, `MemoryMatchExplanation`, `MemoryListLimit`, `MemorySearchLimit`, `MemoryCursor`.
+- **Fail-closed secret-shaped content filter**: Regex-based detector (`is_secret_shaped`) intercepting PEM private keys, provider API tokens (OpenAI, Anthropic, GitHub, Slack, AWS), and password/bearer assignments before reaching storage, returning `StorageError::SecretShapedContent` and preventing journal or table writes.
+- **Journal-authoritative memory lifecycle (`altior-storage`)**: Appends durable domain events for all lifecycle transitions (`memory.proposed`, `memory.confirmed`, `memory.rejected`, `memory.superseded`, `memory.forgotten`, `memory.expired`) in atomic `IMMEDIATE` SQLite transactions.
+- **Forward-only schema v6 migration**: Adds `memory` relational projection table and dedicated standalone `memory_fts` FTS5 virtual table for confirmed retrievable memories.
+- **Deterministic composite ranking & FTS5 search**: Full-text search combining literal phrase term escaping, BM25 text relevance, scope affinity weighting, confidence scaling, recency decay, and explicit statement bonuses with structured explainability fields.
+- **Lazy expiry & eager sweep**: Automatic query-time exclusion of past-due memories (`expires_at > now`) and batch transition sweep (`sweep_expired_memories`).
+- **Deterministic projection rebuild**: `rebuild_domain_projections` restores `memory` and `memory_fts` from `domain_journal` with bit-for-bit checksum verification via `domain_projection_digest`.
+
 #### P1.4 Acceptance Journey, Binding v5 & Journey-Hardened Runtime (ADR 0016)
 - **Durable harness bindings over IPC**: `AcpHarnessBinding` gains `args`, `env_keys`, and `secret_refs` with domain bounds; `configure_agent` persists bindings (storage schema v5, forward-only migration) and `env_keys.len() == secret_refs.len()` is enforced at the DTO boundary.
 - **Default binding auto-selection on `open_thread`**: explicit binding > persisted session binding > first binding for the agent, with a typed `MissingHarnessBinding` error; sessions and no-auto-resend invariants persist across daemon restarts.

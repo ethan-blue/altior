@@ -39,6 +39,10 @@ pub(crate) const MIGRATIONS: &[Migration] = &[
         version: 5,
         sql: SCHEMA_V5,
     },
+    Migration {
+        version: 6,
+        sql: SCHEMA_V6,
+    },
 ];
 
 /// The highest schema version this build understands.
@@ -335,4 +339,71 @@ const SCHEMA_V5: &str = r"
 ALTER TABLE harness_binding ADD COLUMN args_json TEXT NOT NULL DEFAULT '[]';
 ALTER TABLE harness_binding ADD COLUMN env_keys_json TEXT NOT NULL DEFAULT '[]';
 ALTER TABLE harness_binding ADD COLUMN secret_refs_json TEXT NOT NULL DEFAULT '[]';
+";
+
+/// Schema v6: durable memory projection table with a selectively indexed FTS5 search
+/// index (P2.1, ADR 0017). `memory` is a projection table and query index derived
+/// from the authoritative `domain_journal`. Lifecycle events are appended to
+/// `domain_journal` and folded into `memory` in place.
+///
+/// `memory_fts` is a standalone FTS5 table holding ONLY retrievable rows
+/// (`state = 'confirmed'` AND `superseded_by IS NULL`); the triggers keep
+/// it in sync, so forgotten/rejected/superseded/expired rows disappear
+/// from search the moment their row leaves the retrievable set. A
+/// standalone table (rather than `content='memory'` external content) is
+/// required because the indexed set is a subset of the table's rows, which
+/// an external-content parity integrity check cannot express.
+const SCHEMA_V6: &str = r"
+CREATE TABLE memory (
+    memory_id TEXT PRIMARY KEY,
+    content TEXT NOT NULL,
+    scope_kind TEXT NOT NULL,
+    scope_target TEXT,
+    kind TEXT NOT NULL,
+    state TEXT NOT NULL,
+    confidence INTEGER NOT NULL,
+    sensitivity TEXT NOT NULL,
+    source TEXT NOT NULL,
+    explicit INTEGER NOT NULL,
+    provenance_thread_id TEXT,
+    provenance_turn_id TEXT,
+    excerpt TEXT,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    expires_at INTEGER,
+    superseded_by TEXT
+) STRICT;
+
+CREATE INDEX memory_updated ON memory(updated_at);
+CREATE INDEX memory_state_updated ON memory(state, updated_at);
+
+CREATE VIRTUAL TABLE memory_fts USING fts5(
+    memory_id UNINDEXED,
+    content,
+    tokenize='porter unicode61'
+);
+
+-- The index holds only retrievable memories: the WHEN clause admits new
+-- rows solely in the retrievable set, the UPDATE trigger removes the old
+-- index entry unconditionally (a no-op when absent) and re-admits the new
+-- row only when it is retrievable, and the DELETE trigger removes any
+-- matching index row.
+CREATE TRIGGER memory_fts_insert AFTER INSERT ON memory
+WHEN new.state = 'confirmed' AND new.superseded_by IS NULL
+BEGIN
+    INSERT INTO memory_fts (memory_id, content) VALUES (new.memory_id, new.content);
+END;
+
+CREATE TRIGGER memory_fts_update AFTER UPDATE ON memory
+BEGIN
+    DELETE FROM memory_fts WHERE memory_id = old.memory_id;
+    INSERT INTO memory_fts (memory_id, content)
+    SELECT new.memory_id, new.content
+    WHERE new.state = 'confirmed' AND new.superseded_by IS NULL;
+END;
+
+CREATE TRIGGER memory_fts_delete AFTER DELETE ON memory
+BEGIN
+    DELETE FROM memory_fts WHERE memory_id = old.memory_id;
+END;
 ";

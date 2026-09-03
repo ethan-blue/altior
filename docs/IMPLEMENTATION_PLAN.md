@@ -491,6 +491,19 @@ Object hierarchy.
 
 ## P2: Personal identity and memory
 
+### P2.1 Long-term memory lifecycle, journal events, and ranked SQLite FTS5 retrieval
+
+- implement pure memory domain models (`MemoryRecord`, `MemoryDraft`, `MemoryScope`, `MemoryKind`, `MemoryState`, `MemorySensitivity`, `MemorySource`, `MemoryProvenance`, `MemoryHit`, `MemoryMatchExplanation`, `MemoryListLimit`, `MemorySearchLimit`, `MemoryCursor`)
+- add 6 authoritative domain event kinds (`memory.proposed`, `memory.confirmed`, `memory.rejected`, `memory.superseded`, `memory.forgotten`, `memory.expired`)
+- implement fail-closed secret-shaped content filtering (`is_secret_shaped`) with zero journal or projection contamination on rejection
+- add schema v6 migration creating `memory` projection table and standalone `memory_fts` FTS5 index
+- implement deterministic composite ranking search (BM25, scope affinity, confidence score, recency decay, explicit bonus, tie-breaking) with structured explainability
+- add lazy expiry exclusion, eager sweep (`sweep_expired_memories`), correction superseding, forget tombstones, and deterministic projection rebuilds (`domain_projection_digest`)
+
+Status: **complete (ADR 0017)**.
+- Evidence: 8 domain unit tests (`crates/altior-domain/src/entity.rs`), 11 secret detector unit tests (`crates/altior-domain/src/secret_shape.rs`), and 8 deterministic storage integration tests (`crates/altior-storage/tests/memory.rs`: `memory_lifecycle_propose_confirm_and_invalid_transitions`, `memory_correction_supersedes_original_and_updates_search`, `memory_forget_tombstone_retained_in_db_and_excluded_from_search`, `memory_lazy_expiry_at_search_and_eager_sweep`, `memory_secret_shaped_content_and_excerpt_rejection_leaves_journal_empty`, `memory_fts_literal_escaping_and_special_characters`, `memory_ranking_deterministic_scoring_explanations_and_limits`, `memory_projection_rebuild_restores_identical_state_and_search`, `migration_v5_to_v6_creates_memory_tables_and_preserves_journal`).
+- Gates: full workspace clean clippy, fmt, and test suites passing with zero warnings.
+
 - implement identity documents above ACP
 - implement ContextSnapshot assembly and token budgeting
 - add memory candidate, confirmation, correction, rejection, expiry, and forgetting

@@ -14,6 +14,7 @@
 //! history, and search queries.
 
 pub mod error;
+pub mod memory;
 mod migrations;
 
 use rusqlite::{Connection, params};
@@ -673,6 +674,120 @@ fn fold_domain_event_in_tx(
     seq: i64,
     occurred_at: i64,
 ) -> Result<(), StorageError> {
+    match &event.kind {
+        DomainEventKind::MemoryProposed => {
+            fold_memory_proposed_in_tx(tx, event, occurred_at)?;
+            if let Some(thread_id) = event.thread_id.as_ref() {
+                update_thread_activity(
+                    tx,
+                    thread_id.as_str(),
+                    seq,
+                    event.event_id.as_str(),
+                    event.kind.as_str(),
+                    occurred_at,
+                )?;
+            }
+            return Ok(());
+        }
+        DomainEventKind::MemoryConfirmed => {
+            fold_memory_confirmed_in_tx(tx, event, occurred_at)?;
+            if let Some(thread_id) = event.thread_id.as_ref() {
+                update_thread_activity(
+                    tx,
+                    thread_id.as_str(),
+                    seq,
+                    event.event_id.as_str(),
+                    event.kind.as_str(),
+                    occurred_at,
+                )?;
+            }
+            return Ok(());
+        }
+        DomainEventKind::MemoryRejected => {
+            let mem_id =
+                extract_json_string(event.payload.as_bytes(), "memory_id").unwrap_or_default();
+            tx.execute(
+                "UPDATE memory SET state = 'rejected', updated_at = ?1 WHERE memory_id = ?2",
+                params![occurred_at, mem_id],
+            )
+            .map_err(|error| StorageError::from_sqlite("fold_memory_rejected", error))?;
+            if let Some(thread_id) = event.thread_id.as_ref() {
+                update_thread_activity(
+                    tx,
+                    thread_id.as_str(),
+                    seq,
+                    event.event_id.as_str(),
+                    event.kind.as_str(),
+                    occurred_at,
+                )?;
+            }
+            return Ok(());
+        }
+        DomainEventKind::MemorySuperseded => {
+            let mem_id =
+                extract_json_string(event.payload.as_bytes(), "memory_id").unwrap_or_default();
+            let superseded_by =
+                extract_json_string(event.payload.as_bytes(), "superseded_by").unwrap_or_default();
+            tx.execute(
+                "UPDATE memory SET superseded_by = ?1, updated_at = ?2 WHERE memory_id = ?3",
+                params![superseded_by, occurred_at, mem_id],
+            )
+            .map_err(|error| StorageError::from_sqlite("fold_memory_superseded", error))?;
+            if let Some(thread_id) = event.thread_id.as_ref() {
+                update_thread_activity(
+                    tx,
+                    thread_id.as_str(),
+                    seq,
+                    event.event_id.as_str(),
+                    event.kind.as_str(),
+                    occurred_at,
+                )?;
+            }
+            return Ok(());
+        }
+        DomainEventKind::MemoryForgotten => {
+            let mem_id =
+                extract_json_string(event.payload.as_bytes(), "memory_id").unwrap_or_default();
+            tx.execute(
+                "UPDATE memory SET state = 'forgotten', updated_at = ?1 WHERE memory_id = ?2",
+                params![occurred_at, mem_id],
+            )
+            .map_err(|error| StorageError::from_sqlite("fold_memory_forgotten", error))?;
+            if let Some(thread_id) = event.thread_id.as_ref() {
+                update_thread_activity(
+                    tx,
+                    thread_id.as_str(),
+                    seq,
+                    event.event_id.as_str(),
+                    event.kind.as_str(),
+                    occurred_at,
+                )?;
+            }
+            return Ok(());
+        }
+        DomainEventKind::MemoryExpired => {
+            let mem_id =
+                extract_json_string(event.payload.as_bytes(), "memory_id").unwrap_or_default();
+            tx.execute(
+                "UPDATE memory SET state = 'expired', updated_at = ?1 WHERE memory_id = ?2",
+                params![occurred_at, mem_id],
+            )
+            .map_err(|error| StorageError::from_sqlite("fold_memory_expired", error))?;
+            if let Some(thread_id) = event.thread_id.as_ref() {
+                update_thread_activity(
+                    tx,
+                    thread_id.as_str(),
+                    seq,
+                    event.event_id.as_str(),
+                    event.kind.as_str(),
+                    occurred_at,
+                )?;
+            }
+            return Ok(());
+        }
+        _ => {}
+    }
+
     let Some(thread_id) = event.thread_id.as_ref() else {
         return Ok(());
     };
@@ -916,6 +1031,207 @@ fn fold_domain_event_in_tx(
                 occurred_at,
             )?;
         }
+        _ => {}
+    }
+    Ok(())
+}
+
+fn fold_memory_proposed_in_tx(
+    tx: &rusqlite::Transaction<'_>,
+    event: &DomainEvent,
+    occurred_at: i64,
+) -> Result<(), StorageError> {
+    let p: serde_json::Value = serde_json::from_slice(event.payload.as_bytes()).map_err(|_| {
+        StorageError::InvalidDomainEvent {
+            detail: "payload is not JSON".into(),
+        }
+    })?;
+    let mem_id = p
+        .get("memory_id")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default();
+    let content = p
+        .get("content")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default();
+    let scope_kind = p
+        .get("scope_kind")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("global");
+    let scope_target = p.get("scope_target").and_then(serde_json::Value::as_str);
+    let kind = p
+        .get("kind")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("fact");
+    let state = "candidate";
+    #[allow(clippy::cast_possible_wrap)]
+    let confidence = p
+        .get("confidence")
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or(100) as i64;
+    let sensitivity = p
+        .get("sensitivity")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("normal");
+    let source = p
+        .get("source")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("inferred");
+    let explicit = i64::from(
+        p.get("explicit")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false),
+    );
+    let prov_thread = p
+        .get("provenance_thread_id")
+        .and_then(serde_json::Value::as_str);
+    let prov_turn = p
+        .get("provenance_turn_id")
+        .and_then(serde_json::Value::as_str);
+    let excerpt = p.get("excerpt").and_then(serde_json::Value::as_str);
+    let expires_at = p.get("expires_at").and_then(serde_json::Value::as_i64);
+
+    tx.execute(
+        "INSERT INTO memory (
+            memory_id, content, scope_kind, scope_target, kind, state,
+            confidence, sensitivity, source, explicit,
+            provenance_thread_id, provenance_turn_id, excerpt,
+            created_at, updated_at, expires_at, superseded_by
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?14, ?15, NULL)
+        ON CONFLICT(memory_id) DO UPDATE SET
+            content = excluded.content,
+            scope_kind = excluded.scope_kind,
+            scope_target = excluded.scope_target,
+            kind = excluded.kind,
+            state = excluded.state,
+            confidence = excluded.confidence,
+            sensitivity = excluded.sensitivity,
+            source = excluded.source,
+            explicit = excluded.explicit,
+            provenance_thread_id = excluded.provenance_thread_id,
+            provenance_turn_id = excluded.provenance_turn_id,
+            excerpt = excluded.excerpt,
+            updated_at = excluded.updated_at,
+            expires_at = excluded.expires_at",
+        params![
+            mem_id,
+            content,
+            scope_kind,
+            scope_target,
+            kind,
+            state,
+            confidence,
+            sensitivity,
+            source,
+            explicit,
+            prov_thread,
+            prov_turn,
+            excerpt,
+            occurred_at,
+            expires_at
+        ],
+    )
+    .map_err(|e| StorageError::from_sqlite("fold_memory_proposed", e))?;
+    Ok(())
+}
+
+fn fold_memory_confirmed_in_tx(
+    tx: &rusqlite::Transaction<'_>,
+    event: &DomainEvent,
+    occurred_at: i64,
+) -> Result<(), StorageError> {
+    let p: serde_json::Value = serde_json::from_slice(event.payload.as_bytes()).map_err(|_| {
+        StorageError::InvalidDomainEvent {
+            detail: "payload is not JSON".into(),
+        }
+    })?;
+    let mem_id = p
+        .get("memory_id")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default();
+
+    let exists: i64 = tx
+        .query_row(
+            "SELECT COUNT(*) FROM memory WHERE memory_id = ?1",
+            params![mem_id],
+            |r| r.get(0),
+        )
+        .map_err(|e| StorageError::from_sqlite("check memory exists", e))?;
+
+    if exists > 0 {
+        tx.execute(
+            "UPDATE memory SET state = 'confirmed', updated_at = ?1 WHERE memory_id = ?2",
+            params![occurred_at, mem_id],
+        )
+        .map_err(|e| StorageError::from_sqlite("fold_memory_confirmed_update", e))?;
+    } else {
+        let content = p
+            .get("content")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default();
+        let scope_kind = p
+            .get("scope_kind")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("global");
+        let scope_target = p.get("scope_target").and_then(serde_json::Value::as_str);
+        let kind = p
+            .get("kind")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("fact");
+        let state = "confirmed";
+        #[allow(clippy::cast_possible_wrap)]
+        let confidence = p
+            .get("confidence")
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or(100) as i64;
+        let sensitivity = p
+            .get("sensitivity")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("normal");
+        let source = p
+            .get("source")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("explicit");
+        let explicit = i64::from(
+            p.get("explicit")
+                .and_then(serde_json::Value::as_bool)
+                .unwrap_or(true),
+        );
+        let prov_thread = p
+            .get("provenance_thread_id")
+            .and_then(serde_json::Value::as_str);
+        let prov_turn = p
+            .get("provenance_turn_id")
+            .and_then(serde_json::Value::as_str);
+        let excerpt = p.get("excerpt").and_then(serde_json::Value::as_str);
+        let expires_at = p.get("expires_at").and_then(serde_json::Value::as_i64);
+
+        tx.execute(
+            "INSERT INTO memory (
+                memory_id, content, scope_kind, scope_target, kind, state,
+                confidence, sensitivity, source, explicit,
+                provenance_thread_id, provenance_turn_id, excerpt,
+                created_at, updated_at, expires_at, superseded_by
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?14, ?15, NULL)",
+            params![
+                mem_id,
+                content,
+                scope_kind,
+                scope_target,
+                kind,
+                state,
+                confidence,
+                sensitivity,
+                source,
+                explicit,
+                prov_thread,
+                prov_turn,
+                excerpt,
+                occurred_at,
+                expires_at
+            ],
+        )
+        .map_err(|e| StorageError::from_sqlite("fold_memory_confirmed_insert", e))?;
     }
     Ok(())
 }
@@ -2576,14 +2892,20 @@ impl Store {
             [],
         )
         .map_err(|error| StorageError::from_sqlite("domain_rebuild preflight fts", error))?;
+        tx.execute("INSERT INTO memory_fts(memory_fts) VALUES('rebuild')", [])
+            .map_err(|error| {
+                StorageError::from_sqlite("domain_rebuild preflight memory fts", error)
+            })?;
 
         // Wipe all derived projections. FTS is rebuilt again from the
-        // journal-replayed `thread` projection below.
+        // journal-replayed `thread` and `memory` projections below.
         tx.execute("DELETE FROM permission", [])
             .map_err(|error| StorageError::from_sqlite("domain_rebuild", error))?;
         tx.execute("DELETE FROM turn", [])
             .map_err(|error| StorageError::from_sqlite("domain_rebuild", error))?;
         tx.execute("DELETE FROM thread", [])
+            .map_err(|error| StorageError::from_sqlite("domain_rebuild", error))?;
+        tx.execute("DELETE FROM memory", [])
             .map_err(|error| StorageError::from_sqlite("domain_rebuild", error))?;
 
         // Replay every domain journal event in order.
@@ -2672,12 +2994,14 @@ impl Store {
             fold_domain_event_in_tx(&tx, &domain_event, row.seq, row.occurred_at)?;
         }
 
-        // Rebuild FTS5 virtual table to be 100% clean and consistent with projected threads.
+        // Rebuild FTS5 virtual tables to be 100% clean and consistent with projected threads and memories.
         tx.execute(
             "INSERT INTO thread_search(thread_search) VALUES('rebuild')",
             [],
         )
         .map_err(|error| StorageError::from_sqlite("domain_rebuild fts", error))?;
+        tx.execute("INSERT INTO memory_fts(memory_fts) VALUES('rebuild')", [])
+            .map_err(|error| StorageError::from_sqlite("domain_rebuild memory fts", error))?;
 
         // Store the checksum after every replay; normal opens compare this
         // projection-sized value rather than replaying the full journal.
@@ -3404,6 +3728,19 @@ fn validate_domain_event_in_tx(
     let o = p
         .as_object()
         .ok_or_else(|| fail("payload is not JSON object".into()))?;
+
+    if matches!(
+        e.kind,
+        DomainEventKind::MemoryProposed
+            | DomainEventKind::MemoryConfirmed
+            | DomainEventKind::MemoryRejected
+            | DomainEventKind::MemorySuperseded
+            | DomainEventKind::MemoryForgotten
+            | DomainEventKind::MemoryExpired
+    ) {
+        return validate_memory_domain_event_in_tx(tx, e, o);
+    }
+
     if matches!(e.kind, DomainEventKind::Other(_)) {
         if e.turn_id.is_some() {
             return Err(fail("custom event cannot have turn scope".into()));
@@ -3584,7 +3921,15 @@ fn validate_domain_event_in_tx(
                 return Err(fail("decision requires pending permission".into()));
             }
         }
-        DomainEventKind::Other(_) => {}
+        // Memory kinds are validated by `validate_memory_domain_event_in_tx`
+        // and return early above; listed here only for exhaustiveness.
+        DomainEventKind::MemoryProposed
+        | DomainEventKind::MemoryConfirmed
+        | DomainEventKind::MemoryRejected
+        | DomainEventKind::MemorySuperseded
+        | DomainEventKind::MemoryForgotten
+        | DomainEventKind::MemoryExpired
+        | DomainEventKind::Other(_) => {}
     }
     if !matches!(e.kind, DomainEventKind::ThreadCreated) {
         let n: i64 = tx
@@ -3598,6 +3943,230 @@ fn validate_domain_event_in_tx(
             return Err(fail("thread missing".into()));
         }
     }
+    Ok(())
+}
+
+/// Reads the current `state` of a memory row, `None` when the row is absent.
+fn memory_state_in_tx(
+    tx: &rusqlite::Transaction<'_>,
+    memory_id: &str,
+    context: &'static str,
+) -> Result<Option<String>, StorageError> {
+    tx.query_row(
+        "SELECT state FROM memory WHERE memory_id=?1",
+        params![memory_id],
+        |r| r.get(0),
+    )
+    .map(Some)
+    .or_else(|err| match err {
+        rusqlite::Error::QueryReturnedNoRows => Ok(None),
+        e => Err(StorageError::from_sqlite(context, e)),
+    })
+}
+
+fn validate_memory_domain_event_in_tx(
+    tx: &rusqlite::Transaction<'_>,
+    e: &DomainEvent,
+    o: &serde_json::Map<String, serde_json::Value>,
+) -> Result<(), StorageError> {
+    let fail = |d: String| StorageError::InvalidDomainEvent { detail: d };
+
+    // If thread_id is specified, verify it exists
+    if let Some(thr) = &e.thread_id {
+        let n: i64 = tx
+            .query_row(
+                "SELECT COUNT(*) FROM thread WHERE thread_id=?1",
+                params![thr.as_str()],
+                |r| r.get(0),
+            )
+            .map_err(|x| StorageError::from_sqlite("validate thread", x))?;
+        if n != 1 {
+            return Err(fail("thread missing".into()));
+        }
+    }
+
+    let req = |k: &str| {
+        o.get(k)
+            .and_then(serde_json::Value::as_str)
+            .filter(|v| !v.is_empty())
+            .ok_or_else(|| fail(format!("missing/wrong {k}")))
+    };
+
+    let mem_id_str = req("memory_id")?;
+    mem_id_str
+        .parse::<altior_domain::MemoryId>()
+        .map_err(|x| fail(format!("invalid memory_id: {x}")))?;
+
+    validate_memory_kind_transition_in_tx(tx, &e.kind, mem_id_str, o)
+}
+
+fn validate_memory_kind_transition_in_tx(
+    tx: &rusqlite::Transaction<'_>,
+    kind: &DomainEventKind,
+    mem_id_str: &str,
+    o: &serde_json::Map<String, serde_json::Value>,
+) -> Result<(), StorageError> {
+    let fail = |d: String| StorageError::InvalidDomainEvent { detail: d };
+    let req = |k: &str| {
+        o.get(k)
+            .and_then(serde_json::Value::as_str)
+            .filter(|v| !v.is_empty())
+            .ok_or_else(|| fail(format!("missing/wrong {k}")))
+    };
+
+    match kind {
+        DomainEventKind::MemoryProposed => {
+            validate_memory_draft_payload(o, fail)?;
+            let exists: i64 = tx
+                .query_row(
+                    "SELECT COUNT(*) FROM memory WHERE memory_id=?1",
+                    params![mem_id_str],
+                    |r| r.get(0),
+                )
+                .map_err(|x| StorageError::from_sqlite("validate memory proposed exists", x))?;
+            if exists > 0 {
+                return Err(fail("memory already exists".into()));
+            }
+        }
+        DomainEventKind::MemoryConfirmed => {
+            let exists: i64 = tx
+                .query_row(
+                    "SELECT COUNT(*) FROM memory WHERE memory_id=?1",
+                    params![mem_id_str],
+                    |r| r.get(0),
+                )
+                .map_err(|x| StorageError::from_sqlite("validate memory confirmed exists", x))?;
+            if exists > 0 {
+                let state = memory_state_in_tx(tx, mem_id_str, "validate memory state")?;
+                if state.as_deref() != Some("candidate") {
+                    return Err(fail("cannot confirm non-candidate memory".into()));
+                }
+            } else {
+                validate_memory_draft_payload(o, fail)?;
+            }
+        }
+        DomainEventKind::MemoryRejected => {
+            let state = memory_state_in_tx(tx, mem_id_str, "validate memory rejected state")?;
+            match state.as_deref() {
+                Some("candidate") => {}
+                Some(_) => return Err(fail("cannot reject non-candidate memory".into())),
+                None => return Err(fail("memory not found".into())),
+            }
+        }
+        DomainEventKind::MemorySuperseded => {
+            let super_str = req("superseded_by")?;
+            super_str
+                .parse::<altior_domain::MemoryId>()
+                .map_err(|x| fail(format!("invalid superseded_by memory_id: {x}")))?;
+            let row_info: Option<(String, Option<String>)> = tx
+                .query_row(
+                    "SELECT state, superseded_by FROM memory WHERE memory_id=?1",
+                    params![mem_id_str],
+                    |r| Ok((r.get(0)?, r.get(1)?)),
+                )
+                .map(Some)
+                .or_else(|err| match err {
+                    rusqlite::Error::QueryReturnedNoRows => Ok(None),
+                    e => Err(StorageError::from_sqlite(
+                        "validate memory superseded state",
+                        e,
+                    )),
+                })?;
+            match row_info {
+                Some((state, superseded_by)) => {
+                    if state != "confirmed" || superseded_by.is_some() {
+                        return Err(fail(
+                            "cannot supersede non-confirmed or already-superseded memory".into(),
+                        ));
+                    }
+                }
+                None => return Err(fail("memory not found".into())),
+            }
+        }
+        DomainEventKind::MemoryForgotten => {
+            let state = memory_state_in_tx(tx, mem_id_str, "validate memory forgotten state")?;
+            match state.as_deref() {
+                Some("confirmed") => {}
+                Some(_) => return Err(fail("cannot forget non-confirmed memory".into())),
+                None => return Err(fail("memory not found".into())),
+            }
+        }
+        DomainEventKind::MemoryExpired => {
+            let state = memory_state_in_tx(tx, mem_id_str, "validate memory expired state")?;
+            match state.as_deref() {
+                Some("confirmed") => {}
+                Some(_) => return Err(fail("cannot expire non-confirmed memory".into())),
+                None => return Err(fail("memory not found".into())),
+            }
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
+fn validate_memory_draft_payload<F>(
+    o: &serde_json::Map<String, serde_json::Value>,
+    fail: F,
+) -> Result<(), StorageError>
+where
+    F: Fn(String) -> StorageError,
+{
+    let content = o
+        .get("content")
+        .and_then(serde_json::Value::as_str)
+        .ok_or_else(|| fail("missing/wrong content".into()))?;
+    if content.trim().is_empty() {
+        return Err(fail("empty memory content".into()));
+    }
+    if content.len() > altior_domain::MEMORY_CONTENT_MAX_BYTES {
+        return Err(fail("memory content exceeds capacity".into()));
+    }
+    if altior_domain::is_secret_shaped(content) {
+        return Err(fail("secret-shaped memory content refused".into()));
+    }
+
+    let scope_kind = o
+        .get("scope_kind")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("global");
+    let scope_target = o.get("scope_target").and_then(serde_json::Value::as_str);
+    altior_domain::MemoryScope::try_from_parts(scope_kind, scope_target)
+        .map_err(|e| fail(format!("invalid memory scope: {e}")))?;
+
+    let kind = o
+        .get("kind")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("fact");
+    altior_domain::MemoryKind::try_from_str(kind)
+        .map_err(|e| fail(format!("invalid memory kind: {e}")))?;
+
+    if let Some(conf) = o
+        .get("confidence")
+        .and_then(serde_json::Value::as_u64)
+        .filter(|conf| *conf > 100)
+    {
+        return Err(fail(format!("memory confidence {conf} exceeds 100")));
+    }
+
+    if let Some(sens) = o.get("sensitivity").and_then(serde_json::Value::as_str) {
+        altior_domain::MemorySensitivity::try_from_str(sens)
+            .map_err(|e| fail(format!("invalid memory sensitivity: {e}")))?;
+    }
+
+    if let Some(src) = o.get("source").and_then(serde_json::Value::as_str) {
+        altior_domain::MemorySource::try_from_str(src)
+            .map_err(|e| fail(format!("invalid memory source: {e}")))?;
+    }
+
+    if let Some(excerpt) = o.get("excerpt").and_then(serde_json::Value::as_str) {
+        if excerpt.len() > altior_domain::MEMORY_EXCERPT_MAX_BYTES {
+            return Err(fail("memory excerpt exceeds capacity".into()));
+        }
+        if altior_domain::is_secret_shaped(excerpt) {
+            return Err(fail("secret-shaped memory excerpt refused".into()));
+        }
+    }
+
     Ok(())
 }
 fn update_thread_activity(
@@ -3639,15 +4208,21 @@ fn fts5_quoted_literal(input: &str) -> String {
 
 /// Checks both FTS5's internal index and its external-content parity.
 ///
-/// Passing `rank = 1` is required for an external-content FTS5 table:
-/// without it SQLite checks only the index structure, not whether it still
-/// represents the `thread` projection.
+/// Checks FTS5 index consistency for both thread search and memory search.
 fn check_fts_consistency(conn: &Connection) -> bool {
-    conn.execute(
-        "INSERT INTO thread_search(thread_search, rank) VALUES('integrity-check', 1)",
-        [],
-    )
-    .is_ok()
+    let thread_ok = conn
+        .execute(
+            "INSERT INTO thread_search(thread_search, rank) VALUES('integrity-check', 1)",
+            [],
+        )
+        .is_ok();
+    let memory_ok = conn
+        .execute(
+            "INSERT INTO memory_fts(memory_fts) VALUES('integrity-check')",
+            [],
+        )
+        .is_ok();
+    thread_ok && memory_ok
 }
 
 /// Streaming FNV-1a 64-bit hasher with structured byte framing.
@@ -3913,6 +4488,99 @@ pub fn domain_projection_digest(conn: &Connection) -> Result<String, StorageErro
     }
     drop(perm_rows);
     drop(perm_stmt);
+
+    // 4. Memory projection rows ordered by memory_id
+    let mut mem_stmt = conn
+        .prepare(
+            "SELECT memory_id, content, scope_kind, scope_target, kind, state,
+                    confidence, sensitivity, source, explicit,
+                    provenance_thread_id, provenance_turn_id, excerpt,
+                    created_at, updated_at, expires_at, superseded_by
+             FROM memory ORDER BY memory_id ASC",
+        )
+        .map_err(|e| StorageError::from_sqlite("domain_projection_digest memory", e))?;
+
+    let mut mem_rows = mem_stmt
+        .query([])
+        .map_err(|e| StorageError::from_sqlite("domain_projection_digest memory query", e))?;
+
+    while let Some(row) = mem_rows
+        .next()
+        .map_err(|e| StorageError::from_sqlite("domain_projection_digest memory row", e))?
+    {
+        hasher.write_tag(b'M');
+        let memory_id: String = row
+            .get(0)
+            .map_err(|e| StorageError::from_sqlite("digest memory.memory_id", e))?;
+        let content: String = row
+            .get(1)
+            .map_err(|e| StorageError::from_sqlite("digest memory.content", e))?;
+        let scope_kind: String = row
+            .get(2)
+            .map_err(|e| StorageError::from_sqlite("digest memory.scope_kind", e))?;
+        let scope_target: Option<String> = row
+            .get(3)
+            .map_err(|e| StorageError::from_sqlite("digest memory.scope_target", e))?;
+        let kind: String = row
+            .get(4)
+            .map_err(|e| StorageError::from_sqlite("digest memory.kind", e))?;
+        let state: String = row
+            .get(5)
+            .map_err(|e| StorageError::from_sqlite("digest memory.state", e))?;
+        let confidence: i64 = row
+            .get(6)
+            .map_err(|e| StorageError::from_sqlite("digest memory.confidence", e))?;
+        let sensitivity: String = row
+            .get(7)
+            .map_err(|e| StorageError::from_sqlite("digest memory.sensitivity", e))?;
+        let source: String = row
+            .get(8)
+            .map_err(|e| StorageError::from_sqlite("digest memory.source", e))?;
+        let explicit: i64 = row
+            .get(9)
+            .map_err(|e| StorageError::from_sqlite("digest memory.explicit", e))?;
+        let prov_thread: Option<String> = row
+            .get(10)
+            .map_err(|e| StorageError::from_sqlite("digest memory.prov_thread", e))?;
+        let prov_turn: Option<String> = row
+            .get(11)
+            .map_err(|e| StorageError::from_sqlite("digest memory.prov_turn", e))?;
+        let excerpt: Option<String> = row
+            .get(12)
+            .map_err(|e| StorageError::from_sqlite("digest memory.excerpt", e))?;
+        let created_at: i64 = row
+            .get(13)
+            .map_err(|e| StorageError::from_sqlite("digest memory.created_at", e))?;
+        let updated_at: i64 = row
+            .get(14)
+            .map_err(|e| StorageError::from_sqlite("digest memory.updated_at", e))?;
+        let expires_at: Option<i64> = row
+            .get(15)
+            .map_err(|e| StorageError::from_sqlite("digest memory.expires_at", e))?;
+        let superseded_by: Option<String> = row
+            .get(16)
+            .map_err(|e| StorageError::from_sqlite("digest memory.superseded_by", e))?;
+
+        hasher.write_str(&memory_id);
+        hasher.write_str(&content);
+        hasher.write_str(&scope_kind);
+        hasher.write_opt_str(scope_target.as_deref());
+        hasher.write_str(&kind);
+        hasher.write_str(&state);
+        hasher.write_i64(confidence);
+        hasher.write_str(&sensitivity);
+        hasher.write_str(&source);
+        hasher.write_i64(explicit);
+        hasher.write_opt_str(prov_thread.as_deref());
+        hasher.write_opt_str(prov_turn.as_deref());
+        hasher.write_opt_str(excerpt.as_deref());
+        hasher.write_i64(created_at);
+        hasher.write_i64(updated_at);
+        hasher.write_opt_i64(expires_at);
+        hasher.write_opt_str(superseded_by.as_deref());
+    }
+    drop(mem_rows);
+    drop(mem_stmt);
 
     Ok(hasher.finish_hex())
 }

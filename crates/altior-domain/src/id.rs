@@ -227,6 +227,11 @@ define_id!(
     RuntimeCheckpointId,
     "chk_"
 );
+define_id!(
+    /// Identity of a durable memory record (P2.1).
+    MemoryId,
+    "mem_"
+);
 
 #[cfg(test)]
 mod tests {
@@ -281,6 +286,12 @@ mod tests {
                 .unwrap()
                 .to_string(),
             "chk_fixture000000011"
+        );
+        assert_eq!(
+            MemoryId::from_str("mem_fixture000000012")
+                .unwrap()
+                .to_string(),
+            "mem_fixture000000012"
         );
     }
 

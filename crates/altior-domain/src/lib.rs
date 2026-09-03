@@ -2,6 +2,7 @@
 
 pub mod entity;
 pub mod id;
+pub mod secret_shape;
 pub mod time;
 
 pub use entity::{
@@ -12,7 +13,11 @@ pub use entity::{
     HISTORY_LIMIT_MAX, HarnessArg, HarnessBindingCursor, HarnessBindingListLimit, HarnessEnvKey,
     HarnessSecretRef, HistoryLimit, MAX_HARNESS_ARG_BYTES, MAX_HARNESS_ARGS_COUNT,
     MAX_HARNESS_ENV_KEY_BYTES, MAX_HARNESS_ENV_KEYS_COUNT, MAX_HARNESS_SECRET_REF_BYTES,
-    MAX_HARNESS_SECRET_REFS_COUNT, OpaqueSessionId, PERMISSION_LIST_LIMIT_MAX,
+    MAX_HARNESS_SECRET_REFS_COUNT, MEMORY_CONTENT_MAX_BYTES, MEMORY_EXCERPT_MAX_BYTES,
+    MEMORY_LIST_LIMIT_MAX, MEMORY_SEARCH_DEFAULT_LIMIT, MEMORY_SEARCH_LIMIT_MAX, MemoryContent,
+    MemoryCursor, MemoryDraft, MemoryExcerpt, MemoryHit, MemoryKind, MemoryListLimit,
+    MemoryMatchExplanation, MemoryProvenance, MemoryRecord, MemoryScope, MemorySearchLimit,
+    MemorySensitivity, MemorySource, MemoryState, OpaqueSessionId, PERMISSION_LIST_LIMIT_MAX,
     PROJECT_REF_LIST_LIMIT_MAX, Permission, PermissionCursor, PermissionDecision,
     PermissionDescription, PermissionKind, PermissionListLimit, ProjectRef, ProjectRefCursor,
     ProjectRefListLimit, RemoteRequestId, RuntimeCheckpoint, SearchQuery, SessionBinding,
@@ -21,9 +26,10 @@ pub use entity::{
 };
 
 pub use id::{
-    AgentProfileId, CoreInstanceId, EventId, HarnessBindingId, IdParseError, OperationId,
+    AgentProfileId, CoreInstanceId, EventId, HarnessBindingId, IdParseError, MemoryId, OperationId,
     ProjectId, RuntimeCheckpointId, ThreadId, TurnId,
 };
+pub use secret_shape::is_secret_shaped;
 pub use time::{LogicalTick, TimeError, UnixMillis};
 
 /// Synchronization policy for a durable data family.
