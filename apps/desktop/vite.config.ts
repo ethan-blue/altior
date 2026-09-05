@@ -11,6 +11,11 @@ export default defineConfig({
     fs: {
       allow: ["../.."],
     },
+    // Never watch the Tauri shell build tree: target/debug contains locked
+    // executables while `tauri dev` compiles, which crashes chokidar (EBUSY).
+    watch: {
+      ignored: ["**/src-tauri/**"],
+    },
   },
   test: {
     environment: "jsdom",
