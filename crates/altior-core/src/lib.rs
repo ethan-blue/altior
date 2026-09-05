@@ -17,6 +17,7 @@
 //!   event pump, and connection sessions (P1.3).
 
 pub mod application;
+pub mod context;
 pub mod operations;
 pub mod ownership;
 pub mod runtime;
@@ -28,4 +29,8 @@ pub use application::{
     CoreStatusReport, DaemonSessionState, DaemonStepReport, EventPump, FakeConnection,
     InMemoryClient, InMemoryDuplexConnection, InMemoryListener, IpcConnection, IpcListener,
     StartupRecoveryReport, ThreadOpenResult,
+};
+pub use context::{
+    AssembleParams, AssembledContext, AssemblerError, ContextBudgetConfig,
+    DEFAULT_IDENTITY_LIMIT_TOKENS, DEFAULT_MEMORY_LIMIT_TOKENS, assemble_context, estimate_tokens,
 };

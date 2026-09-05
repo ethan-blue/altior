@@ -360,7 +360,7 @@ fn test_p14_acceptance_journey_complete_eight_steps() {
     // ── Step 1: Clean Store Validation & Core Daemon Launch ────────────
     {
         let store = Store::open(&db_path).expect("open sqlite store for clean schema check");
-        assert_eq!(store.schema_version().expect("schema version"), 6);
+        assert_eq!(store.schema_version().expect("schema version"), 7);
         assert!(
             store
                 .agent_profiles(None, AgentProfileListLimit::try_new(50).unwrap())

@@ -12,17 +12,21 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use altior_domain::{
-    AcpHarnessBinding, AgentProfile, AgentProfileId, BoundedPath, DisplayName, EventId, HarnessArg,
-    HarnessBindingId, HarnessEnvKey, HarnessKind, HarnessSecretRef, MemoryMode, OperationId,
-    PermissionDecision, PermissionListLimit, ProjectId, SearchQuery, ThreadCursor, ThreadId,
-    ThreadListLimit, ThreadTitle, TurnCursor, TurnId, TurnListLimit, UnixMillis,
+    AcpHarnessBinding, AgentProfile, AgentProfileId, BoundedPath, ContextSnapshotListLimit,
+    DisplayName, EventId, HarnessArg, HarnessBindingId, HarnessEnvKey, HarnessKind,
+    HarnessSecretRef, IdentityContent, IdentityDocument, IdentityDocumentId, IdentityDocumentKind,
+    IdentityDocumentListLimit, MemoryMode, OperationId, PermissionDecision, PermissionListLimit,
+    ProjectId, SearchQuery, ThreadCursor, ThreadId, ThreadListLimit, ThreadTitle, TurnCursor,
+    TurnId, TurnListLimit, UnixMillis,
 };
 use altior_ipc::{CatchUpDelivery, IpcError, LaunchCredentials, ServerSession};
 use altior_protocol::{
     AgentProfileDto, CancelTurnCommand, CommandEnvelope, CommandKind, ConfigureAgentCommand,
-    CreateThreadCommand, DesktopHello, DiagnosticText, DiagnosticsCommand, EnvelopeLimits,
-    EventBody, EventEnvelope, GetHistoryCommand, KnownEvent, ListThreadsCommand, OpenThreadCommand,
-    PermissionDto, ProtocolVersion, RespondPermissionCommand, RuntimeDiagnosticsDto,
+    ContextSnapshotDto, CreateThreadCommand, DeleteIdentityDocumentCommand, DesktopHello,
+    DiagnosticText, DiagnosticsCommand, EnvelopeLimits, EventBody, EventEnvelope,
+    GetContextSnapshotCommand, GetHistoryCommand, IdentityDocumentDto, KnownEvent,
+    ListIdentityDocumentsCommand, ListThreadsCommand, OpenThreadCommand, PermissionDto,
+    ProtocolVersion, PutIdentityDocumentCommand, RespondPermissionCommand, RuntimeDiagnosticsDto,
     SearchThreadsCommand, Sequence, SnapshotEnvelope, StartTurnCommand, TestHarnessBindingCommand,
     ThreadCursorDto, ThreadDto, ThreadHistoryResponseDto, ThreadListResponseDto, ThreadSnapshotDto,
     ThreadSummaryDto, TurnCursorDto, TurnDto,
@@ -768,6 +772,18 @@ where
             CommandKind::RequestSnapshot => {
                 Self::handle_request_snapshot(app, limits, session, cmd, now)
             }
+            CommandKind::PutIdentityDocument => {
+                Self::handle_put_identity_document(app, limits, session, cmd, now)
+            }
+            CommandKind::DeleteIdentityDocument => {
+                Self::handle_delete_identity_document(app, limits, session, cmd, now)
+            }
+            CommandKind::ListIdentityDocuments => {
+                Self::handle_list_identity_documents(app, limits, session, cmd, now)
+            }
+            CommandKind::GetContextSnapshot => {
+                Self::handle_get_context_snapshot(app, limits, session, cmd, now)
+            }
             _ => Ok(()),
         }
     }
@@ -1449,6 +1465,218 @@ where
         let snap = SnapshotEnvelope::runtime_diagnostics(&dto, op_id, now, limits)
             .map_err(CoreAppError::from)?;
         session.send_json(&snap).map_err(CoreAppError::from)?;
+        Ok(())
+    }
+
+    /// P2.2 (ADR 0018): stores or updates a device-local identity document.
+    fn handle_put_identity_document(
+        app: &mut CoreApplication<H, StoreCheckpointAdapter>,
+        limits: &EnvelopeLimits,
+        session: &mut DaemonClientSession<<L as IpcListener>::Connection>,
+        cmd: &CommandEnvelope,
+        now: UnixMillis,
+    ) -> Result<(), CoreAppError> {
+        let op_id = cmd.operation_id.clone();
+        let res = (|| -> Result<serde_json::Value, CoreAppError> {
+            let payload: PutIdentityDocumentCommand =
+                cmd.parse_payload().map_err(CoreAppError::Protocol)?;
+            payload.validate().map_err(CoreAppError::Protocol)?;
+            let document_id = match payload.document_id {
+                Some(ref id) => {
+                    IdentityDocumentId::from_str(id.as_str()).map_err(CoreAppError::Id)?
+                }
+                None => IdentityDocumentId::from_str(&format!("idd_{:016x}", now.as_millis()))
+                    .map_err(CoreAppError::Id)?,
+            };
+            let kind = IdentityDocumentKind::try_from_str(payload.kind.as_str())
+                .map_err(CoreAppError::Entity)?;
+            let content = IdentityContent::try_from(payload.content.as_str())
+                .map_err(CoreAppError::Entity)?;
+            let document = IdentityDocument {
+                id: document_id,
+                kind,
+                content,
+                created_at: now,
+                updated_at: now,
+            };
+            app.store_mut()
+                .put_identity_document(&document)
+                .map_err(CoreAppError::from)?;
+            let dto = IdentityDocumentDto::from(&document);
+            serde_json::to_value(dto).map_err(|e| CoreAppError::Other(e.to_string()))
+        })();
+
+        match res {
+            Ok(data) => {
+                let event =
+                    Self::make_command_result_event(app, limits, op_id, true, Some(data), now)?;
+                session.send_json(&event).map_err(CoreAppError::from)?;
+            }
+            Err(err) => {
+                let err_event = Self::make_command_error_event(
+                    app,
+                    op_id,
+                    "PUT_IDENTITY_DOCUMENT_FAILED",
+                    &err.to_string(),
+                    now,
+                )?;
+                session.send_json(&err_event).map_err(CoreAppError::from)?;
+            }
+        }
+        Ok(())
+    }
+
+    /// P2.2 (ADR 0018): deletes a device-local identity document.
+    fn handle_delete_identity_document(
+        app: &mut CoreApplication<H, StoreCheckpointAdapter>,
+        limits: &EnvelopeLimits,
+        session: &mut DaemonClientSession<<L as IpcListener>::Connection>,
+        cmd: &CommandEnvelope,
+        now: UnixMillis,
+    ) -> Result<(), CoreAppError> {
+        let op_id = cmd.operation_id.clone();
+        let res = (|| -> Result<(), CoreAppError> {
+            let payload: DeleteIdentityDocumentCommand =
+                cmd.parse_payload().map_err(CoreAppError::Protocol)?;
+            let document_id = IdentityDocumentId::from_str(payload.document_id.as_str())
+                .map_err(CoreAppError::Id)?;
+            app.store_mut()
+                .delete_identity_document(&document_id)
+                .map_err(CoreAppError::from)?;
+            Ok(())
+        })();
+
+        match res {
+            Ok(()) => {
+                let event = Self::make_command_result_event(app, limits, op_id, true, None, now)?;
+                session.send_json(&event).map_err(CoreAppError::from)?;
+            }
+            Err(err) => {
+                let err_event = Self::make_command_error_event(
+                    app,
+                    op_id,
+                    "DELETE_IDENTITY_DOCUMENT_FAILED",
+                    &err.to_string(),
+                    now,
+                )?;
+                session.send_json(&err_event).map_err(CoreAppError::from)?;
+            }
+        }
+        Ok(())
+    }
+
+    /// P2.2 (ADR 0018): lists device-local identity documents.
+    fn handle_list_identity_documents(
+        app: &CoreApplication<H, StoreCheckpointAdapter>,
+        limits: &EnvelopeLimits,
+        session: &mut DaemonClientSession<<L as IpcListener>::Connection>,
+        cmd: &CommandEnvelope,
+        now: UnixMillis,
+    ) -> Result<(), CoreAppError> {
+        let op_id = cmd.operation_id.clone();
+        let res = (|| -> Result<serde_json::Value, CoreAppError> {
+            let payload: ListIdentityDocumentsCommand =
+                cmd.parse_payload().map_err(CoreAppError::Protocol)?;
+            payload.validate().map_err(CoreAppError::Protocol)?;
+            let limit = match payload.limit {
+                Some(n) => IdentityDocumentListLimit::try_new(n).map_err(CoreAppError::Entity)?,
+                None => IdentityDocumentListLimit::try_new(IdentityDocumentListLimit::DEFAULT)
+                    .map_err(CoreAppError::Entity)?,
+            };
+            let docs = app
+                .store()
+                .list_identity_documents(limit)
+                .map_err(CoreAppError::from)?;
+            let dtos: Vec<IdentityDocumentDto> =
+                docs.iter().map(IdentityDocumentDto::from).collect();
+            serde_json::to_value(dtos).map_err(|e| CoreAppError::Other(e.to_string()))
+        })();
+
+        match res {
+            Ok(data) => {
+                let event =
+                    Self::make_command_result_event(app, limits, op_id, true, Some(data), now)?;
+                session.send_json(&event).map_err(CoreAppError::from)?;
+            }
+            Err(err) => {
+                let err_event = Self::make_command_error_event(
+                    app,
+                    op_id,
+                    "LIST_IDENTITY_DOCUMENTS_FAILED",
+                    &err.to_string(),
+                    now,
+                )?;
+                session.send_json(&err_event).map_err(CoreAppError::from)?;
+            }
+        }
+        Ok(())
+    }
+
+    /// P2.2 (ADR 0018): returns the audit `ContextSnapshot` for a turn, or the
+    /// snapshot list for a thread.
+    fn handle_get_context_snapshot(
+        app: &CoreApplication<H, StoreCheckpointAdapter>,
+        limits: &EnvelopeLimits,
+        session: &mut DaemonClientSession<<L as IpcListener>::Connection>,
+        cmd: &CommandEnvelope,
+        now: UnixMillis,
+    ) -> Result<(), CoreAppError> {
+        let op_id = cmd.operation_id.clone();
+        let res = (|| -> Result<serde_json::Value, CoreAppError> {
+            let payload: GetContextSnapshotCommand =
+                cmd.parse_payload().map_err(CoreAppError::Protocol)?;
+            payload.validate().map_err(CoreAppError::Protocol)?;
+            let value = match (payload.turn_id, payload.thread_id) {
+                (Some(turn), None) => {
+                    let turn_id = TurnId::from_str(turn.as_str()).map_err(CoreAppError::Id)?;
+                    let snapshot = app.get_context_snapshot(&turn_id)?;
+                    match snapshot {
+                        Some(s) => serde_json::to_value(ContextSnapshotDto::from(&s))
+                            .map_err(|e| CoreAppError::Other(e.to_string()))?,
+                        None => serde_json::Value::Null,
+                    }
+                }
+                (None, Some(thread)) => {
+                    let thread_id =
+                        ThreadId::from_str(thread.as_str()).map_err(CoreAppError::Id)?;
+                    let limit =
+                        match payload.limit {
+                            Some(n) => ContextSnapshotListLimit::try_new(n)
+                                .map_err(CoreAppError::Entity)?,
+                            None => ContextSnapshotListLimit::try_new(20)
+                                .map_err(CoreAppError::Entity)?,
+                        };
+                    let snapshots = app.list_context_snapshots(&thread_id, limit)?;
+                    let dtos: Vec<ContextSnapshotDto> =
+                        snapshots.iter().map(ContextSnapshotDto::from).collect();
+                    serde_json::to_value(dtos).map_err(|e| CoreAppError::Other(e.to_string()))?
+                }
+                _ => {
+                    return Err(CoreAppError::InvalidInput(
+                        "exactly one of turn_id or thread_id is required".to_string(),
+                    ));
+                }
+            };
+            Ok(value)
+        })();
+
+        match res {
+            Ok(data) => {
+                let event =
+                    Self::make_command_result_event(app, limits, op_id, true, Some(data), now)?;
+                session.send_json(&event).map_err(CoreAppError::from)?;
+            }
+            Err(err) => {
+                let err_event = Self::make_command_error_event(
+                    app,
+                    op_id,
+                    "GET_CONTEXT_SNAPSHOT_FAILED",
+                    &err.to_string(),
+                    now,
+                )?;
+                session.send_json(&err_event).map_err(CoreAppError::from)?;
+            }
+        }
         Ok(())
     }
 

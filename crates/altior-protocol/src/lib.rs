@@ -27,14 +27,17 @@ pub use bounded::{BoundedPayload, BoundedText, DiagnosticText, EnvelopeLimits, M
 pub use capability::{CapabilityId, CapabilitySet, CapabilitySupport};
 pub use command::{
     CancelTurnCommand, CommandEnvelope, CommandKind, ConfigureAgentCommand, CreateThreadCommand,
-    DiagnosticsCommand, GetHistoryCommand, ListThreadsCommand, OpenThreadCommand,
-    RespondPermissionCommand, RuntimeStatusCommand, SearchThreadsCommand, StartTurnCommand,
-    TestHarnessBindingCommand,
+    DeleteIdentityDocumentCommand, DiagnosticsCommand, GetContextSnapshotCommand,
+    GetHistoryCommand, ListIdentityDocumentsCommand, ListThreadsCommand, OpenThreadCommand,
+    PutIdentityDocumentCommand, RespondPermissionCommand, RuntimeStatusCommand,
+    SearchThreadsCommand, StartTurnCommand, TestHarnessBindingCommand,
 };
 pub use dto::{
-    AgentProfileDto, HarnessBindingConfigDto, HarnessBindingDto, PermissionDto,
-    RuntimeDiagnosticsDto, ThreadCursorDto, ThreadDto, ThreadHistoryResponseDto,
-    ThreadListResponseDto, ThreadSnapshotDto, ThreadSummaryDto, TurnCursorDto, TurnDto,
+    AgentProfileDto, ContextDegradationDto, ContextDroppedEntryDto, ContextIdentityEntryDto,
+    ContextMemoryEntryDto, ContextSnapshotDto, ContextTokenBudgetDto, HarnessBindingConfigDto,
+    HarnessBindingDto, IdentityDocumentDto, PermissionDto, RuntimeDiagnosticsDto, ThreadCursorDto,
+    ThreadDto, ThreadHistoryResponseDto, ThreadListResponseDto, ThreadSnapshotDto,
+    ThreadSummaryDto, TurnCursorDto, TurnDto,
 };
 pub use error::ProtocolError;
 pub use event::{EventBody, EventEnvelope, KnownEvent, Sequence};

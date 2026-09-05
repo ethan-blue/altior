@@ -504,20 +504,26 @@ Status: **complete (ADR 0017)**.
 - Evidence: 8 domain unit tests (`crates/altior-domain/src/entity.rs`), 11 secret detector unit tests (`crates/altior-domain/src/secret_shape.rs`), and 8 deterministic storage integration tests (`crates/altior-storage/tests/memory.rs`: `memory_lifecycle_propose_confirm_and_invalid_transitions`, `memory_correction_supersedes_original_and_updates_search`, `memory_forget_tombstone_retained_in_db_and_excluded_from_search`, `memory_lazy_expiry_at_search_and_eager_sweep`, `memory_secret_shaped_content_and_excerpt_rejection_leaves_journal_empty`, `memory_fts_literal_escaping_and_special_characters`, `memory_ranking_deterministic_scoring_explanations_and_limits`, `memory_projection_rebuild_restores_identical_state_and_search`, `migration_v5_to_v6_creates_memory_tables_and_preserves_journal`).
 - Gates: full workspace clean clippy, fmt, and test suites passing with zero warnings.
 
-- implement identity documents above ACP
-- implement ContextSnapshot assembly and token budgeting
-- add memory candidate, confirmation, correction, rejection, expiry, and forgetting
-- reject secret-shaped content before durable writes
-- add bounded explainable FTS retrieval and source evidence
-- add Memory table, provenance inspector, context diagnostics, and explicit controls
+### P2.2 Identity documents, deterministic context assembly, and explainable injection (ADR 0018)
 
-Acceptance:
+- implement identity documents above ACP (device-local `identity_document` table, schema v7, secret-shaped fail-closed)
+- implement ContextSnapshot assembly and deterministic token budgeting (pure estimator, rank-order packing, immutable per-turn `context_snapshot` rows outside the domain digest)
+- add memory confirmation, correction, rejection, expiry, and forgetting wired into turn injection (P2.1 lifecycle reused)
+- reject secret-shaped content before durable writes (identity documents and context payloads fail closed)
+- add bounded explainable FTS retrieval and source evidence into every snapshot (`why_selected`, matched terms, scores, provenance thread/turn/excerpt)
+- add context diagnostics IPC (`get_context_snapshot`, identity document put/delete/list) and a Desktop Inspector Context panel
 
-- a new ACP thread recalls a confirmed fact
-- the user can inspect why it was selected
-- correction supersedes without erasing history
-- forgetting removes it from future context
-- credential fixtures never reach the journal or projection
+Status: **complete (ADR 0018)**.
+- Evidence: 6 core acceptance tests (`crates/altior-core/tests/p22_context_injection.rs`: `confirmed_fact_recalled_in_new_thread_with_explainable_snapshot`, `empty_context_is_byte_identical_passthrough`, `correction_supersedes_injection_and_preserves_history`, `forgetting_removes_memory_from_future_context`, `secret_shaped_memory_rejected_before_journal_and_projection`, `identity_document_injected_into_wire_prompt_and_audited`), 13 storage identity/snapshot tests incl. `migration_v6_to_v7_preserves_journal_and_memory_and_enables_v7`, protocol fixture round-trips for the four new commands, and Desktop Vitest coverage for the Context panel.
+- Gates: workspace clippy/fmt/tests green, `dto-export` deterministic, `tsc --noEmit`, Vitest, and `vite build` pass.
+
+P2 acceptance:
+
+- a new ACP thread recalls a confirmed fact — verified by `confirmed_fact_recalled_in_new_thread_with_explainable_snapshot`
+- the user can inspect why it was selected — `get_context_snapshot` returns per-memory rationale; Desktop Context panel renders it
+- correction supersedes without erasing history — `correction_supersedes_injection_and_preserves_history` (journal events retained, only new content injected)
+- forgetting removes it from future context — `forgetting_removes_memory_from_future_context`
+- credential fixtures never reach the journal or projection — `secret_shaped_memory_rejected_before_journal_and_projection` (zero-write fail-closed)
 
 ## P3: Personal Vault synchronization
 

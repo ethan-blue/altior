@@ -14,6 +14,7 @@
 //! history, and search queries.
 
 pub mod error;
+pub mod identity;
 pub mod memory;
 mod migrations;
 
@@ -30,6 +31,13 @@ use altior_domain::{
     ProjectRef, ProjectRefCursor, ProjectRefListLimit, RemoteRequestId, RuntimeCheckpoint,
     RuntimeCheckpointId, SearchQuery, SessionBinding, ThreadId, ThreadListLimit, ThreadState,
     TurnCursor, TurnId, TurnListLimit, UnixMillis,
+};
+pub use altior_domain::{
+    CONTEXT_SNAPSHOT_LIST_LIMIT_MAX, CONTEXT_SNAPSHOT_PAYLOAD_MAX_BYTES, ContextDegradation,
+    ContextDropReason, ContextDroppedEntry, ContextIdentityEntry, ContextMemoryEntry,
+    ContextSnapshot, ContextSnapshotListLimit, ContextTokenBudget, IDENTITY_CONTENT_MAX_BYTES,
+    IDENTITY_DOCUMENT_COUNT_MAX, IdentityContent, IdentityDocument, IdentityDocumentId,
+    IdentityDocumentKind, IdentityDocumentListLimit,
 };
 use altior_protocol::EventEnvelope;
 pub use error::StorageError;

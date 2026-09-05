@@ -21,12 +21,14 @@ use std::sync::{Arc, Mutex};
 
 use altior_domain::{
     AcpHarnessBinding, AgentProfile, AgentProfileCursor, AgentProfileId, AgentProfileListLimit,
-    CHECKPOINT_LIST_LIMIT_MAX, CheckpointListLimit, CheckpointState, CoreInstanceId, DeliveryState,
+    BoundedLabel, CHECKPOINT_LIST_LIMIT_MAX, CheckpointListLimit, CheckpointState,
+    ContextDegradation, ContextSnapshot, ContextSnapshotListLimit, CoreInstanceId, DeliveryState,
     DomainEvent, DomainEventKind, EventId, HarnessBindingCursor, HarnessBindingId,
-    HarnessBindingListLimit, HistoryLimit, OperationId, Permission, PermissionCursor,
-    PermissionDecision, PermissionListLimit, ProjectId, SearchQuery, THREAD_LIST_LIMIT_MAX,
-    TURN_LIST_LIMIT_MAX, ThreadCursor, ThreadId, ThreadListLimit, ThreadState, ThreadTitle,
-    TurnCursor, TurnId, TurnListLimit, UnixMillis,
+    HarnessBindingListLimit, HistoryLimit, IdentityDocumentListLimit, MemoryMode, MemoryScope,
+    MemorySearchLimit, OperationId, Permission, PermissionCursor, PermissionDecision,
+    PermissionListLimit, ProjectId, SearchQuery, THREAD_LIST_LIMIT_MAX, TURN_LIST_LIMIT_MAX,
+    ThreadCursor, ThreadId, ThreadListLimit, ThreadState, ThreadTitle, TurnCursor, TurnId,
+    TurnListLimit, UnixMillis,
 };
 use altior_ipc::{DEFAULT_RETAINED_CAPACITY, EventLog, LaunchCredentials};
 use altior_protocol::{
@@ -50,6 +52,7 @@ pub use mod_types::{
 };
 pub use session::{CoreServerPort, FakeConnection};
 
+use crate::context::{AssembleParams, ContextBudgetConfig, assemble_context};
 use crate::operations::OperationRegistry;
 use crate::runtime::adapters::acp::AcpHarnessAdapter;
 use crate::runtime::adapters::storage::StoreCheckpointAdapter;
@@ -67,8 +70,8 @@ fn hsb_fallback() -> HarnessBindingId {
 use crate::runtime::coordinator::AgentRuntimeSupervisor;
 use crate::runtime::ports::{AgentRuntime, HarnessRuntimePort, RuntimeCheckpointPort};
 use crate::runtime::state::{
-    BindingProbeOutcome, CancelOutcome, HarnessSessionId, RuntimeError, RuntimeEvent,
-    SupervisorState, TurnAdmission,
+    BindingProbeOutcome, CancelOutcome, CheckpointError, HarnessSessionId, RuntimeError,
+    RuntimeEvent, SupervisorState, TurnAdmission,
 };
 
 /// Default capacity for the operation dedup ledger.
@@ -667,6 +670,50 @@ where
             .map_err(CoreAppError::from)
     }
 
+    /// Returns the audit `ContextSnapshot` for a turn, if recorded.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CoreAppError`] on storage failure.
+    pub fn get_context_snapshot(
+        &self,
+        turn_id: &TurnId,
+    ) -> Result<Option<ContextSnapshot>, CoreAppError> {
+        self.supervisor
+            .checkpoint()
+            .store()
+            .get_context_snapshot(turn_id)
+            .map_err(CoreAppError::from)
+    }
+
+    /// Lists audit `ContextSnapshots` for a thread in reverse chronological order.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CoreAppError`] on storage failure.
+    pub fn list_context_snapshots(
+        &self,
+        thread_id: &ThreadId,
+        limit: ContextSnapshotListLimit,
+    ) -> Result<Vec<ContextSnapshot>, CoreAppError> {
+        self.supervisor
+            .checkpoint()
+            .store()
+            .list_context_snapshots_for_thread(thread_id, limit)
+            .map_err(CoreAppError::from)
+    }
+
+    /// Returns an immutable reference to the underlying store.
+    #[must_use]
+    pub fn store(&self) -> &altior_storage::Store {
+        self.supervisor.checkpoint().store()
+    }
+
+    /// Returns a mutable reference to the underlying store.
+    pub fn store_mut(&mut self) -> &mut altior_storage::Store {
+        self.supervisor.checkpoint_mut().store_mut()
+    }
+
     /// Updates thread title in the domain journal.
     ///
     /// # Errors
@@ -853,7 +900,7 @@ where
         content: &str,
         now: UnixMillis,
     ) -> Result<(TurnAdmission, Option<EventEnvelope>), CoreAppError> {
-        let _ = self
+        let thread = self
             .supervisor
             .checkpoint()
             .store()
@@ -931,13 +978,141 @@ where
             return Ok((TurnAdmission::Duplicate, None));
         }
 
+        // ── Context Assembly & Budgeting (ADR 0018) ────────────────────
+        let agent_profile_id =
+            AgentProfileId::from_str(&thread.agent_profile_id).map_err(CoreAppError::Id)?;
+        let agent_profile = self
+            .supervisor
+            .checkpoint()
+            .store()
+            .agent_profile_by_id(&agent_profile_id)?;
+        let memory_mode = agent_profile.map_or(MemoryMode::Off, |p| p.memory_mode);
+
+        let mut memory_hits = Vec::new();
+        let mut degradation = None;
+
+        match memory_mode {
+            MemoryMode::Off => {}
+            MemoryMode::LongTerm => {
+                let trimmed = content.trim();
+                if !trimmed.is_empty() {
+                    let (query_str, was_truncated) = if trimmed.len() > SearchQuery::capacity() {
+                        let mut end = SearchQuery::capacity();
+                        while !trimmed.is_char_boundary(end) {
+                            end -= 1;
+                        }
+                        (&trimmed[..end], true)
+                    } else {
+                        (trimmed, false)
+                    };
+
+                    if was_truncated {
+                        degradation = Some(ContextDegradation {
+                            code: "memory_query_truncated".to_string(),
+                            detail: format!(
+                                "user prompt of {} bytes truncated to {} bytes for memory search",
+                                content.len(),
+                                query_str.len()
+                            ),
+                        });
+                    }
+
+                    if let Ok(search_query) = SearchQuery::try_from(query_str) {
+                        let limit = MemorySearchLimit::default_limit();
+                        let hits = self.supervisor.checkpoint().store().search_memories(
+                            &search_query,
+                            None,
+                            limit,
+                            now,
+                        )?;
+                        memory_hits = hits;
+                    }
+                }
+            }
+            MemoryMode::Session => {
+                let trimmed = content.trim();
+                if !trimmed.is_empty() {
+                    let (query_str, was_truncated) = if trimmed.len() > SearchQuery::capacity() {
+                        let mut end = SearchQuery::capacity();
+                        while !trimmed.is_char_boundary(end) {
+                            end -= 1;
+                        }
+                        (&trimmed[..end], true)
+                    } else {
+                        (trimmed, false)
+                    };
+
+                    if was_truncated {
+                        degradation = Some(ContextDegradation {
+                            code: "memory_query_truncated".to_string(),
+                            detail: format!(
+                                "user prompt of {} bytes truncated to {} bytes for memory search",
+                                content.len(),
+                                query_str.len()
+                            ),
+                        });
+                    }
+
+                    if let Ok(search_query) = SearchQuery::try_from(query_str)
+                        && let Ok(label) = BoundedLabel::try_from(thread_id.as_str())
+                    {
+                        let scope = MemoryScope::Thread(label);
+                        let limit = MemorySearchLimit::default_limit();
+                        let hits = self.supervisor.checkpoint().store().search_memories(
+                            &search_query,
+                            Some(&scope),
+                            limit,
+                            now,
+                        )?;
+                        memory_hits = hits;
+                    }
+                }
+            }
+        }
+
+        let identity_docs = self
+            .supervisor
+            .checkpoint()
+            .store()
+            .list_identity_documents(IdentityDocumentListLimit::default())?;
+
+        let assembled = assemble_context(AssembleParams {
+            turn_id: &turn_id,
+            thread_id: &thread_id,
+            memory_mode: memory_mode.as_str(),
+            user_prompt: content,
+            identity_docs: &identity_docs,
+            memory_hits: &memory_hits,
+            budget: ContextBudgetConfig::default(),
+            now,
+            degraded: degradation,
+        })?;
+
         // Persist TurnStarted domain event BEFORE calling supervisor.prompt (external boundary)
         // so that the turn exists in domain storage for intent checkpoint FK constraints.
+        // Invariant: TurnStarted retains the user's raw prompt, never enriched context.
         self.persist_turn_started(&thread_id, &turn_id, &operation_id, content, now)?;
 
-        let prompt_result =
-            self.supervisor
-                .prompt(&thread_id, operation_id.clone(), turn_id.clone(), content);
+        // Record ContextSnapshot audit row exactly once before harness delivery
+        if let Err(e) = self
+            .supervisor
+            .checkpoint_mut()
+            .store_mut()
+            .record_context_snapshot(&assembled.snapshot)
+        {
+            let rt_err = RuntimeError::Checkpoint(CheckpointError::Persistence(format!(
+                "failed to record context snapshot: {e}"
+            )));
+            let _ = self.persist_turn_failed(&thread_id, &turn_id, &operation_id, &rt_err, now);
+            return Err(CoreAppError::Storage(e));
+        }
+
+        let prompt_result = self.supervisor.prompt(
+            &thread_id,
+            operation_id.clone(),
+            turn_id.clone(),
+            &assembled.wire_prompt,
+        );
 
         match prompt_result {
             Ok(admission) => {

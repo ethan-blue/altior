@@ -2,6 +2,7 @@
 
 pub mod entity;
 pub mod id;
+pub mod identity;
 pub mod secret_shape;
 pub mod time;
 
@@ -24,10 +25,17 @@ pub use entity::{
     THREAD_LIST_LIMIT_MAX, TURN_LIST_LIMIT_MAX, Thread, ThreadCursor, ThreadListLimit, ThreadState,
     ThreadTitle, Turn, TurnCursor, TurnListLimit, TurnState,
 };
+pub use identity::{
+    CONTEXT_SNAPSHOT_LIST_LIMIT_MAX, CONTEXT_SNAPSHOT_PAYLOAD_MAX_BYTES, ContextDegradation,
+    ContextDropReason, ContextDroppedEntry, ContextIdentityEntry, ContextMemoryEntry,
+    ContextSnapshot, ContextSnapshotListLimit, ContextTokenBudget, IDENTITY_CONTENT_MAX_BYTES,
+    IDENTITY_DOCUMENT_COUNT_MAX, IdentityContent, IdentityDocument, IdentityDocumentKind,
+    IdentityDocumentListLimit,
+};
 
 pub use id::{
-    AgentProfileId, CoreInstanceId, EventId, HarnessBindingId, IdParseError, MemoryId, OperationId,
-    ProjectId, RuntimeCheckpointId, ThreadId, TurnId,
+    AgentProfileId, CoreInstanceId, EventId, HarnessBindingId, IdParseError, IdentityDocumentId,
+    MemoryId, OperationId, ProjectId, RuntimeCheckpointId, ThreadId, TurnId,
 };
 pub use secret_shape::is_secret_shaped;
 pub use time::{LogicalTick, TimeError, UnixMillis};

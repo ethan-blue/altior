@@ -232,6 +232,11 @@ define_id!(
     MemoryId,
     "mem_"
 );
+define_id!(
+    /// Identity of a device-local identity document (P2.2, ADR 0018).
+    IdentityDocumentId,
+    "idd_"
+);
 
 #[cfg(test)]
 mod tests {
@@ -292,6 +297,12 @@ mod tests {
                 .unwrap()
                 .to_string(),
             "mem_fixture000000012"
+        );
+        assert_eq!(
+            IdentityDocumentId::from_str("idd_fixture000000013")
+                .unwrap()
+                .to_string(),
+            "idd_fixture000000013"
         );
     }
 

@@ -711,10 +711,10 @@ fn migration_v5_to_v6_creates_memory_tables_and_preserves_journal() {
         );
     }
 
-    // Now open with Store::open, which should auto-migrate from v5 to v6
+    // Now open with Store::open, which should auto-migrate from v5 to latest (v7)
     {
-        let mut store = Store::open(&db_path).expect("open and migrate to v6");
-        assert_eq!(store.schema_version().expect("schema_version"), 6);
+        let mut store = Store::open(&db_path).expect("open and migrate to v7");
+        assert_eq!(store.schema_version().expect("schema_version"), 7);
 
         // Verify we can write and search memories on the migrated database
         let draft = fixture_draft("Memory created after v5 to v6 migration");

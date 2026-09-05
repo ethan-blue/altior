@@ -1,0 +1,134 @@
+    Checking altior-core v0.0.1 (D:\Projects\GitProjects\Altior\crates\altior-core)
+error[E0425]: cannot find value `thread` in this scope
+   --> crates\altior-core\src\application\mod.rs:982:58
+    |
+982 |         let agent_profile_id = AgentProfileId::from_str(&thread.agent_profile_id)
+    |                                                          ^^^^^^ not found in this scope
+
+warning: unused import: `IdentityDocumentKind`
+  --> crates\altior-core\src\context\mod.rs:32:23
+   |
+32 |     IdentityDocument, IdentityDocumentKind, MemoryHit, ThreadId, TurnId, UnixMillis,
+   |                       ^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+error[E0599]: no method named `list_context_snapshots` found for reference `&Store` in the current scope
+   --> crates\altior-core\src\application\mod.rs:702:14
+    |
+699 | /         self.supervisor
+700 | |             .checkpoint()
+701 | |             .store()
+702 | |             .list_context_snapshots(thread_id, limit)
+    | |_____________-^^^^^^^^^^^^^^^^^^^^^^
+    |
+help: there is a method `list_context_snapshots_for_thread` with a similar name
+    |
+702 |             .list_context_snapshots_for_thread(thread_id, limit)
+    |                                    +++++++++++
+
+error[E0599]: no associated function or constant named `default` found for struct `MemorySearchLimit` in the current scope
+    --> crates\altior-core\src\application\mod.rs:1021:56
+     |
+1021 |                         let limit = MemorySearchLimit::default();
+     |                                                        ^^^^^^^ associated function or constant not found in `MemorySearchLimit`
+     |
+note: if you're trying to build a new `MemorySearchLimit` consider using one of the following associated functions:
+      MemorySearchLimit::try_new
+      MemorySearchLimit::default_limit
+    --> crates\altior-domain\src\entity.rs:2587:5
+     |
+2587 |     pub fn try_new(value: u32) -> Result<Self, EntityError> {
+     |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+2599 |     pub const fn default_limit() -> Self {
+     |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+help: there is an associated function `default_limit` with a similar name
+     |
+1021 |                         let limit = MemorySearchLimit::default_limit();
+     |                                                               ++++++
+
+error[E0599]: no associated function or constant named `default` found for struct `MemorySearchLimit` in the current scope
+    --> crates\altior-core\src\application\mod.rs:1058:60
+     |
+1058 | ...                   let limit = MemorySearchLimit::default();
+     |                                                      ^^^^^^^ associated function or constant not found in `MemorySearchLimit`
+     |
+note: if you're trying to build a new `MemorySearchLimit` consider using one of the following associated functions:
+      MemorySearchLimit::try_new
+      MemorySearchLimit::default_limit
+    --> crates\altior-domain\src\entity.rs:2587:5
+     |
+2587 |     pub fn try_new(value: u32) -> Result<Self, EntityError> {
+     |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+2599 |     pub const fn default_limit() -> Self {
+     |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+help: there is an associated function `default_limit` with a similar name
+     |
+1058 |                             let limit = MemorySearchLimit::default_limit();
+     |                                                                   ++++++
+
+error[E0599]: no variant, associated function, or constant named `Storage` found for enum `RuntimeError` in the current scope
+    --> crates\altior-core\src\application\mod.rs:1101:40
+     |
+1101 |             let rt_err = RuntimeError::Storage(format!("failed to record context snapshot: {e}"));
+     |                                        ^^^^^^^ variant, associated function, or constant not found in `RuntimeError`
+     |
+    ::: crates\altior-core\src\runtime\state.rs:364:1
+     |
+ 364 | pub enum RuntimeError {
+     | --------------------- variant, associated function, or constant `Storage` not found for this enum
+
+error[E0609]: no field `id` on type `MemoryRecord`
+   --> crates\altior-core\src\context\mod.rs:257:36
+    |
+257 |             .then_with(|| a.record.id.as_str().cmp(b.record.id.as_str()))
+    |                                    ^^ unknown field
+    |
+    = note: available fields are: `memory_id`, `content`, `scope`, `kind`, `state` ... and 8 others
+
+error[E0609]: no field `id` on type `MemoryRecord`
+   --> crates\altior-core\src\context\mod.rs:257:61
+    |
+257 |             .then_with(|| a.record.id.as_str().cmp(b.record.id.as_str()))
+    |                                                             ^^ unknown field
+    |
+    = note: available fields are: `memory_id`, `content`, `scope`, `kind`, `state` ... and 8 others
+
+error[E0609]: no field `id` on type `MemoryRecord`
+   --> crates\altior-core\src\context\mod.rs:279:39
+    |
+279 |                 memory_id: hit.record.id.clone(),
+    |                                       ^^ unknown field
+    |
+    = note: available fields are: `memory_id`, `content`, `scope`, `kind`, `state` ... and 8 others
+
+error[E0609]: no field `id` on type `MemoryRecord`
+   --> crates\altior-core\src\context\mod.rs:300:39
+    |
+300 |                 memory_id: hit.record.id.clone(),
+    |                                       ^^ unknown field
+    |
+    = note: available fields are: `memory_id`, `content`, `scope`, `kind`, `state` ... and 8 others
+
+error[E0609]: no field `explicit` on type `MemoryRecord`
+   --> crates\altior-core\src\context\mod.rs:304:38
+    |
+304 |                 explicit: hit.record.explicit,
+    |                                      ^^^^^^^^ unknown field
+    |
+    = note: available fields are: `memory_id`, `content`, `scope`, `kind`, `state` ... and 8 others
+
+error[E0609]: no field `id` on type `MemoryRecord`
+   --> crates\altior-core\src\context\mod.rs:315:39
+    |
+315 |                 memory_id: hit.record.id.clone(),
+    |                                       ^^ unknown field
+    |
+    = note: available fields are: `memory_id`, `content`, `scope`, `kind`, `state` ... and 8 others
+
+Some errors have detailed explanations: E0425, E0599, E0609.
+For more information about an error, try `rustc --explain E0425`.
+warning: `altior-core` (lib) generated 1 warning
+error: could not compile `altior-core` (lib) due to 11 previous errors; 1 warning emitted

@@ -167,6 +167,35 @@ pub enum StorageError {
         /// The missing memory ID.
         memory_id: String,
     },
+    /// The specified identity document was not found.
+    IdentityDocumentNotFound {
+        /// The missing identity document ID.
+        identity_document_id: String,
+    },
+    /// An identity document already exists with conflicting content.
+    IdentityDocumentConflict {
+        /// The conflicting identity document ID.
+        identity_document_id: String,
+    },
+    /// The device already holds the maximum number of identity documents.
+    IdentityDocumentCountExceeded {
+        /// The current document count.
+        count: usize,
+        /// The maximum allowed count.
+        max: usize,
+    },
+    /// A context snapshot already exists for the turn with different payload.
+    ContextSnapshotConflict {
+        /// The conflicting turn ID.
+        turn_id: String,
+    },
+    /// A stored context snapshot payload could not be decoded.
+    ContextSnapshotCorrupt {
+        /// The offending turn ID.
+        turn_id: String,
+        /// Decode failure detail.
+        detail: String,
+    },
     /// Content matched a secret-shaped pattern and was refused before any
     /// durable write (ADR memory policy; AGENTS.md "Memory").
     SecretShapedContent,
@@ -296,6 +325,37 @@ impl fmt::Display for StorageError {
             Self::MemoryNotFound { memory_id } => {
                 write!(f, "memory {memory_id} not found")
             }
+            Self::IdentityDocumentNotFound {
+                identity_document_id,
+            } => {
+                write!(f, "identity document {identity_document_id} not found")
+            }
+            Self::IdentityDocumentConflict {
+                identity_document_id,
+            } => {
+                write!(
+                    f,
+                    "identity document {identity_document_id} already exists with conflicting content"
+                )
+            }
+            Self::IdentityDocumentCountExceeded { count, max } => {
+                write!(
+                    f,
+                    "identity document count {count} exceeds the device cap {max}"
+                )
+            }
+            Self::ContextSnapshotConflict { turn_id } => {
+                write!(
+                    f,
+                    "a different context snapshot already exists for turn {turn_id}"
+                )
+            }
+            Self::ContextSnapshotCorrupt { turn_id, detail } => {
+                write!(
+                    f,
+                    "context snapshot for turn {turn_id} is corrupt: {detail}"
+                )
+            }
             Self::SecretShapedContent => {
                 f.write_str("content matches a secret-shaped pattern; refusing durable write")
             }
@@ -335,6 +395,11 @@ impl std::error::Error for StorageError {
             | Self::TurnNotFound { .. }
             | Self::TurnThreadMismatch { .. }
             | Self::MemoryNotFound { .. }
+            | Self::IdentityDocumentNotFound { .. }
+            | Self::IdentityDocumentConflict { .. }
+            | Self::IdentityDocumentCountExceeded { .. }
+            | Self::ContextSnapshotConflict { .. }
+            | Self::ContextSnapshotCorrupt { .. }
             | Self::SecretShapedContent
             | Self::LimitOutOfRange { .. } => None,
         }

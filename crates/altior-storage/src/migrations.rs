@@ -43,6 +43,10 @@ pub(crate) const MIGRATIONS: &[Migration] = &[
         version: 6,
         sql: SCHEMA_V6,
     },
+    Migration {
+        version: 7,
+        sql: SCHEMA_V7,
+    },
 ];
 
 /// The highest schema version this build understands.
@@ -406,4 +410,42 @@ CREATE TRIGGER memory_fts_delete AFTER DELETE ON memory
 BEGIN
     DELETE FROM memory_fts WHERE memory_id = old.memory_id;
 END;
+";
+
+/// Schema v7: device-local identity documents and `ContextSnapshot` audit
+/// records (P2.2, ADR 0018).
+///
+/// Both tables are device-local by decision, exactly like `agent_profile`
+/// and `runtime_checkpoint`: identity documents are user-authored local
+/// inputs (never journaled domain knowledge), and a context snapshot is a
+/// per-turn explainability record of what Core assembled into the wire
+/// prompt. Neither participates in `rebuild_domain_projections` or
+/// `domain_projection_digest` — wiping or rebuilding the domain projections
+/// must never disturb them, and they never sync through the Personal Vault
+/// (P3 may add an explicit opt-in family instead).
+const SCHEMA_V7: &str = r"
+CREATE TABLE identity_document (
+    identity_document_id TEXT PRIMARY KEY,
+    kind TEXT NOT NULL,
+    content TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+) STRICT;
+
+CREATE INDEX identity_document_kind_id ON identity_document(kind, identity_document_id);
+
+-- One audit row per turn: `turn_id` is the natural immutable key because
+-- automatic resend of a confirmed/indeterminate turn is forbidden, and the
+-- assembler writes the snapshot exactly once before harness delivery.
+CREATE TABLE context_snapshot (
+    turn_id TEXT PRIMARY KEY,
+    thread_id TEXT NOT NULL,
+    memory_mode TEXT NOT NULL,
+    passthrough INTEGER NOT NULL,
+    created_at INTEGER NOT NULL,
+    payload_json TEXT NOT NULL
+) STRICT;
+
+CREATE INDEX context_snapshot_thread_created
+    ON context_snapshot(thread_id, created_at, turn_id);
 ";

@@ -2,16 +2,22 @@ import type { AgentProfileDto } from "./dto/AgentProfileDto";
 import type { CancelTurnCommand } from "./dto/CancelTurnCommand";
 import type { CommandEnvelope } from "./dto/CommandEnvelope";
 import type { ConfigureAgentCommand } from "./dto/ConfigureAgentCommand";
+import type { ContextSnapshotDto } from "./dto/ContextSnapshotDto";
 import type { CreateThreadCommand } from "./dto/CreateThreadCommand";
+import type { DeleteIdentityDocumentCommand } from "./dto/DeleteIdentityDocumentCommand";
 import type { DiagnosticsCommand } from "./dto/DiagnosticsCommand";
 import type { EventBody } from "./dto/EventBody";
 import type { EventEnvelope } from "./dto/EventEnvelope";
+import type { GetContextSnapshotCommand } from "./dto/GetContextSnapshotCommand";
 import type { GetHistoryCommand } from "./dto/GetHistoryCommand";
 import type { HarnessBindingConfigDto } from "./dto/HarnessBindingConfigDto";
 import type { HarnessBindingDto } from "./dto/HarnessBindingDto";
+import type { IdentityDocumentDto } from "./dto/IdentityDocumentDto";
+import type { ListIdentityDocumentsCommand } from "./dto/ListIdentityDocumentsCommand";
 import type { NegotiatedHandshake } from "./dto/NegotiatedHandshake";
 import type { OpenThreadCommand } from "./dto/OpenThreadCommand";
 import type { PermissionDto } from "./dto/PermissionDto";
+import type { PutIdentityDocumentCommand } from "./dto/PutIdentityDocumentCommand";
 import type { RuntimeDiagnosticsDto } from "./dto/RuntimeDiagnosticsDto";
 import type { SearchThreadsCommand } from "./dto/SearchThreadsCommand";
 import type { Sequence } from "./dto/Sequence";
@@ -52,6 +58,10 @@ export interface InMemoryTransportOptions {
   readonly includeHugeThread?: boolean;
   /** Automatically stream reply deltas on start_turn. Defaults to true. */
   readonly autoStreamReplies?: boolean;
+  /** Initial identity document fixtures. */
+  readonly initialIdentityDocuments?: readonly IdentityDocumentDto[];
+  /** Initial context snapshots fixtures. */
+  readonly initialContextSnapshots?: readonly ContextSnapshotDto[];
 }
 
 const DEFAULT_AGENTS_DTO: AgentProfileDto[] = [
@@ -119,6 +129,8 @@ export class InMemoryTransport implements CoreTransport {
   #threadFixtures: ThreadFixture[];
   #agents: AgentProfileDto[];
   #bindings = new Map<string, HarnessBindingDto>();
+  #identityDocs: IdentityDocumentDto[] = [];
+  #contextSnapshots = new Map<string, ContextSnapshotDto>();
 
   constructor(options: InMemoryTransportOptions = {}) {
     this.#negotiated = options.negotiated ?? negotiatedFixture;
@@ -141,6 +153,27 @@ export class InMemoryTransport implements CoreTransport {
     for (const binding of bindingsToSeed) {
       this.#bindings.set(binding.id, structuredClone(binding));
     }
+
+    if (options.initialIdentityDocuments) {
+      this.#identityDocs = options.initialIdentityDocuments.map((d) => structuredClone(d));
+    }
+    if (options.initialContextSnapshots) {
+      for (const snap of options.initialContextSnapshots) {
+        if (snap.turn_id) {
+          this.#contextSnapshots.set(snap.turn_id, structuredClone(snap));
+        }
+      }
+    }
+  }
+
+  /** Sets a context snapshot fixture in memory. */
+  setContextSnapshot(snapshot: ContextSnapshotDto): void {
+    this.#contextSnapshots.set(snapshot.turn_id, structuredClone(snapshot));
+  }
+
+  /** Active identity documents in memory. */
+  get identityDocuments(): readonly IdentityDocumentDto[] {
+    return this.#identityDocs;
   }
 
   /** Commands sent through `send` or `command`, in dispatch order. */
@@ -701,6 +734,105 @@ export class InMemoryTransport implements CoreTransport {
           data: diagDto,
         };
         return snapshot;
+      }
+
+      case "get_context_snapshot": {
+        const payload = command.payload as GetContextSnapshotCommand | null;
+        const turnId = payload?.turn_id;
+        const threadId = payload?.thread_id;
+        if (turnId && this.#contextSnapshots.has(turnId)) {
+          return structuredClone(this.#contextSnapshots.get(turnId)!);
+        }
+        for (const snap of this.#contextSnapshots.values()) {
+          if ((threadId && snap.thread_id === threadId) || (turnId && snap.turn_id === turnId)) {
+            return structuredClone(snap);
+          }
+        }
+        const fallbackSnap: ContextSnapshotDto = {
+          turn_id: turnId ?? "trn_default",
+          thread_id: threadId ?? "thread-1",
+          memory_mode: "long_term",
+          created_at: Date.now(),
+          passthrough: false,
+          budget: {
+            identity_limit_tokens: 1024,
+            memory_limit_tokens: 2048,
+            prompt_tokens: 120,
+            identity_tokens: 250,
+            memory_tokens: 680,
+            total_tokens: 1050,
+          },
+          identity: [
+            {
+              document_id: "idd_user_profile",
+              kind: "about",
+              tokens: 250,
+            },
+          ],
+          memories: [
+            {
+              memory_id: "mem_pref_testing",
+              kind: "preference",
+              scope_kind: "project",
+              scope_target: null,
+              confidence: 95,
+              explicit: true,
+              tokens: 180,
+              score: 0.92,
+              why_selected: 'matched terms: ["test", "vitest"], bm25: 2.140, total: 0.9200',
+              provenance_thread_id: "thread-old",
+              provenance_turn_id: "turn-42",
+            },
+          ],
+          dropped: [
+            {
+              memory_id: "mem_low_rank",
+              tokens: 300,
+              rank: 5,
+              reason: "budget_exhausted",
+            },
+          ],
+          degraded: null,
+          rendered_prompt: "Rendered prompt content with injected memories...",
+        };
+        return fallbackSnap;
+      }
+
+      case "list_identity_documents": {
+        const payload = command.payload as ListIdentityDocumentsCommand | null;
+        const limit = payload?.limit ?? 32;
+        return this.#identityDocs.slice(0, limit).map((d) => structuredClone(d));
+      }
+
+      case "put_identity_document": {
+        const payload = command.payload as PutIdentityDocumentCommand | null;
+        const docId = payload?.document_id ?? `idd_${Date.now().toString(36)}`;
+        const now = Date.now();
+        const doc: IdentityDocumentDto = {
+          document_id: docId,
+          kind: payload?.kind ?? "about",
+          content: payload?.content ?? "",
+          created_at: now,
+          updated_at: now,
+        };
+        const existingIdx = this.#identityDocs.findIndex((d) => d.document_id === docId);
+        if (existingIdx >= 0) {
+          doc.created_at = this.#identityDocs[existingIdx]!.created_at;
+          this.#identityDocs[existingIdx] = doc;
+        } else {
+          this.#identityDocs.push(doc);
+        }
+        return structuredClone(doc);
+      }
+
+      case "delete_identity_document": {
+        const payload = command.payload as DeleteIdentityDocumentCommand | null;
+        if (payload?.document_id) {
+          this.#identityDocs = this.#identityDocs.filter(
+            (d) => d.document_id !== payload.document_id,
+          );
+        }
+        return { ok: true };
       }
 
       default:

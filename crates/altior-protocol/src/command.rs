@@ -19,7 +19,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 
 use altior_domain::{
-    AgentProfileId, EventId, HarnessBindingId, OperationId, ProjectId, ThreadId, TurnId, UnixMillis,
+    AgentProfileId, ContextSnapshotListLimit, EventId, HarnessBindingId, IdentityContent,
+    IdentityDocumentId, IdentityDocumentKind, IdentityDocumentListLimit, OperationId, ProjectId,
+    ThreadId, TurnId, UnixMillis,
 };
 
 use crate::bounded::{BoundedPayload, EnvelopeLimits, MessageText};
@@ -73,6 +75,14 @@ pub enum CommandKind {
     RuntimeStatus,
     /// Query Core runtime diagnostic summaries.
     Diagnostics,
+    /// Create or update a device-local identity document.
+    PutIdentityDocument,
+    /// Delete a device-local identity document by ID.
+    DeleteIdentityDocument,
+    /// List device-local identity documents in priority order.
+    ListIdentityDocuments,
+    /// Retrieve context snapshot explainability record(s).
+    GetContextSnapshot,
 }
 
 impl CommandKind {
@@ -96,6 +106,10 @@ impl CommandKind {
             Self::RespondPermission => "respond_permission",
             Self::RuntimeStatus => "runtime_status",
             Self::Diagnostics => "diagnostics",
+            Self::PutIdentityDocument => "put_identity_document",
+            Self::DeleteIdentityDocument => "delete_identity_document",
+            Self::ListIdentityDocuments => "list_identity_documents",
+            Self::GetContextSnapshot => "get_context_snapshot",
         }
     }
 }
@@ -127,6 +141,10 @@ impl FromStr for CommandKind {
             "respond_permission" => Ok(Self::RespondPermission),
             "runtime_status" => Ok(Self::RuntimeStatus),
             "diagnostics" => Ok(Self::Diagnostics),
+            "put_identity_document" => Ok(Self::PutIdentityDocument),
+            "delete_identity_document" => Ok(Self::DeleteIdentityDocument),
+            "list_identity_documents" => Ok(Self::ListIdentityDocuments),
+            "get_context_snapshot" => Ok(Self::GetContextSnapshot),
             other => Err(ProtocolError::UnsupportedCommandKind {
                 kind: other.to_owned(),
             }),
@@ -423,6 +441,153 @@ pub struct DiagnosticsCommand {
     pub thread_id: Option<ThreadId>,
     /// Maximum diagnostic entries to retrieve.
     pub limit: Option<u32>,
+}
+
+/// Payload for creating or updating an identity document (`put_identity_document`).
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(
+    feature = "dto-export",
+    derive(ts_rs::TS),
+    ts(export, export_to = "../../../apps/desktop/src/ipc/dto/")
+)]
+pub struct PutIdentityDocumentCommand {
+    /// Optional document ID; if omitted, Core generates one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub document_id: Option<String>,
+    /// Semantic classification ("name", "about", "preference", "instruction").
+    pub kind: String,
+    /// Document content (up to 4096 bytes).
+    pub content: String,
+}
+
+impl PutIdentityDocumentCommand {
+    /// Validates the command fields against domain invariants.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ProtocolError`] if `document_id` format is invalid, kind is unknown,
+    /// or content is empty/exceeds limit.
+    pub fn validate(&self) -> Result<(), ProtocolError> {
+        if let Some(ref id) = self.document_id {
+            id.parse::<IdentityDocumentId>().map_err(|e| {
+                altior_domain::EntityError::InvalidIdentityDocument {
+                    detail: format!("invalid document_id: {e}"),
+                }
+            })?;
+        }
+        IdentityDocumentKind::try_from_str(self.kind.as_str())?;
+        IdentityContent::try_from(self.content.as_str())?;
+        Ok(())
+    }
+}
+
+/// Payload for deleting an identity document (`delete_identity_document`).
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(
+    feature = "dto-export",
+    derive(ts_rs::TS),
+    ts(export, export_to = "../../../apps/desktop/src/ipc/dto/")
+)]
+pub struct DeleteIdentityDocumentCommand {
+    /// ID of the identity document to delete.
+    pub document_id: String,
+}
+
+impl DeleteIdentityDocumentCommand {
+    /// Validates the command fields against domain invariants.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ProtocolError`] if `document_id` format is invalid.
+    pub fn validate(&self) -> Result<(), ProtocolError> {
+        self.document_id
+            .parse::<IdentityDocumentId>()
+            .map_err(|e| altior_domain::EntityError::InvalidIdentityDocument {
+                detail: format!("invalid document_id: {e}"),
+            })?;
+        Ok(())
+    }
+}
+
+/// Payload for listing identity documents (`list_identity_documents`).
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(
+    feature = "dto-export",
+    derive(ts_rs::TS),
+    ts(export, export_to = "../../../apps/desktop/src/ipc/dto/")
+)]
+pub struct ListIdentityDocumentsCommand {
+    /// Maximum items to return (1..=32).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub limit: Option<u32>,
+}
+
+impl ListIdentityDocumentsCommand {
+    /// Validates the command fields against domain invariants.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ProtocolError`] if limit is out of range.
+    pub fn validate(&self) -> Result<(), ProtocolError> {
+        if let Some(lim) = self.limit {
+            IdentityDocumentListLimit::try_new(lim)?;
+        }
+        Ok(())
+    }
+}
+
+/// Payload for retrieving context snapshot explainability record(s) (`get_context_snapshot`).
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(
+    feature = "dto-export",
+    derive(ts_rs::TS),
+    ts(export, export_to = "../../../apps/desktop/src/ipc/dto/")
+)]
+pub struct GetContextSnapshotCommand {
+    /// Target turn ID for retrieving a single context snapshot.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub turn_id: Option<String>,
+    /// Target thread ID for listing context snapshots of a thread.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thread_id: Option<String>,
+    /// Maximum items to return when querying by thread (1..=50).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub limit: Option<u32>,
+}
+
+impl GetContextSnapshotCommand {
+    /// Validates the command fields against domain invariants.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ProtocolError`] if neither `turn_id` nor `thread_id` is given,
+    /// or if IDs or limit are invalid.
+    pub fn validate(&self) -> Result<(), ProtocolError> {
+        if self.turn_id.is_none() && self.thread_id.is_none() {
+            return Err(altior_domain::EntityError::InvalidIdentityDocument {
+                detail: "either turn_id or thread_id must be provided".to_string(),
+            }
+            .into());
+        }
+        if let Some(ref tid) = self.turn_id {
+            tid.parse::<TurnId>().map_err(|e| {
+                altior_domain::EntityError::InvalidIdentityDocument {
+                    detail: format!("invalid turn_id: {e}"),
+                }
+            })?;
+        }
+        if let Some(ref thid) = self.thread_id {
+            thid.parse::<ThreadId>().map_err(|e| {
+                altior_domain::EntityError::InvalidIdentityDocument {
+                    detail: format!("invalid thread_id: {e}"),
+                }
+            })?;
+        }
+        if let Some(lim) = self.limit {
+            ContextSnapshotListLimit::try_new(lim)?;
+        }
+        Ok(())
+    }
 }
 
 // ── Command Envelope ────────────────────────────────────────────────
@@ -1059,6 +1224,148 @@ impl CommandEnvelope {
     ///
     /// Returns [`ProtocolError::MalformedEnvelope`] if decoding fails.
     pub fn diagnostics_payload(&self) -> Result<DiagnosticsCommand, ProtocolError> {
+        self.parse_payload()
+    }
+
+    /// Builds a `put_identity_document` command.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ProtocolError`] if validation fails or limits are exceeded.
+    pub fn put_identity_document(
+        document_id: Option<String>,
+        kind: String,
+        content: String,
+        operation_id: OperationId,
+        issued_at: UnixMillis,
+        limits: &EnvelopeLimits,
+    ) -> Result<Self, ProtocolError> {
+        let cmd = PutIdentityDocumentCommand {
+            document_id,
+            kind,
+            content,
+        };
+        cmd.validate()?;
+        Self::new_typed(
+            CommandKind::PutIdentityDocument,
+            &cmd,
+            operation_id,
+            issued_at,
+            limits,
+        )
+    }
+
+    /// Extracts the payload of a `put_identity_document` command.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ProtocolError::MalformedEnvelope`] if decoding fails.
+    pub fn put_identity_document_payload(
+        &self,
+    ) -> Result<PutIdentityDocumentCommand, ProtocolError> {
+        self.parse_payload()
+    }
+
+    /// Builds a `delete_identity_document` command.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ProtocolError`] if validation fails or limits are exceeded.
+    pub fn delete_identity_document(
+        document_id: String,
+        operation_id: OperationId,
+        issued_at: UnixMillis,
+        limits: &EnvelopeLimits,
+    ) -> Result<Self, ProtocolError> {
+        let cmd = DeleteIdentityDocumentCommand { document_id };
+        cmd.validate()?;
+        Self::new_typed(
+            CommandKind::DeleteIdentityDocument,
+            &cmd,
+            operation_id,
+            issued_at,
+            limits,
+        )
+    }
+
+    /// Extracts the payload of a `delete_identity_document` command.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ProtocolError::MalformedEnvelope`] if decoding fails.
+    pub fn delete_identity_document_payload(
+        &self,
+    ) -> Result<DeleteIdentityDocumentCommand, ProtocolError> {
+        self.parse_payload()
+    }
+
+    /// Builds a `list_identity_documents` command.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ProtocolError`] if validation fails or limits are exceeded.
+    pub fn list_identity_documents(
+        limit: Option<u32>,
+        operation_id: OperationId,
+        issued_at: UnixMillis,
+        limits: &EnvelopeLimits,
+    ) -> Result<Self, ProtocolError> {
+        let cmd = ListIdentityDocumentsCommand { limit };
+        cmd.validate()?;
+        Self::new_typed(
+            CommandKind::ListIdentityDocuments,
+            &cmd,
+            operation_id,
+            issued_at,
+            limits,
+        )
+    }
+
+    /// Extracts the payload of a `list_identity_documents` command.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ProtocolError::MalformedEnvelope`] if decoding fails.
+    pub fn list_identity_documents_payload(
+        &self,
+    ) -> Result<ListIdentityDocumentsCommand, ProtocolError> {
+        self.parse_payload()
+    }
+
+    /// Builds a `get_context_snapshot` command.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ProtocolError`] if validation fails or limits are exceeded.
+    pub fn get_context_snapshot(
+        turn_id: Option<String>,
+        thread_id: Option<String>,
+        limit: Option<u32>,
+        operation_id: OperationId,
+        issued_at: UnixMillis,
+        limits: &EnvelopeLimits,
+    ) -> Result<Self, ProtocolError> {
+        let cmd = GetContextSnapshotCommand {
+            turn_id,
+            thread_id,
+            limit,
+        };
+        cmd.validate()?;
+        Self::new_typed(
+            CommandKind::GetContextSnapshot,
+            &cmd,
+            operation_id,
+            issued_at,
+            limits,
+        )
+    }
+
+    /// Extracts the payload of a `get_context_snapshot` command.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ProtocolError::MalformedEnvelope`] if decoding fails.
+    pub fn get_context_snapshot_payload(&self) -> Result<GetContextSnapshotCommand, ProtocolError> {
         self.parse_payload()
     }
 

@@ -26,14 +26,20 @@ import {
 import type { CancelTurnCommand } from "../ipc/dto/CancelTurnCommand";
 import type { CommandEnvelope } from "../ipc/dto/CommandEnvelope";
 import type { ConfigureAgentCommand } from "../ipc/dto/ConfigureAgentCommand";
+import type { ContextSnapshotDto } from "../ipc/dto/ContextSnapshotDto";
 import type { CreateThreadCommand } from "../ipc/dto/CreateThreadCommand";
+import type { DeleteIdentityDocumentCommand } from "../ipc/dto/DeleteIdentityDocumentCommand";
 import type { DiagnosticsCommand } from "../ipc/dto/DiagnosticsCommand";
 import type { EventEnvelope } from "../ipc/dto/EventEnvelope";
+import type { GetContextSnapshotCommand } from "../ipc/dto/GetContextSnapshotCommand";
 import type { GetHistoryCommand } from "../ipc/dto/GetHistoryCommand";
 import type { HarnessBindingConfigDto } from "../ipc/dto/HarnessBindingConfigDto";
+import type { IdentityDocumentDto } from "../ipc/dto/IdentityDocumentDto";
+import type { ListIdentityDocumentsCommand } from "../ipc/dto/ListIdentityDocumentsCommand";
 import type { ListThreadsCommand } from "../ipc/dto/ListThreadsCommand";
 import type { NegotiatedHandshake } from "../ipc/dto/NegotiatedHandshake";
 import type { OpenThreadCommand } from "../ipc/dto/OpenThreadCommand";
+import type { PutIdentityDocumentCommand } from "../ipc/dto/PutIdentityDocumentCommand";
 import type { RespondPermissionCommand } from "../ipc/dto/RespondPermissionCommand";
 import type { RuntimeDiagnosticsDto } from "../ipc/dto/RuntimeDiagnosticsDto";
 import type { RuntimeStatusCommand } from "../ipc/dto/RuntimeStatusCommand";
@@ -120,6 +126,8 @@ export interface ApplicationState {
 
   readonly activeTurn: ActiveTurnState | null;
   readonly runtimeDiagnostics: RuntimeDiagnosticsDto | null;
+  readonly contextSnapshot: ContextSnapshotDto | null;
+  readonly identityDocuments: readonly IdentityDocumentDto[];
   readonly streamLog: readonly {
     readonly sequence: number;
     readonly label: string;
@@ -151,6 +159,12 @@ export interface ApplicationStore {
   openThread(threadId: string): Promise<void>;
   getHistory(threadId: string, limit?: number): Promise<void>;
   getDiagnostics(threadId?: string | null): Promise<RuntimeDiagnosticsDto | null>;
+
+  // Context & Identity Operations (P2.2)
+  getContextSnapshot(threadId?: string | null, turnId?: string | null): Promise<ContextSnapshotDto | null>;
+  listIdentityDocuments(limit?: number): Promise<readonly IdentityDocumentDto[]>;
+  putIdentityDocument(params: { document_id?: string | null; kind: string; content: string }): Promise<IdentityDocumentDto>;
+  deleteIdentityDocument(documentId: string): Promise<void>;
 
   // Prompt & Turn Execution
   sendPrompt(text: string): Promise<void>;
@@ -305,6 +319,8 @@ export function createApplicationStore(
 
     activeTurn: null,
     runtimeDiagnostics: null,
+    contextSnapshot: null,
+    identityDocuments: [],
     streamLog: [],
   };
 
@@ -715,6 +731,141 @@ export function createApplicationStore(
       // Diagnostics query failure
     }
     return null;
+  };
+
+  const getContextSnapshot = async (
+    threadId?: string | null,
+    turnId?: string | null,
+  ): Promise<ContextSnapshotDto | null> => {
+    // Protocol constraint (ADR 0018): exactly one of turn_id or thread_id is required
+    const targetTurn = turnId || null;
+    const targetThread = (!targetTurn && (threadId || state.selectedThreadId)) || null;
+
+    const envelope: CommandEnvelope = {
+      protocol_version: state.negotiated?.selected_version ?? 1,
+      operation_id: `op_get_context_snapshot_${++opCounter}_${Date.now()}`,
+      kind: "get_context_snapshot",
+      payload: {
+        turn_id: targetTurn,
+        thread_id: targetTurn ? null : targetThread,
+      } as GetContextSnapshotCommand,
+      issued_at: Date.now(),
+    };
+
+    try {
+      const res = await transport.command<SnapshotEnvelope | ContextSnapshotDto | ContextSnapshotDto[] | null>(envelope);
+      let snapshot: ContextSnapshotDto | null = null;
+      if (isSnapshotEnvelope(res)) {
+        if (Array.isArray(res.data)) {
+          snapshot = (res.data[0] as ContextSnapshotDto) ?? null;
+        } else {
+          snapshot = (res.data as ContextSnapshotDto) ?? null;
+        }
+      } else if (Array.isArray(res)) {
+        snapshot = (res[0] as ContextSnapshotDto) ?? null;
+      } else if (res && typeof res === "object" && ("budget" in res || "turn_id" in res)) {
+        snapshot = res as ContextSnapshotDto;
+      }
+
+      updateState((prev) => ({
+        ...prev,
+        contextSnapshot: snapshot,
+      }));
+      return snapshot;
+    } catch (err) {
+      updateState((prev) => ({
+        ...prev,
+        error: `Failed to get context snapshot: ${err instanceof Error ? err.message : String(err)}`,
+      }));
+      return null;
+    }
+  };
+
+  const listIdentityDocuments = async (
+    limit?: number,
+  ): Promise<readonly IdentityDocumentDto[]> => {
+    const envelope: CommandEnvelope = {
+      protocol_version: state.negotiated?.selected_version ?? 1,
+      operation_id: `op_list_identity_docs_${++opCounter}_${Date.now()}`,
+      kind: "list_identity_documents",
+      payload: { limit: limit ?? null } as ListIdentityDocumentsCommand,
+      issued_at: Date.now(),
+    };
+
+    try {
+      const res = await transport.command<SnapshotEnvelope | IdentityDocumentDto[]>(envelope);
+      const docs = isSnapshotEnvelope(res)
+        ? ((res.data as IdentityDocumentDto[]) ?? [])
+        : Array.isArray(res)
+          ? res
+          : [];
+      updateState((prev) => ({
+        ...prev,
+        identityDocuments: docs,
+      }));
+      return docs;
+    } catch (err) {
+      updateState((prev) => ({
+        ...prev,
+        error: `Failed to list identity documents: ${err instanceof Error ? err.message : String(err)}`,
+      }));
+      return [];
+    }
+  };
+
+  const putIdentityDocument = async (
+    params: { document_id?: string | null; kind: string; content: string },
+  ): Promise<IdentityDocumentDto> => {
+    const envelope: CommandEnvelope = {
+      protocol_version: state.negotiated?.selected_version ?? 1,
+      operation_id: `op_put_identity_doc_${++opCounter}_${Date.now()}`,
+      kind: "put_identity_document",
+      payload: {
+        document_id: params.document_id ?? null,
+        kind: params.kind,
+        content: params.content,
+      } as PutIdentityDocumentCommand,
+      issued_at: Date.now(),
+    };
+
+    const res = await transport.command<SnapshotEnvelope | IdentityDocumentDto>(envelope);
+    const doc = (isSnapshotEnvelope(res) ? res.data : res) as IdentityDocumentDto;
+    updateState((prev) => {
+      const existingIdx = prev.identityDocuments.findIndex(
+        (d) => d.document_id === doc.document_id,
+      );
+      const updated = [...prev.identityDocuments];
+      if (existingIdx >= 0) {
+        updated[existingIdx] = doc;
+      } else {
+        updated.push(doc);
+      }
+      return {
+        ...prev,
+        identityDocuments: updated,
+      };
+    });
+    return doc;
+  };
+
+  const deleteIdentityDocument = async (documentId: string): Promise<void> => {
+    const envelope: CommandEnvelope = {
+      protocol_version: state.negotiated?.selected_version ?? 1,
+      operation_id: `op_delete_identity_doc_${++opCounter}_${Date.now()}`,
+      kind: "delete_identity_document",
+      payload: {
+        document_id: documentId,
+      } as DeleteIdentityDocumentCommand,
+      issued_at: Date.now(),
+    };
+
+    await transport.command(envelope);
+    updateState((prev) => ({
+      ...prev,
+      identityDocuments: prev.identityDocuments.filter(
+        (d) => d.document_id !== documentId,
+      ),
+    }));
   };
 
   const init = async (): Promise<void> => {
@@ -1205,6 +1356,10 @@ export function createApplicationStore(
     openThread,
     getHistory,
     getDiagnostics,
+    getContextSnapshot,
+    listIdentityDocuments,
+    putIdentityDocument,
+    deleteIdentityDocument,
     sendPrompt,
     cancelActiveTurn,
     decidePermission,

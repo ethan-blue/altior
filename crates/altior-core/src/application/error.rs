@@ -71,6 +71,8 @@ pub enum CoreAppError {
     AuthenticationRejected,
     /// Synchronization lock poisoned or unavailable.
     LockPoisoned(&'static str),
+    /// Context assembler failure.
+    ContextAssembler(crate::context::AssemblerError),
     /// Domain identifier parsing or validation failure.
     Id(IdParseError),
     /// Invalid request parameters or malformed input.
@@ -125,6 +127,7 @@ impl fmt::Display for CoreAppError {
             Self::SessionAlreadyActive(id) => write!(f, "session already active for thread: {id}"),
             Self::AuthenticationRejected => write!(f, "IPC authentication rejected"),
             Self::LockPoisoned(resource) => write!(f, "lock poisoned: {resource}"),
+            Self::ContextAssembler(err) => write!(f, "context assembler error: {err}"),
             Self::Id(err) => write!(f, "identifier error: {err}"),
             Self::InvalidInput(msg) => write!(f, "invalid input: {msg}"),
             Self::Other(msg) => write!(f, "application error: {msg}"),
@@ -142,9 +145,16 @@ impl std::error::Error for CoreAppError {
             Self::Protocol(err) => Some(err),
             Self::Harness(err) => Some(err),
             Self::Checkpoint(err) => Some(err),
+            Self::ContextAssembler(err) => Some(err),
             Self::Id(err) => Some(err),
             _ => None,
         }
+    }
+}
+
+impl From<crate::context::AssemblerError> for CoreAppError {
+    fn from(err: crate::context::AssemblerError) -> Self {
+        Self::ContextAssembler(err)
     }
 }
 

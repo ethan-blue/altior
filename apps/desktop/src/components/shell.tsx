@@ -7,6 +7,7 @@
 import { useCallback, useRef, useState } from "react";
 import type { TimelineRow } from "../features/timeline/timelineStore";
 import type { ThreadFixture, ThreadStatus } from "../fixtures/timeline";
+import type { ContextSnapshotDto } from "../ipc/dto/ContextSnapshotDto";
 import type { AgentProfile } from "../stores/applicationStore";
 import {
   INSPECTOR_MAX,
@@ -14,7 +15,10 @@ import {
   NAV_MAX,
   NAV_MIN,
 } from "../app/uiStore";
+import { ContextPanel, type ContextPanelProps } from "./ContextPanel";
 import shell from "./shell.module.css";
+
+export { ContextPanel, type ContextPanelProps };
 
 const statusLabel: Record<ThreadStatus, string> = {
   running: "running",
@@ -328,12 +332,13 @@ export interface InspectorProps {
   readonly onClose: () => void;
   readonly focusedRow: TimelineRow | null;
   readonly activeAgent?: AgentProfile | null;
+  readonly contextSnapshot?: ContextSnapshotDto | null;
+  readonly initialTab?: "details" | "context";
 }
 
 /**
- * Inspector: one contextual pane for turn details, tool output, and
- * provenance. The resize handle is a slider: drag or arrow keys, clamped
- * to the token range.
+ * Inspector: contextual pane for turn details, tool output, provenance,
+ * and context assembly snapshots (ADR 0018).
  */
 export function Inspector({
   width,
@@ -341,7 +346,10 @@ export function Inspector({
   onClose,
   focusedRow,
   activeAgent,
+  contextSnapshot,
+  initialTab = "details",
 }: InspectorProps) {
+  const [activeTab, setActiveTab] = useState<"details" | "context">(initialTab);
   const dragState = useRef<{ startX: number; startWidth: number } | null>(null);
 
   const onPointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
@@ -388,12 +396,37 @@ export function Inspector({
       />
       <div className={shell.inspectorBody}>
         <div className={shell.inspectorHeader}>
-          <h2 className={shell.sectionTitle}>Turn details</h2>
+          <div className={shell.inspectorTabs} role="tablist" aria-label="Inspector Views">
+            <button
+              type="button"
+              role="tab"
+              aria-selected={activeTab === "details"}
+              className={`${shell.inspectorTab} ${activeTab === "details" ? shell.inspectorTabActive : ""}`}
+              onClick={() => setActiveTab("details")}
+              data-testid="inspector-tab-details"
+            >
+              Turn details
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={activeTab === "context"}
+              className={`${shell.inspectorTab} ${activeTab === "context" ? shell.inspectorTabActive : ""}`}
+              onClick={() => setActiveTab("context")}
+              data-testid="inspector-tab-context"
+            >
+              Context
+            </button>
+          </div>
           <button type="button" onClick={onClose} data-testid="inspector-close">
             Close
           </button>
         </div>
-        <InspectorDetails row={focusedRow} activeAgent={activeAgent} />
+        {activeTab === "details" ? (
+          <InspectorDetails row={focusedRow} activeAgent={activeAgent} />
+        ) : (
+          <ContextPanel snapshot={contextSnapshot} />
+        )}
       </div>
     </aside>
   );

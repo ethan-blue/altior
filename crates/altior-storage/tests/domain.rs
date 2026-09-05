@@ -155,7 +155,7 @@ fn ensure_project_ref(store: &mut Store, name: &str) -> ProjectId {
 #[test]
 fn v3_migration_adds_domain_tables() {
     let store = Store::open_in_memory().expect("store");
-    assert_eq!(store.schema_version().expect("version"), 6);
+    assert_eq!(store.schema_version().expect("version"), 7);
     assert_eq!(store.domain_journal_len().expect("count"), 0);
 }
 
@@ -184,7 +184,7 @@ fn v3_migration_preserves_v1_journal() {
 
     // Reopen — v5 migration applied, v1 data intact.
     let store = Store::open(&path).expect("reopen");
-    assert_eq!(store.schema_version().expect("version"), 6);
+    assert_eq!(store.schema_version().expect("version"), 7);
     assert_eq!(store.journal_len().expect("v1 count"), 1);
     assert_eq!(store.domain_journal_len().expect("domain count"), 0);
 }
@@ -204,7 +204,7 @@ fn newer_schema_refused() {
         error,
         StorageError::SchemaTooNew {
             found: 99,
-            supported: 6
+            supported: 7
         }
     ));
 }
@@ -4535,7 +4535,7 @@ fn harness_binding_v4_schema_migration_defaults_empty_vectors() {
 
     // Now open with Store (which applies v5 migration)
     let mut store = Store::open(&path).expect("open and migrate to v5");
-    assert_eq!(store.schema_version().expect("version"), 6);
+    assert_eq!(store.schema_version().expect("version"), 7);
 
     // Read back the legacy binding
     let legacy_binding = store

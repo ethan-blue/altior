@@ -2978,6 +2978,45 @@ pub enum EntityError {
         /// The maximum allowed value.
         max: u32,
     },
+    /// Identity document content is empty after trimming.
+    EmptyIdentityContent,
+    /// Identity document content exceeds the byte cap.
+    IdentityContentTooLong {
+        /// The actual length.
+        length: usize,
+        /// The maximum allowed length.
+        max: usize,
+    },
+    /// The string does not name a valid identity document kind.
+    InvalidIdentityDocumentKind,
+    /// An identity document violates its invariants.
+    InvalidIdentityDocument {
+        /// What went wrong.
+        detail: String,
+    },
+    /// Identity document count exceeds the device cap.
+    IdentityDocumentCountExceeded {
+        /// The actual count.
+        count: usize,
+        /// The maximum allowed count.
+        max: usize,
+    },
+    /// Identity document list page size is outside 1..=32.
+    IdentityDocumentListLimitOutOfRange {
+        /// The rejected value.
+        value: u32,
+        /// The maximum allowed value.
+        max: u32,
+    },
+    /// Context snapshot list page size is outside 1..=50.
+    ContextSnapshotListLimitOutOfRange {
+        /// The rejected value.
+        value: u32,
+        /// The maximum allowed value.
+        max: u32,
+    },
+    /// The string does not name a valid context drop reason.
+    InvalidContextDropReason,
 }
 
 impl fmt::Display for EntityError {
@@ -3118,6 +3157,30 @@ impl fmt::Display for EntityError {
             Self::MemoryListLimitOutOfRange { value, max } => {
                 write!(f, "memory list limit {value} is outside 1..={max}")
             }
+            Self::EmptyIdentityContent => write!(f, "identity content is empty"),
+            Self::IdentityContentTooLong { length, max } => {
+                write!(f, "identity content is {length} bytes, limit is {max}")
+            }
+            Self::InvalidIdentityDocumentKind => write!(f, "invalid identity document kind"),
+            Self::InvalidIdentityDocument { detail } => {
+                write!(f, "invalid identity document: {detail}")
+            }
+            Self::IdentityDocumentCountExceeded { count, max } => {
+                write!(f, "identity document count {count} exceeds limit {max}")
+            }
+            Self::IdentityDocumentListLimitOutOfRange { value, max } => {
+                write!(
+                    f,
+                    "identity document list limit {value} is outside 1..={max}"
+                )
+            }
+            Self::ContextSnapshotListLimitOutOfRange { value, max } => {
+                write!(
+                    f,
+                    "context snapshot list limit {value} is outside 1..={max}"
+                )
+            }
+            Self::InvalidContextDropReason => write!(f, "invalid context drop reason"),
         }
     }
 }

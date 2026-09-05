@@ -589,6 +589,252 @@ pub struct RuntimeDiagnosticsDto {
     pub summary: Option<String>,
 }
 
+// ── P2.2: Identity documents & context snapshots (ADR 0018) ────────
+
+/// Serializable representation of a device-local identity document.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(
+    feature = "dto-export",
+    derive(ts_rs::TS),
+    ts(export, export_to = "../../../apps/desktop/src/ipc/dto/")
+)]
+pub struct IdentityDocumentDto {
+    /// Identity document id (`idd_...`).
+    pub document_id: String,
+    /// Semantic classification (`"name"`, `"about"`, `"preference"`, `"instruction"`).
+    pub kind: String,
+    /// Bounded document content.
+    pub content: String,
+    /// Creation timestamp.
+    #[cfg_attr(feature = "dto-export", ts(type = "number"))]
+    pub created_at: UnixMillis,
+    /// Last update timestamp.
+    #[cfg_attr(feature = "dto-export", ts(type = "number"))]
+    pub updated_at: UnixMillis,
+}
+
+impl From<&altior_domain::IdentityDocument> for IdentityDocumentDto {
+    fn from(d: &altior_domain::IdentityDocument) -> Self {
+        Self {
+            document_id: d.id.as_str().to_owned(),
+            kind: d.kind.as_str().to_owned(),
+            content: d.content.as_str().to_owned(),
+            created_at: d.created_at,
+            updated_at: d.updated_at,
+        }
+    }
+}
+
+/// Token accounting for one assembled turn context.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(
+    feature = "dto-export",
+    derive(ts_rs::TS),
+    ts(export, export_to = "../../../apps/desktop/src/ipc/dto/")
+)]
+pub struct ContextTokenBudgetDto {
+    /// Maximum identity tokens the policy allows.
+    pub identity_limit_tokens: u32,
+    /// Maximum memory tokens the policy allows.
+    pub memory_limit_tokens: u32,
+    /// Estimated tokens of the user's original prompt.
+    pub prompt_tokens: u32,
+    /// Tokens consumed by the injected identity block (including framing).
+    pub identity_tokens: u32,
+    /// Tokens consumed by the injected memory block (including framing).
+    pub memory_tokens: u32,
+    /// Total tokens of the assembled wire prompt.
+    pub total_tokens: u32,
+}
+
+impl From<altior_domain::ContextTokenBudget> for ContextTokenBudgetDto {
+    fn from(b: altior_domain::ContextTokenBudget) -> Self {
+        Self {
+            identity_limit_tokens: b.identity_limit_tokens,
+            memory_limit_tokens: b.memory_limit_tokens,
+            prompt_tokens: b.prompt_tokens,
+            identity_tokens: b.identity_tokens,
+            memory_tokens: b.memory_tokens,
+            total_tokens: b.total_tokens,
+        }
+    }
+}
+
+/// One identity document selected into a wire prompt.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(
+    feature = "dto-export",
+    derive(ts_rs::TS),
+    ts(export, export_to = "../../../apps/desktop/src/ipc/dto/")
+)]
+pub struct ContextIdentityEntryDto {
+    /// The identity document id.
+    pub document_id: String,
+    /// The document kind.
+    pub kind: String,
+    /// Estimated tokens of the rendered entry.
+    pub tokens: u32,
+}
+
+/// One confirmed memory selected into a wire prompt, with explainability.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(
+    feature = "dto-export",
+    derive(ts_rs::TS),
+    ts(export, export_to = "../../../apps/desktop/src/ipc/dto/")
+)]
+pub struct ContextMemoryEntryDto {
+    /// The memory record id.
+    pub memory_id: String,
+    /// Memory kind.
+    pub kind: String,
+    /// Memory scope kind (`"global"` | `"project"` | `"thread"`).
+    pub scope_kind: String,
+    /// Optional scope target.
+    pub scope_target: Option<String>,
+    /// Confidence percentage (0..=100).
+    pub confidence: u32,
+    /// Whether the memory source was explicit.
+    pub explicit: bool,
+    /// Estimated tokens of the rendered entry.
+    pub tokens: u32,
+    /// Composite retrieval score.
+    pub score: f64,
+    /// Human-readable selection rationale from the ranking engine.
+    pub why_selected: String,
+    /// Provenance thread id, when known.
+    pub provenance_thread_id: Option<String>,
+    /// Provenance turn id, when known.
+    pub provenance_turn_id: Option<String>,
+}
+
+/// One retrieved memory that was dropped from a wire prompt.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(
+    feature = "dto-export",
+    derive(ts_rs::TS),
+    ts(export, export_to = "../../../apps/desktop/src/ipc/dto/")
+)]
+pub struct ContextDroppedEntryDto {
+    /// The memory record id.
+    pub memory_id: String,
+    /// Estimated tokens the entry would have consumed.
+    pub tokens: u32,
+    /// Rank of the entry at drop time (1 = highest score).
+    pub rank: u32,
+    /// Why the entry was dropped (`"budget_exhausted"`).
+    pub reason: String,
+}
+
+/// Recorded degradation when assembly proceeded with reduced information.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(
+    feature = "dto-export",
+    derive(ts_rs::TS),
+    ts(export, export_to = "../../../apps/desktop/src/ipc/dto/")
+)]
+pub struct ContextDegradationDto {
+    /// Canonical machine-readable code (e.g. `memory_query_truncated`).
+    pub code: String,
+    /// Bounded human-readable explanation.
+    pub detail: String,
+}
+
+/// The deterministic audit record of one turn's context assembly (ADR 0018).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(
+    feature = "dto-export",
+    derive(ts_rs::TS),
+    ts(export, export_to = "../../../apps/desktop/src/ipc/dto/")
+)]
+pub struct ContextSnapshotDto {
+    /// The turn this snapshot assembled context for.
+    pub turn_id: String,
+    /// The thread the turn belongs to.
+    pub thread_id: String,
+    /// Agent memory mode at assembly time (`"off"` | `"session"` | `"long_term"`).
+    pub memory_mode: String,
+    /// When the snapshot was assembled.
+    #[cfg_attr(feature = "dto-export", ts(type = "number"))]
+    pub created_at: UnixMillis,
+    /// Whether the wire prompt was byte-identical to the user prompt.
+    pub passthrough: bool,
+    /// Token accounting.
+    pub budget: ContextTokenBudgetDto,
+    /// Identity documents injected, in render order.
+    pub identity: Vec<ContextIdentityEntryDto>,
+    /// Memories injected, in rank order.
+    pub memories: Vec<ContextMemoryEntryDto>,
+    /// Memories retrieved but dropped, in rank order.
+    pub dropped: Vec<ContextDroppedEntryDto>,
+    /// Recorded degradation, if any.
+    pub degraded: Option<ContextDegradationDto>,
+    /// Optional rendered wire prompt (bounded), when retained.
+    pub rendered_prompt: Option<String>,
+}
+
+impl From<&altior_domain::ContextSnapshot> for ContextSnapshotDto {
+    fn from(s: &altior_domain::ContextSnapshot) -> Self {
+        Self {
+            turn_id: s.turn_id.as_str().to_owned(),
+            thread_id: s.thread_id.as_str().to_owned(),
+            memory_mode: s.memory_mode.clone(),
+            created_at: s.created_at,
+            passthrough: s.passthrough,
+            budget: s.budget.into(),
+            identity: s
+                .identity
+                .iter()
+                .map(|e| ContextIdentityEntryDto {
+                    document_id: e.document_id.as_str().to_owned(),
+                    kind: e.kind.as_str().to_owned(),
+                    tokens: e.tokens,
+                })
+                .collect(),
+            memories: s
+                .memories
+                .iter()
+                .map(|e| ContextMemoryEntryDto {
+                    memory_id: e.memory_id.as_str().to_owned(),
+                    kind: e.kind.as_str().to_owned(),
+                    scope_kind: e.scope.kind_str().to_owned(),
+                    scope_target: e.scope.target_str().map(str::to_owned),
+                    confidence: u32::from(e.confidence),
+                    explicit: e.explicit,
+                    tokens: e.tokens,
+                    score: e.score,
+                    why_selected: e.why_selected.clone(),
+                    provenance_thread_id: e
+                        .provenance_thread_id
+                        .as_ref()
+                        .map(altior_domain::ThreadId::as_str)
+                        .map(str::to_owned),
+                    provenance_turn_id: e
+                        .provenance_turn_id
+                        .as_ref()
+                        .map(altior_domain::TurnId::as_str)
+                        .map(str::to_owned),
+                })
+                .collect(),
+            dropped: s
+                .dropped
+                .iter()
+                .map(|e| ContextDroppedEntryDto {
+                    memory_id: e.memory_id.as_str().to_owned(),
+                    tokens: e.tokens,
+                    rank: e.rank,
+                    reason: e.reason.as_str().to_owned(),
+                })
+                .collect(),
+            degraded: s.degraded.as_ref().map(|d| ContextDegradationDto {
+                code: d.code.clone(),
+                detail: d.detail.clone(),
+            }),
+            rendered_prompt: s.rendered_prompt.clone(),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
