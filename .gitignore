@@ -12,3 +12,4 @@ dist/
 node_modules/
 
 .alma-snapshots
+cargo_check.txt
