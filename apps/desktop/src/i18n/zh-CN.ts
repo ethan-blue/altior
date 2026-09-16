@@ -104,6 +104,11 @@ export const zhCN: TranslationDictionary = {
     failed: "失败",
     unknown: "未知",
     entryAria: (kind) => `${kind} 条目`,
+    conversationAria: "会话时间线",
+    permissionApproved: "已批准权限请求",
+    permissionDenied: "已拒绝权限请求",
+    newActivity: (count) => `有 ${count} 条新消息 ↓`,
+    threadTimelineAria: (title) => `${title} 的时间线`,
   },
   contextPanel: {
     loading: "加载上下文快照中…",
@@ -185,6 +190,25 @@ export const zhCN: TranslationDictionary = {
     saveAgent: "保存代理配置",
     verified: "连接已验证",
     testFailed: (msg) => `测试失败：${msg}`,
+  },
+  markdown: {
+    copy: "复制",
+    copied: "已复制！",
+    copyCodeAria: "复制代码",
+    copiedAria: "已复制",
+    copyOutputAria: "复制输出",
+    copiedOutputAria: "已复制输出",
+    toolExecution: "工具执行",
+    collapseOutput: "收起输出",
+    expandOutput: (extraLines) =>
+      `展开完整输出（+${extraLines} 行）`,
+    openImage: "（打开图片）",
+  },
+  workbenchEmpty: {
+    connecting: "正在连接 Core…",
+    coreDisconnected: "Core 已断开",
+    noConversations: "暂无会话。请新建会话或配置代理后开始。",
+    selectConversation: "请从列表中选择一个会话。",
   },
   settings: {
     title: "本地偏好设置",

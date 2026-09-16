@@ -104,6 +104,12 @@ export const en: TranslationDictionary = {
     failed: "Failed",
     unknown: "Unknown",
     entryAria: (kind) => `${kind} entry`,
+    conversationAria: "Conversation timeline",
+    permissionApproved: "Permission approved",
+    permissionDenied: "Permission denied",
+    newActivity: (count) =>
+      count === 1 ? "1 new row ↓" : `${count} new rows ↓`,
+    threadTimelineAria: (title) => `${title} timeline`,
   },
   contextPanel: {
     loading: "Loading context snapshot…",
@@ -185,6 +191,25 @@ export const en: TranslationDictionary = {
     saveAgent: "Save Agent",
     verified: "Connection verified",
     testFailed: (msg) => `Test failed: ${msg}`,
+  },
+  markdown: {
+    copy: "Copy",
+    copied: "Copied!",
+    copyCodeAria: "Copy code",
+    copiedAria: "Copied",
+    copyOutputAria: "Copy output",
+    copiedOutputAria: "Copied output",
+    toolExecution: "Tool execution",
+    collapseOutput: "Collapse output",
+    expandOutput: (extraLines) =>
+      `Expand full output (+${extraLines} lines)`,
+    openImage: "(Open image)",
+  },
+  workbenchEmpty: {
+    connecting: "Connecting to Core…",
+    coreDisconnected: "Core disconnected",
+    noConversations: "No conversations yet. Create a thread or configure an agent to begin.",
+    selectConversation: "Select a conversation from the list.",
   },
   settings: {
     title: "Preferences",

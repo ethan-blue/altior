@@ -29,6 +29,7 @@ import {
   type HeightIndex,
 } from "./virtualWindow";
 import styles from "./timeline.module.css";
+import { useI18n } from "../../i18n";
 
 export interface TimelineProps {
   readonly store: TimelineStore;
@@ -76,8 +77,10 @@ export function Timeline({
   viewportHeight,
   measured,
   overscan = DEFAULT_OVERSCAN,
-  ariaLabel = "Conversation timeline",
+  ariaLabel,
 }: TimelineProps) {
+  const { t } = useI18n();
+  const resolvedAriaLabel = ariaLabel ?? t.timeline.conversationAria;
   const containerRef = useRef<HTMLDivElement | null>(null);
   const { structureVersion } = useSyncExternalStore(
     store.subscribe,
@@ -308,7 +311,7 @@ export function Timeline({
     (id: string, decision: PermissionDecision) => {
       onPermissionDecision(id, decision);
       setAnnouncement(
-        decision === "approved" ? "Permission approved" : "Permission denied",
+        decision === "approved" ? t.timeline.permissionApproved : t.timeline.permissionDenied,
       );
     },
     [onPermissionDecision],
@@ -320,7 +323,7 @@ export function Timeline({
         ref={containerRef}
         className={styles.scroller}
         role="log"
-        aria-label={ariaLabel}
+        aria-label={resolvedAriaLabel}
         tabIndex={focusedRowId == null ? 0 : -1}
         onKeyDown={onKeyDown}
         onScroll={onScroll}
@@ -354,7 +357,7 @@ export function Timeline({
             applyScroll(heightIndex.total);
           }}
         >
-          {missedRows} new {missedRows === 1 ? "row" : "rows"} ↓
+          {t.timeline.newActivity(missedRows)}
         </button>
       ) : null}
       <div className={styles.visuallyHidden} aria-live="polite" role="status">

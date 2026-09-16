@@ -26,7 +26,7 @@ import {
   ThreadHeader,
   ThreadsPane,
 } from "../components/shell";
-import { I18nProvider } from "../i18n";
+import { I18nProvider, getDictionary } from "../i18n";
 import { Timeline } from "../features/timeline/Timeline";
 import type { TimelineRow } from "../features/timeline/timelineStore";
 import type { PermissionDecision } from "../features/timeline/timelineStore";
@@ -317,7 +317,7 @@ export function App({
             anchorRowId={ui.anchors[currentThread.id] ?? null}
             onFirstVisibleChange={onFirstVisibleChange}
             viewportHeight={timelineViewportHeight}
-            ariaLabel={`${currentThread.title} timeline`}
+            ariaLabel={getDictionary(ui.locale).timeline.threadTimelineAria(currentThread.title)}
           />
           {currentThreadActiveTurn?.notice ? (
             <p
@@ -338,7 +338,7 @@ export function App({
             cancelPending={currentThreadActiveTurn?.cancelState === "requested"}
             disabledReason={
               appState.connectionStatus === "disconnected"
-                ? "Core disconnected"
+                ? getDictionary(ui.locale).workbenchEmpty.coreDisconnected
                 : null
             }
           />
@@ -347,7 +347,7 @@ export function App({
         <main className={styles.workbench} data-testid="thread-empty">
           {appState.connectionStatus === "connecting" ? (
             <p className={styles.emptyState} role="status">
-              Connecting to Core…
+              {getDictionary(ui.locale).workbenchEmpty.connecting}
             </p>
           ) : appState.error ? (
             <p className={styles.emptyState} role="alert" data-testid="empty-state-error">
@@ -355,11 +355,11 @@ export function App({
             </p>
           ) : appState.threads.length === 0 ? (
             <p className={styles.emptyState} role="status" data-testid="empty-state-none">
-              No conversations yet. Create a thread or configure an agent to begin.
+              {getDictionary(ui.locale).workbenchEmpty.noConversations}
             </p>
           ) : (
             <p className={styles.emptyState} role="status">
-              Select a conversation from the list.
+              {getDictionary(ui.locale).workbenchEmpty.selectConversation}
             </p>
           )}
         </main>

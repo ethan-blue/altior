@@ -10,6 +10,7 @@
  * 6. Remote images: Policy-compliant privacy notice placeholder rather than automatic tracking fetches.
  */
 import { useState, type ReactNode } from "react";
+import { useI18n } from "../i18n";
 import styles from "./safeMarkdown.module.css";
 
 export async function copyToClipboard(text: string): Promise<boolean> {
@@ -34,6 +35,7 @@ export interface CodeBlockProps {
 }
 
 export function CodeBlock({ code, language = "text" }: CodeBlockProps) {
+  const { t } = useI18n();
   const [copied, setCopied] = useState(false);
 
   const handleCopy = async () => {
@@ -52,10 +54,10 @@ export function CodeBlock({ code, language = "text" }: CodeBlockProps) {
           type="button"
           className={styles.copyButton}
           onClick={handleCopy}
-          aria-label={copied ? "Copied" : "Copy code"}
+          aria-label={copied ? t.markdown.copiedAria : t.markdown.copyCodeAria}
           data-testid="copy-code-btn"
         >
-          {copied ? "Copied!" : "Copy"}
+          {copied ? t.markdown.copied : t.markdown.copy}
         </button>
       </div>
       <pre className={styles.codeContent} tabIndex={0}>
@@ -75,6 +77,7 @@ const TOOL_COLLAPSE_LINE_THRESHOLD = 8;
 const TOOL_COLLAPSE_CHAR_THRESHOLD = 400;
 
 export function ToolBlock({ text, status, onToggle }: ToolBlockProps) {
+  const { t } = useI18n();
   const [copied, setCopied] = useState(false);
   const [expanded, setExpanded] = useState(false);
 
@@ -112,7 +115,7 @@ export function ToolBlock({ text, status, onToggle }: ToolBlockProps) {
     <div className={styles.toolOutputContainer} data-testid="tool-output-block">
       <div className={styles.toolHeader}>
         <div style={{ display: "flex", alignItems: "center", gap: "var(--spacing-8)" }}>
-          <span>Tool execution</span>
+          <span>{t.markdown.toolExecution}</span>
           {status ? (
             <span className={`${styles.toolStatusBadge} ${statusClass}`}>
               {status}
@@ -123,10 +126,10 @@ export function ToolBlock({ text, status, onToggle }: ToolBlockProps) {
           type="button"
           className={styles.copyButton}
           onClick={handleCopy}
-          aria-label={copied ? "Copied output" : "Copy output"}
+          aria-label={copied ? t.markdown.copiedOutputAria : t.markdown.copyOutputAria}
           data-testid="copy-tool-output-btn"
         >
-          {copied ? "Copied!" : "Copy"}
+          {copied ? t.markdown.copied : t.markdown.copy}
         </button>
       </div>
       <pre className={styles.toolText}>
@@ -140,15 +143,15 @@ export function ToolBlock({ text, status, onToggle }: ToolBlockProps) {
           data-testid="tool-expand-toggle"
         >
           {expanded
-            ? "Collapse output"
-            : `Expand full output (+${lines.length - TOOL_COLLAPSE_LINE_THRESHOLD} lines)`}
+            ? t.markdown.collapseOutput
+            : t.markdown.expandOutput(lines.length - TOOL_COLLAPSE_LINE_THRESHOLD)}
         </button>
       ) : null}
     </div>
   );
 }
 
-function parseInline(text: string): ReactNode[] {
+function parseInline(text: string, openImageLabel: string): ReactNode[] {
   const nodes: ReactNode[] = [];
   let index = 0;
 
@@ -177,7 +180,7 @@ function parseInline(text: string): ReactNode[] {
               rel="noopener noreferrer"
               className={styles.link}
             >
-              (Open image)
+              {openImageLabel}
             </a>
           ) : null}
         </span>,
@@ -234,6 +237,9 @@ export interface SafeMarkdownProps {
 }
 
 export function SafeMarkdown({ text }: SafeMarkdownProps) {
+  const { t } = useI18n();
+  const inline = (line: string) => parseInline(line, t.markdown.openImage);
+
   // If plain single line without any markdown tokens, render direct text
   if (!text.includes("\n") && !/[#*`|!\[]/.test(text)) {
     return <span className={styles.paragraph}>{text}</span>;
@@ -294,7 +300,7 @@ export function SafeMarkdown({ text }: SafeMarkdownProps) {
             <thead>
               <tr>
                 {headerCells.map((cell, cIdx) => (
-                  <th key={cIdx}>{parseInline(cell)}</th>
+                  <th key={cIdx}>{inline(cell)}</th>
                 ))}
               </tr>
             </thead>
@@ -302,7 +308,7 @@ export function SafeMarkdown({ text }: SafeMarkdownProps) {
               {rows.map((row, rIdx) => (
                 <tr key={rIdx}>
                   {row.map((cell, cIdx) => (
-                    <td key={cIdx}>{parseInline(cell)}</td>
+                    <td key={cIdx}>{inline(cell)}</td>
                   ))}
                 </tr>
               ))}
@@ -317,7 +323,7 @@ export function SafeMarkdown({ text }: SafeMarkdownProps) {
     if (line.startsWith("# ")) {
       elements.push(
         <h1 key={`h1-${i}`} className={styles.heading1}>
-          {parseInline(line.slice(2))}
+          {inline(line.slice(2))}
         </h1>,
       );
       i++;
@@ -328,7 +334,7 @@ export function SafeMarkdown({ text }: SafeMarkdownProps) {
     if (line.startsWith("## ")) {
       elements.push(
         <h2 key={`h2-${i}`} className={styles.heading2}>
-          {parseInline(line.slice(3))}
+          {inline(line.slice(3))}
         </h2>,
       );
       i++;
@@ -339,7 +345,7 @@ export function SafeMarkdown({ text }: SafeMarkdownProps) {
     if (line.startsWith("### ")) {
       elements.push(
         <h3 key={`h3-${i}`} className={styles.heading3}>
-          {parseInline(line.slice(4))}
+          {inline(line.slice(4))}
         </h3>,
       );
       i++;
@@ -356,7 +362,7 @@ export function SafeMarkdown({ text }: SafeMarkdownProps) {
       elements.push(
         <ul key={`ul-${i}`} className={styles.list}>
           {listItems.map((item, idx) => (
-            <li key={idx}>{parseInline(item)}</li>
+            <li key={idx}>{inline(item)}</li>
           ))}
         </ul>,
       );
@@ -373,7 +379,7 @@ export function SafeMarkdown({ text }: SafeMarkdownProps) {
       elements.push(
         <ol key={`ol-${i}`} className={styles.list}>
           {listItems.map((item, idx) => (
-            <li key={idx}>{parseInline(item)}</li>
+            <li key={idx}>{inline(item)}</li>
           ))}
         </ol>,
       );
@@ -389,7 +395,7 @@ export function SafeMarkdown({ text }: SafeMarkdownProps) {
     // Regular paragraph line
     elements.push(
       <p key={`p-${i}`} className={styles.paragraph}>
-        {parseInline(line)}
+        {inline(line)}
       </p>,
     );
     i++;

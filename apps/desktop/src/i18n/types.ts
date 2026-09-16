@@ -105,6 +105,11 @@ export interface TranslationDictionary {
     readonly failed: string;
     readonly unknown: string;
     readonly entryAria: (kind: string) => string;
+    readonly conversationAria: string;
+    readonly permissionApproved: string;
+    readonly permissionDenied: string;
+    readonly newActivity: (count: number) => string;
+    readonly threadTimelineAria: (title: string) => string;
   };
   readonly contextPanel: {
     readonly loading: string;
@@ -186,6 +191,24 @@ export interface TranslationDictionary {
     readonly saveAgent: string;
     readonly verified: string;
     readonly testFailed: (msg: string) => string;
+  };
+  readonly markdown: {
+    readonly copy: string;
+    readonly copied: string;
+    readonly copyCodeAria: string;
+    readonly copiedAria: string;
+    readonly copyOutputAria: string;
+    readonly copiedOutputAria: string;
+    readonly toolExecution: string;
+    readonly collapseOutput: string;
+    readonly expandOutput: (extraLines: number) => string;
+    readonly openImage: string;
+  };
+  readonly workbenchEmpty: {
+    readonly connecting: string;
+    readonly coreDisconnected: string;
+    readonly noConversations: string;
+    readonly selectConversation: string;
   };
   readonly settings: {
     readonly title: string;
