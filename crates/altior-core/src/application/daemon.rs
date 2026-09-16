@@ -15,23 +15,27 @@ use altior_domain::{
     AcpHarnessBinding, AgentProfile, AgentProfileId, BoundedPath, ContextSnapshotListLimit,
     DisplayName, EventId, HarnessArg, HarnessBindingId, HarnessEnvKey, HarnessKind,
     HarnessSecretRef, IdentityContent, IdentityDocument, IdentityDocumentId, IdentityDocumentKind,
-    IdentityDocumentListLimit, MemoryMode, OperationId, PermissionDecision, PermissionListLimit,
-    ProjectId, SearchQuery, ThreadCursor, ThreadId, ThreadListLimit, ThreadTitle, TurnCursor,
-    TurnId, TurnListLimit, UnixMillis,
+    IdentityDocumentListLimit, MemoryContent, MemoryCursor, MemoryDraft, MemoryExcerpt, MemoryId,
+    MemoryKind, MemoryListLimit, MemoryMode, MemoryProvenance, MemoryScope, MemorySensitivity,
+    MemorySource, MemoryState, OperationId, PermissionDecision, PermissionListLimit, ProjectId,
+    SearchQuery, ThreadCursor, ThreadId, ThreadListLimit, ThreadTitle, TurnCursor, TurnId,
+    TurnListLimit, UnixMillis,
 };
 use altior_ipc::{CatchUpDelivery, IpcError, LaunchCredentials, ServerSession};
 use altior_protocol::{
     AgentProfileDto, CancelTurnCommand, CommandEnvelope, CommandKind, ConfigureAgentCommand,
-    ContextSnapshotDto, CreateThreadCommand, DeleteIdentityDocumentCommand, DesktopHello,
-    DiagnosticText, DiagnosticsCommand, EnvelopeLimits, EventBody, EventEnvelope,
-    GetContextSnapshotCommand, GetHistoryCommand, IdentityDocumentDto, KnownEvent,
-    ListIdentityDocumentsCommand, ListThreadsCommand, OpenThreadCommand, PermissionDto,
-    ProtocolVersion, PutIdentityDocumentCommand, RespondPermissionCommand, RuntimeDiagnosticsDto,
-    SearchThreadsCommand, Sequence, SnapshotEnvelope, StartTurnCommand, TestHarnessBindingCommand,
-    ThreadCursorDto, ThreadDto, ThreadHistoryResponseDto, ThreadListResponseDto, ThreadSnapshotDto,
-    ThreadSummaryDto, TurnCursorDto, TurnDto,
+    ConfirmMemoryCommand, ContextSnapshotDto, CorrectMemoryCommand, CreateThreadCommand,
+    DeleteIdentityDocumentCommand, DesktopHello, DiagnosticText, DiagnosticsCommand,
+    EnvelopeLimits, EventBody, EventEnvelope, ForgetMemoryCommand, GetContextSnapshotCommand,
+    GetHistoryCommand, HistoryCursorDto, HistoryEntryDto, IdentityDocumentDto, KnownEvent,
+    ListIdentityDocumentsCommand, ListMemoriesCommand, ListThreadsCommand, MemoryCursorDto,
+    MemoryListResponseDto, MemoryRecordDto, OpenThreadCommand, PermissionDto, ProposeMemoryCommand,
+    ProtocolVersion, PutIdentityDocumentCommand, RejectMemoryCommand, RespondPermissionCommand,
+    RuntimeDiagnosticsDto, SearchThreadsCommand, Sequence, SnapshotEnvelope, StartTurnCommand,
+    TestHarnessBindingCommand, ThreadCursorDto, ThreadDto, ThreadHistoryResponseDto,
+    ThreadListResponseDto, ThreadSnapshotDto, ThreadSummaryDto, TurnCursorDto, TurnDto,
 };
-use altior_storage::{ThreadRow, TurnRow};
+use altior_storage::{JournalEventRow, ThreadRow, TurnRow};
 
 use crate::application::CoreApplication;
 use crate::application::connection::{InMemoryListener, IpcConnection, IpcListener};
@@ -784,6 +788,18 @@ where
             CommandKind::GetContextSnapshot => {
                 Self::handle_get_context_snapshot(app, limits, session, cmd, now)
             }
+            CommandKind::ListMemories => Self::handle_list_memories(app, limits, session, cmd, now),
+            CommandKind::ProposeMemory => {
+                Self::handle_propose_memory(app, limits, session, cmd, now)
+            }
+            CommandKind::ConfirmMemory => {
+                Self::handle_confirm_memory(app, limits, session, cmd, now)
+            }
+            CommandKind::RejectMemory => Self::handle_reject_memory(app, limits, session, cmd, now),
+            CommandKind::CorrectMemory => {
+                Self::handle_correct_memory(app, limits, session, cmd, now)
+            }
+            CommandKind::ForgetMemory => Self::handle_forget_memory(app, limits, session, cmd, now),
             _ => Ok(()),
         }
     }
@@ -828,7 +844,10 @@ where
         let res = (|| -> Result<ThreadDto, CoreAppError> {
             let payload: CreateThreadCommand =
                 cmd.parse_payload().map_err(CoreAppError::Protocol)?;
-            let thread_id = ThreadId::from_str(&format!("thr_{:016x}", now.as_millis()))?;
+            let thread_id = app
+                .entity_ids()
+                .new_thread_id(now)
+                .map_err(CoreAppError::Id)?;
             let title = payload
                 .title
                 .as_deref()
@@ -1079,11 +1098,47 @@ where
                 turn_id: t.id.clone(),
             });
 
+            // Journal-projected timeline entries (ADR 0020): bounded page
+            // toward the past, plus the live catch-up high-water seq.
+            let (journal_rows, high_water) = {
+                let store = app.supervisor().checkpoint().store();
+                store.journal_events_for_thread(
+                    payload.thread_id.as_str(),
+                    payload.before_seq,
+                    i64::from(limit.get()),
+                )?
+            };
+            let entries: Vec<HistoryEntryDto> =
+                journal_rows.iter().map(journal_row_to_entry).collect();
+            let next_seq_cursor = entries.first().map(|entry| {
+                let seq = match entry {
+                    HistoryEntryDto::UserMessage { seq, .. }
+                    | HistoryEntryDto::AssistantDelta { seq, .. }
+                    | HistoryEntryDto::Permission { seq, .. }
+                    | HistoryEntryDto::PermissionDecision { seq, .. }
+                    | HistoryEntryDto::TurnState { seq, .. }
+                    | HistoryEntryDto::Unknown { seq, .. } => *seq,
+                };
+                HistoryCursorDto { seq }
+            });
+            let entries_has_more = match next_seq_cursor {
+                Some(cursor) => {
+                    let store = app.supervisor().checkpoint().store();
+                    store
+                        .journal_has_older(payload.thread_id.as_str(), cursor.seq)
+                        .map_err(|e| CoreAppError::Other(e.to_string()))?
+                }
+                None => false,
+            };
+
             Ok(ThreadHistoryResponseDto {
                 thread_id: payload.thread_id,
                 turns: turn_dtos,
                 next_cursor,
-                has_more,
+                has_more: has_more || entries_has_more,
+                entries,
+                next_seq_cursor,
+                high_water_seq: high_water,
             })
         })();
 
@@ -1116,15 +1171,20 @@ where
         now: UnixMillis,
     ) -> Result<(), CoreAppError> {
         let op_id = cmd.operation_id.clone();
+        let mut result_profile_id: Option<String> = None;
+        let mut result_binding_id: Option<String> = None;
         let res = (|| -> Result<(), CoreAppError> {
             let payload: ConfigureAgentCommand =
                 cmd.parse_payload().map_err(CoreAppError::Protocol)?;
             payload.validate().map_err(CoreAppError::Protocol)?;
             let profile_id = match payload.agent_profile_id {
                 Some(p) => p,
-                None => AgentProfileId::from_str(&format!("agp_{:016x}", now.as_millis()))
+                None => app
+                    .entity_ids()
+                    .new_agent_profile_id(now)
                     .map_err(CoreAppError::Id)?,
             };
+            result_profile_id = Some(profile_id.as_str().to_owned());
             let display_name = DisplayName::try_from(payload.display_name.as_str())
                 .map_err(CoreAppError::Entity)?;
             let preferred_harness = HarnessKind::try_from_str(payload.preferred_harness.as_str())
@@ -1163,6 +1223,7 @@ where
                     HarnessBindingId::from_str(&format!("hsb_{profile_body}"))
                         .map_err(CoreAppError::Id)?
                 };
+                result_binding_id = Some(binding_id.as_str().to_owned());
 
                 let label = DisplayName::try_from(
                     b_dto
@@ -1213,7 +1274,14 @@ where
 
         match res {
             Ok(()) => {
-                let event = Self::make_command_result_event(app, limits, op_id, true, None, now)?;
+                // ADR 0019: clients read the configured identities back
+                // from the result data instead of fabricating their own.
+                let data = serde_json::json!({
+                    "agent_profile_id": result_profile_id,
+                    "harness_binding_id": result_binding_id,
+                });
+                let event =
+                    Self::make_command_result_event(app, limits, op_id, true, Some(data), now)?;
                 session.send_json(&event).map_err(CoreAppError::from)?;
             }
             Err(err) => {
@@ -1238,15 +1306,19 @@ where
         now: UnixMillis,
     ) -> Result<(), CoreAppError> {
         let op_id = cmd.operation_id.clone();
+        let mut result_binding_id: Option<String> = None;
         let res = (|| -> Result<serde_json::Value, CoreAppError> {
             let payload: TestHarnessBindingCommand =
                 cmd.parse_payload().map_err(CoreAppError::Protocol)?;
             payload.validate().map_err(CoreAppError::Protocol)?;
             let binding_id = match payload.harness_binding_id {
                 Some(b) => b,
-                None => HarnessBindingId::from_str(&format!("hsb_{:016x}", now.as_millis()))
+                None => app
+                    .entity_ids()
+                    .new_harness_binding_id(now)
                     .map_err(CoreAppError::Id)?,
             };
+            result_binding_id = Some(binding_id.as_str().to_owned());
             let agent_id =
                 AgentProfileId::from_str("agp_0000000000000000").map_err(CoreAppError::Id)?;
             let label = DisplayName::try_from(payload.label.as_deref().unwrap_or("test"))
@@ -1282,9 +1354,13 @@ where
             )
             .map_err(CoreAppError::Entity)?;
             let outcome = app.test_agent_binding(&binding)?;
+            // ADR 0019: always return the binding id used, so a probe of a
+            // not-yet-saved binding hands back a real Core-minted identity.
             Ok(serde_json::json!({
                 "ok": outcome.ok,
+                "capabilities": outcome.capabilities,
                 "diagnostics": outcome.diagnostics.as_ref().map(BoundedDiagnosticsSummary::as_str),
+                "probed_binding_id": result_binding_id,
             }))
         })();
 
@@ -1317,13 +1393,17 @@ where
         now: UnixMillis,
     ) -> Result<(), CoreAppError> {
         let op_id = cmd.operation_id.clone();
+        let mut result_turn_id: Option<String> = None;
         let res = (|| -> Result<(TurnAdmission, Option<EventEnvelope>), CoreAppError> {
             let payload: StartTurnCommand = cmd.parse_payload().map_err(CoreAppError::Protocol)?;
             let turn_id = match payload.turn_id {
                 Some(t) => t,
-                None => TurnId::from_str(&format!("trn_{:016x}", now.as_millis()))
+                None => app
+                    .entity_ids()
+                    .new_turn_id(now)
                     .map_err(CoreAppError::Id)?,
             };
+            result_turn_id = Some(turn_id.as_str().to_owned());
             app.start_prompt_envelope(
                 op_id.clone(),
                 payload.thread_id,
@@ -1335,11 +1415,14 @@ where
 
         match res {
             Ok((admission, opt_envelope)) => {
+                // ADR 0019: the response carries the turn identity the
+                // client must use when correlating events.
                 let data = serde_json::json!({
                     "admission": match admission {
                         TurnAdmission::Admitted => "admitted",
                         TurnAdmission::Duplicate => "duplicate",
-                    }
+                    },
+                    "turn_id": result_turn_id,
                 });
                 let event =
                     Self::make_command_result_event(app, limits, op_id, true, Some(data), now)?;
@@ -1612,6 +1695,389 @@ where
         Ok(())
     }
 
+    /// Lists memories matching scope/state filters with bounded pagination.
+    fn handle_list_memories(
+        app: &CoreApplication<H, StoreCheckpointAdapter>,
+        limits: &EnvelopeLimits,
+        session: &mut DaemonClientSession<<L as IpcListener>::Connection>,
+        cmd: &CommandEnvelope,
+        now: UnixMillis,
+    ) -> Result<(), CoreAppError> {
+        let op_id = cmd.operation_id.clone();
+        let res = (|| -> Result<serde_json::Value, CoreAppError> {
+            let payload: ListMemoriesCommand =
+                cmd.parse_payload().map_err(CoreAppError::Protocol)?;
+            payload.validate().map_err(CoreAppError::Protocol)?;
+
+            let scope_filter = match payload.scope_kind.as_deref() {
+                Some(k) => Some(
+                    MemoryScope::try_from_parts(k, payload.scope_target.as_deref())
+                        .map_err(CoreAppError::Entity)?,
+                ),
+                None => None,
+            };
+            let state_filter = match payload.state.as_deref() {
+                Some(s) => Some(MemoryState::try_from_str(s).map_err(CoreAppError::Entity)?),
+                None => None,
+            };
+            let limit = match payload.limit {
+                Some(n) => MemoryListLimit::try_new(n).map_err(CoreAppError::Entity)?,
+                None => MemoryListLimit::try_new(50).map_err(CoreAppError::Entity)?,
+            };
+            let cursor = match payload.cursor {
+                Some(ref c) => {
+                    let mem_id = c.memory_id.parse::<MemoryId>().map_err(CoreAppError::Id)?;
+                    Some(MemoryCursor {
+                        updated_at: c.updated_at,
+                        memory_id: mem_id,
+                    })
+                }
+                None => None,
+            };
+
+            let records = app
+                .store()
+                .list_memories(scope_filter.as_ref(), state_filter, limit, cursor.as_ref())
+                .map_err(CoreAppError::from)?;
+
+            let has_more = records.len() >= limit.get() as usize;
+            let next_cursor = if has_more {
+                records.last().map(|last| MemoryCursorDto {
+                    updated_at: last.updated_at,
+                    memory_id: last.memory_id.to_string(),
+                })
+            } else {
+                None
+            };
+
+            let dtos: Vec<MemoryRecordDto> = records.iter().map(MemoryRecordDto::from).collect();
+            let response = MemoryListResponseDto {
+                memories: dtos,
+                next_cursor,
+                has_more,
+            };
+            serde_json::to_value(response).map_err(|e| CoreAppError::Other(e.to_string()))
+        })();
+
+        match res {
+            Ok(data) => {
+                let event =
+                    Self::make_command_result_event(app, limits, op_id, true, Some(data), now)?;
+                session.send_json(&event).map_err(CoreAppError::from)?;
+            }
+            Err(err) => {
+                let err_event = Self::make_command_error_event(
+                    app,
+                    op_id,
+                    "list_memories_failed",
+                    &err.to_string(),
+                    now,
+                )?;
+                session.send_json(&err_event).map_err(CoreAppError::from)?;
+            }
+        }
+        Ok(())
+    }
+
+    fn handle_propose_memory(
+        app: &mut CoreApplication<H, StoreCheckpointAdapter>,
+        limits: &EnvelopeLimits,
+        session: &mut DaemonClientSession<<L as IpcListener>::Connection>,
+        cmd: &CommandEnvelope,
+        now: UnixMillis,
+    ) -> Result<(), CoreAppError> {
+        let op_id = cmd.operation_id.clone();
+        let res = (|| -> Result<serde_json::Value, CoreAppError> {
+            let payload: ProposeMemoryCommand =
+                cmd.parse_payload().map_err(CoreAppError::Protocol)?;
+            payload.validate().map_err(CoreAppError::Protocol)?;
+
+            let content =
+                MemoryContent::try_from(payload.content.as_str()).map_err(CoreAppError::Entity)?;
+            let scope = MemoryScope::try_from_parts(
+                payload.scope_kind.as_str(),
+                payload.scope_target.as_deref(),
+            )
+            .map_err(CoreAppError::Entity)?;
+            let kind =
+                MemoryKind::try_from_str(payload.kind.as_str()).map_err(CoreAppError::Entity)?;
+            let sensitivity = match payload.sensitivity.as_deref() {
+                Some(s) => MemorySensitivity::try_from_str(s).map_err(CoreAppError::Entity)?,
+                None => MemorySensitivity::Normal,
+            };
+            let source = match payload.source.as_deref() {
+                Some(s) => MemorySource::try_from_str(s).map_err(CoreAppError::Entity)?,
+                None => MemorySource::Inferred,
+            };
+            let confidence =
+                payload
+                    .confidence
+                    .unwrap_or(if source.is_explicit() { 100 } else { 80 });
+
+            let thread_id = match payload.thread_id.as_deref() {
+                Some(tid) => Some(tid.parse::<ThreadId>().map_err(CoreAppError::Id)?),
+                None => None,
+            };
+            let turn_id = match payload.turn_id.as_deref() {
+                Some(tid) => Some(tid.parse::<TurnId>().map_err(CoreAppError::Id)?),
+                None => None,
+            };
+            let excerpt = match payload.excerpt.as_deref() {
+                Some(exc) => Some(MemoryExcerpt::try_from(exc).map_err(CoreAppError::Entity)?),
+                None => None,
+            };
+
+            let draft = MemoryDraft {
+                id: None,
+                content,
+                scope,
+                kind,
+                state: if source.is_explicit() {
+                    Some(MemoryState::Confirmed)
+                } else {
+                    Some(MemoryState::Candidate)
+                },
+                confidence,
+                sensitivity,
+                source,
+                provenance: MemoryProvenance {
+                    thread_id,
+                    turn_id,
+                    excerpt,
+                },
+                expires_at: None,
+            };
+
+            let record = if source.is_explicit() {
+                app.create_memory(&draft, now)?
+            } else {
+                app.propose_memory(draft, now)?
+            };
+
+            let dto = MemoryRecordDto::from(&record);
+            serde_json::to_value(dto).map_err(|e| CoreAppError::Other(e.to_string()))
+        })();
+
+        match res {
+            Ok(data) => {
+                let event =
+                    Self::make_command_result_event(app, limits, op_id, true, Some(data), now)?;
+                session.send_json(&event).map_err(CoreAppError::from)?;
+            }
+            Err(err) => {
+                let err_event = Self::make_command_error_event(
+                    app,
+                    op_id,
+                    "propose_memory_failed",
+                    &err.to_string(),
+                    now,
+                )?;
+                session.send_json(&err_event).map_err(CoreAppError::from)?;
+            }
+        }
+        Ok(())
+    }
+
+    fn handle_confirm_memory(
+        app: &mut CoreApplication<H, StoreCheckpointAdapter>,
+        limits: &EnvelopeLimits,
+        session: &mut DaemonClientSession<<L as IpcListener>::Connection>,
+        cmd: &CommandEnvelope,
+        now: UnixMillis,
+    ) -> Result<(), CoreAppError> {
+        let op_id = cmd.operation_id.clone();
+        let res = (|| -> Result<serde_json::Value, CoreAppError> {
+            let payload: ConfirmMemoryCommand =
+                cmd.parse_payload().map_err(CoreAppError::Protocol)?;
+            payload.validate().map_err(CoreAppError::Protocol)?;
+            let mem_id = payload
+                .memory_id
+                .parse::<MemoryId>()
+                .map_err(CoreAppError::Id)?;
+            let record = app.confirm_memory(&mem_id, now)?;
+            let dto = MemoryRecordDto::from(&record);
+            serde_json::to_value(dto).map_err(|e| CoreAppError::Other(e.to_string()))
+        })();
+
+        match res {
+            Ok(data) => {
+                let event =
+                    Self::make_command_result_event(app, limits, op_id, true, Some(data), now)?;
+                session.send_json(&event).map_err(CoreAppError::from)?;
+            }
+            Err(err) => {
+                let err_event = Self::make_command_error_event(
+                    app,
+                    op_id,
+                    "confirm_memory_failed",
+                    &err.to_string(),
+                    now,
+                )?;
+                session.send_json(&err_event).map_err(CoreAppError::from)?;
+            }
+        }
+        Ok(())
+    }
+
+    fn handle_reject_memory(
+        app: &mut CoreApplication<H, StoreCheckpointAdapter>,
+        limits: &EnvelopeLimits,
+        session: &mut DaemonClientSession<<L as IpcListener>::Connection>,
+        cmd: &CommandEnvelope,
+        now: UnixMillis,
+    ) -> Result<(), CoreAppError> {
+        let op_id = cmd.operation_id.clone();
+        let res = (|| -> Result<serde_json::Value, CoreAppError> {
+            let payload: RejectMemoryCommand =
+                cmd.parse_payload().map_err(CoreAppError::Protocol)?;
+            payload.validate().map_err(CoreAppError::Protocol)?;
+            let mem_id = payload
+                .memory_id
+                .parse::<MemoryId>()
+                .map_err(CoreAppError::Id)?;
+            let record = app.reject_memory(&mem_id, payload.reason.as_deref(), now)?;
+            let dto = MemoryRecordDto::from(&record);
+            serde_json::to_value(dto).map_err(|e| CoreAppError::Other(e.to_string()))
+        })();
+
+        match res {
+            Ok(data) => {
+                let event =
+                    Self::make_command_result_event(app, limits, op_id, true, Some(data), now)?;
+                session.send_json(&event).map_err(CoreAppError::from)?;
+            }
+            Err(err) => {
+                let err_event = Self::make_command_error_event(
+                    app,
+                    op_id,
+                    "reject_memory_failed",
+                    &err.to_string(),
+                    now,
+                )?;
+                session.send_json(&err_event).map_err(CoreAppError::from)?;
+            }
+        }
+        Ok(())
+    }
+
+    fn handle_correct_memory(
+        app: &mut CoreApplication<H, StoreCheckpointAdapter>,
+        limits: &EnvelopeLimits,
+        session: &mut DaemonClientSession<<L as IpcListener>::Connection>,
+        cmd: &CommandEnvelope,
+        now: UnixMillis,
+    ) -> Result<(), CoreAppError> {
+        let op_id = cmd.operation_id.clone();
+        let res = (|| -> Result<serde_json::Value, CoreAppError> {
+            let payload: CorrectMemoryCommand =
+                cmd.parse_payload().map_err(CoreAppError::Protocol)?;
+            payload.validate().map_err(CoreAppError::Protocol)?;
+            let mem_id = payload
+                .memory_id
+                .parse::<MemoryId>()
+                .map_err(CoreAppError::Id)?;
+
+            let existing = app.get_memory(&mem_id)?.ok_or_else(|| {
+                CoreAppError::from(altior_storage::StorageError::MemoryNotFound {
+                    memory_id: mem_id.to_string(),
+                })
+            })?;
+
+            let content =
+                MemoryContent::try_from(payload.content.as_str()).map_err(CoreAppError::Entity)?;
+            let scope = match payload.scope_kind.as_deref() {
+                Some(sk) => MemoryScope::try_from_parts(sk, payload.scope_target.as_deref())
+                    .map_err(CoreAppError::Entity)?,
+                None => existing.scope.clone(),
+            };
+            let kind = match payload.kind.as_deref() {
+                Some(k) => MemoryKind::try_from_str(k).map_err(CoreAppError::Entity)?,
+                None => existing.kind,
+            };
+            let sensitivity = match payload.sensitivity.as_deref() {
+                Some(s) => MemorySensitivity::try_from_str(s).map_err(CoreAppError::Entity)?,
+                None => existing.sensitivity,
+            };
+
+            let draft = MemoryDraft {
+                id: None,
+                content,
+                scope,
+                kind,
+                state: Some(MemoryState::Confirmed),
+                confidence: 100,
+                sensitivity,
+                source: MemorySource::Explicit,
+                provenance: existing.provenance.clone(),
+                expires_at: existing.expires_at,
+            };
+
+            let record = app.correct_memory(&mem_id, &draft, now)?;
+            let dto = MemoryRecordDto::from(&record);
+            serde_json::to_value(dto).map_err(|e| CoreAppError::Other(e.to_string()))
+        })();
+
+        match res {
+            Ok(data) => {
+                let event =
+                    Self::make_command_result_event(app, limits, op_id, true, Some(data), now)?;
+                session.send_json(&event).map_err(CoreAppError::from)?;
+            }
+            Err(err) => {
+                let err_event = Self::make_command_error_event(
+                    app,
+                    op_id,
+                    "correct_memory_failed",
+                    &err.to_string(),
+                    now,
+                )?;
+                session.send_json(&err_event).map_err(CoreAppError::from)?;
+            }
+        }
+        Ok(())
+    }
+
+    fn handle_forget_memory(
+        app: &mut CoreApplication<H, StoreCheckpointAdapter>,
+        limits: &EnvelopeLimits,
+        session: &mut DaemonClientSession<<L as IpcListener>::Connection>,
+        cmd: &CommandEnvelope,
+        now: UnixMillis,
+    ) -> Result<(), CoreAppError> {
+        let op_id = cmd.operation_id.clone();
+        let res = (|| -> Result<serde_json::Value, CoreAppError> {
+            let payload: ForgetMemoryCommand =
+                cmd.parse_payload().map_err(CoreAppError::Protocol)?;
+            payload.validate().map_err(CoreAppError::Protocol)?;
+            let mem_id = payload
+                .memory_id
+                .parse::<MemoryId>()
+                .map_err(CoreAppError::Id)?;
+            let record = app.forget_memory(&mem_id, now)?;
+            let dto = MemoryRecordDto::from(&record);
+            serde_json::to_value(dto).map_err(|e| CoreAppError::Other(e.to_string()))
+        })();
+
+        match res {
+            Ok(data) => {
+                let event =
+                    Self::make_command_result_event(app, limits, op_id, true, Some(data), now)?;
+                session.send_json(&event).map_err(CoreAppError::from)?;
+            }
+            Err(err) => {
+                let err_event = Self::make_command_error_event(
+                    app,
+                    op_id,
+                    "forget_memory_failed",
+                    &err.to_string(),
+                    now,
+                )?;
+                session.send_json(&err_event).map_err(CoreAppError::from)?;
+            }
+        }
+        Ok(())
+    }
+
     /// P2.2 (ADR 0018): returns the audit `ContextSnapshot` for a turn, or the
     /// snapshot list for a thread.
     fn handle_get_context_snapshot(
@@ -1842,4 +2308,154 @@ fn turn_row_to_dto(row: &TurnRow) -> Result<TurnDto, CoreAppError> {
         started_at: UnixMillis::from_millis(started_at),
         ended_at,
     })
+}
+
+/// The bounded diagnostic length of a preserved `unknown` history entry
+/// (ADR 0020 §1).
+const UNKNOWN_ENTRY_DIAGNOSTIC_BYTES: usize = 512;
+
+/// Projects one journal row into a [`HistoryEntryDto`] (ADR 0020).
+/// Rows whose kind or payload cannot be projected degrade to a bounded
+/// `Unknown` entry — a corrupt row never fails the page.
+#[allow(clippy::too_many_lines)]
+fn journal_row_to_entry(row: &JournalEventRow) -> HistoryEntryDto {
+    let seq = u64::try_from(row.seq).unwrap_or(0);
+    let occurred_at = UnixMillis::from_millis(u64::try_from(row.occurred_at).unwrap_or(0));
+    let event_id = EventId::from_str(&row.event_id).unwrap_or_else(|_| {
+        EventId::from_str("evt_fallback00000001").expect("static fallback id parses")
+    });
+    let payload: serde_json::Value =
+        serde_json::from_slice(&row.payload).unwrap_or(serde_json::Value::Null);
+
+    let bounded_text = |value: Option<&str>| -> String {
+        let text = value.unwrap_or_default();
+        let mut end = text.len().min(64 * 1024);
+        while end > 0 && !text.is_char_boundary(end) {
+            end -= 1;
+        }
+        text[..end].to_owned()
+    };
+
+    match row.kind.as_str() {
+        "turn.started" => {
+            let turn_id = row
+                .turn_id
+                .as_deref()
+                .and_then(|t| TurnId::from_str(t).ok());
+            if let Some(turn_id) = turn_id {
+                return HistoryEntryDto::UserMessage {
+                    event_id,
+                    turn_id,
+                    seq,
+                    text: bounded_text(payload.get("content").and_then(|v| v.as_str())),
+                    occurred_at,
+                };
+            }
+        }
+        "message.delta" => {
+            let turn_id = row
+                .turn_id
+                .as_deref()
+                .and_then(|t| TurnId::from_str(t).ok());
+            if let Some(turn_id) = turn_id {
+                return HistoryEntryDto::AssistantDelta {
+                    event_id,
+                    turn_id,
+                    seq,
+                    text: bounded_text(payload.get("text").and_then(|v| v.as_str())),
+                    occurred_at,
+                };
+            }
+        }
+        "permission.requested" => {
+            let turn_id = row
+                .turn_id
+                .as_deref()
+                .and_then(|t| TurnId::from_str(t).ok());
+            if let Some(turn_id) = turn_id {
+                return HistoryEntryDto::Permission {
+                    event_id,
+                    turn_id,
+                    seq,
+                    permission_kind: payload
+                        .get("permission_kind")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("unknown")
+                        .to_owned(),
+                    description: bounded_text(payload.get("description").and_then(|v| v.as_str())),
+                    decision: "pending".to_owned(),
+                    occurred_at,
+                };
+            }
+        }
+        "permission.decided" => {
+            let turn_id = row
+                .turn_id
+                .as_deref()
+                .and_then(|t| TurnId::from_str(t).ok());
+            let perm_ev_id = payload
+                .get("permission_event_id")
+                .and_then(|v| v.as_str())
+                .and_then(|s| EventId::from_str(s).ok());
+            if let (Some(turn_id), Some(permission_event_id)) = (turn_id, perm_ev_id) {
+                return HistoryEntryDto::PermissionDecision {
+                    event_id,
+                    permission_event_id,
+                    turn_id,
+                    seq,
+                    decision: payload
+                        .get("decision")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("pending")
+                        .to_owned(),
+                    occurred_at,
+                };
+            }
+        }
+        kind @ ("turn.completed" | "turn.cancelled" | "turn.failed") => {
+            let turn_id = row
+                .turn_id
+                .as_deref()
+                .and_then(|t| TurnId::from_str(t).ok());
+            if let Some(turn_id) = turn_id {
+                let state = kind.strip_prefix("turn.").unwrap_or(kind).to_owned();
+                let reason = payload
+                    .get("reason")
+                    .and_then(|v| v.as_str())
+                    .map(|r| bounded_text(Some(r)))
+                    .filter(|r| !r.is_empty());
+                let delivery = payload
+                    .get("delivery")
+                    .and_then(|v| v.as_str())
+                    .map(str::to_owned);
+                return HistoryEntryDto::TurnState {
+                    event_id,
+                    turn_id,
+                    seq,
+                    state,
+                    reason,
+                    delivery,
+                    occurred_at,
+                };
+            }
+        }
+        _ => {}
+    }
+
+    // Unprojectable: preserve a bounded diagnostic instead of failing.
+    let raw = String::from_utf8_lossy(&row.payload);
+    let mut diagnostic = raw.len().min(UNKNOWN_ENTRY_DIAGNOSTIC_BYTES);
+    while diagnostic > 0 && !raw.is_char_boundary(diagnostic) {
+        diagnostic -= 1;
+    }
+    HistoryEntryDto::Unknown {
+        event_id,
+        seq,
+        kind: row.kind.clone(),
+        diagnostic: format!(
+            "unprojectable journal row: kind={}, payload={}",
+            row.kind,
+            &raw[..diagnostic]
+        ),
+    }
 }

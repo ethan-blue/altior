@@ -5,10 +5,8 @@ import { ContextPanel } from "./ContextPanel";
 
 function fixtureSnapshot(overrides?: Partial<ContextSnapshotDto>): ContextSnapshotDto {
   return {
-    snapshot_version: 1,
-    thread_id: "thr_p22panel00000000000000001",
     turn_id: "trn_p22panel00000000000000001",
-    operation_id: "op_p22panel000000000000000001",
+    thread_id: "thr_p22panel00000000000000001",
     memory_mode: "long_term",
     created_at: 2000,
     passthrough: false,
@@ -45,6 +43,7 @@ function fixtureSnapshot(overrides?: Partial<ContextSnapshotDto>): ContextSnapsh
       },
     ],
     degraded: null,
+    rendered_prompt: null,
     ...overrides,
   } as ContextSnapshotDto;
 }
@@ -52,13 +51,28 @@ function fixtureSnapshot(overrides?: Partial<ContextSnapshotDto>): ContextSnapsh
 describe("ContextPanel (P2.2 inspector)", () => {
   it("shows an empty state when no snapshot is recorded", () => {
     render(<ContextPanel snapshot={null} />);
+    expect(screen.getByTestId("context-empty")).toBeTruthy();
+  });
 
+  it("shows loading state when context snapshot is loading", () => {
+    render(<ContextPanel snapshot={null} status="loading" />);
+    expect(screen.getByTestId("context-loading")).toBeTruthy();
+  });
+
+  it("shows error state with error message when snapshot retrieval fails", () => {
+    render(<ContextPanel snapshot={null} status="error" error="Network timeout" />);
+    const err = screen.getByTestId("context-error");
+    expect(err).toBeTruthy();
+    expect(err.textContent).toContain("Network timeout");
+  });
+
+  it("shows empty state when status is not_found", () => {
+    render(<ContextPanel snapshot={null} status="not_found" />);
     expect(screen.getByTestId("context-empty")).toBeTruthy();
   });
 
   it("shows a memory-off state when the turn ran with memory disabled", () => {
     render(<ContextPanel snapshot={fixtureSnapshot({ memory_mode: "off" })} />);
-
     expect(screen.getByTestId("context-memory-off")).toBeTruthy();
   });
 

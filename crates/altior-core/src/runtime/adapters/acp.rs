@@ -92,13 +92,13 @@ impl Default for AcpHarnessAdapter {
 }
 
 impl AcpHarnessAdapter {
-    /// Creates a new ACP harness adapter with default no-secrets resolver and empty launch env.
+    /// Creates a new ACP harness adapter with production OS secret store resolver and empty launch env.
     #[must_use]
     pub fn new() -> Self {
         Self {
             sessions: BTreeMap::new(),
             client_version: format!("altior-core/{}", env!("CARGO_PKG_VERSION")),
-            secret_resolver: Arc::new(NoSecretsResolver),
+            secret_resolver: Arc::new(crate::secrets::OsSecretStore::new()),
             launch_env: BTreeMap::new(),
         }
     }
@@ -109,6 +109,17 @@ impl AcpHarnessAdapter {
         Self {
             sessions: BTreeMap::new(),
             client_version: version.into(),
+            secret_resolver: Arc::new(crate::secrets::OsSecretStore::new()),
+            launch_env: BTreeMap::new(),
+        }
+    }
+
+    /// Creates a new adapter with an explicit no-secrets resolver (useful for hermetic tests).
+    #[must_use]
+    pub fn with_no_secrets() -> Self {
+        Self {
+            sessions: BTreeMap::new(),
+            client_version: format!("altior-core/{}", env!("CARGO_PKG_VERSION")),
             secret_resolver: Arc::new(NoSecretsResolver),
             launch_env: BTreeMap::new(),
         }
@@ -638,6 +649,9 @@ fn map_negotiated_capabilities(neg: NegotiatedCapabilities) -> CapabilitySet {
 mod tests {
     use super::*;
     use altior_acp::SecretRef;
+    use altior_domain::{
+        BoundedPath, DisplayName, HarnessBindingId, HarnessEnvKey, HarnessSecretRef,
+    };
 
     #[test]
     fn static_fallbacks_are_valid() {
@@ -660,5 +674,120 @@ mod tests {
         let debug_str = format!("{adapter:?}");
         assert!(!debug_str.contains("SK_CANARY_VALUE_SUPER_SECRET"));
         assert!(debug_str.contains("secret-key-1"));
+    }
+
+    #[test]
+    fn acp_harness_adapter_fails_closed_on_missing_secret_reference() {
+        let adapter = AcpHarnessAdapter::new();
+        let binding = AcpHarnessBinding {
+            id: HarnessBindingId::try_from("hsb_0000000000000001").unwrap(),
+            agent_profile_id: altior_domain::AgentProfileId::try_from("agp_0000000000000001")
+                .unwrap(),
+            label: DisplayName::try_from("Test Binding").unwrap(),
+            command: BoundedPath::try_from("non_existent_program_xyz").unwrap(),
+            args: Vec::new(),
+            env_keys: vec![HarnessEnvKey::try_from("MY_API_KEY").unwrap()],
+            secret_refs: vec![HarnessSecretRef::try_from("sec_missing_ref_999").unwrap()],
+            created_at: altior_domain::UnixMillis::from_millis(1_700_000_000_000),
+        };
+        let err = adapter.spawn_child(&binding, None);
+        assert!(err.is_err());
+        let err_msg = err.unwrap_err().to_string();
+        assert!(
+            err_msg.contains("credential not found in OS secret store")
+                || err_msg.contains("not found")
+        );
+    }
+
+    #[test]
+    fn acp_harness_adapter_child_receives_only_authorized_env_keys() {
+        let test_secret_provider = Arc::new(|sref: &SecretRef| -> Result<String, AcpError> {
+            if sref.as_str() == "sec_valid_key" {
+                Ok("VALID_SECRET_VALUE".to_string())
+            } else {
+                Err(AcpError::SecretResolutionFailed {
+                    secret_ref: sref.to_string(),
+                    diagnostic: "not found".to_string(),
+                })
+            }
+        });
+
+        let adapter = AcpHarnessAdapter::new().with_secret_resolver(test_secret_provider);
+        let binding = AcpHarnessBinding {
+            id: HarnessBindingId::try_from("hsb_0000000000000002").unwrap(),
+            agent_profile_id: altior_domain::AgentProfileId::try_from("agp_0000000000000002")
+                .unwrap(),
+            label: DisplayName::try_from("Test Binding 2").unwrap(),
+            command: BoundedPath::try_from("non_existent_program_xyz").unwrap(),
+            args: Vec::new(),
+            env_keys: vec![HarnessEnvKey::try_from("AUTHORIZED_API_KEY").unwrap()],
+            secret_refs: vec![HarnessSecretRef::try_from("sec_valid_key").unwrap()],
+            created_at: altior_domain::UnixMillis::from_millis(1_700_000_000_000),
+        };
+
+        let lc = parse_launch_config(&binding, None).unwrap();
+        let resolved = lc.resolve(&*adapter.secret_resolver).unwrap();
+
+        // Exactly one env key present
+        assert_eq!(resolved.env.len(), 1);
+        assert_eq!(
+            resolved.env.get("AUTHORIZED_API_KEY").unwrap(),
+            "VALID_SECRET_VALUE"
+        );
+        assert!(!resolved.env.contains_key("UNAUTHORIZED_SECRET"));
+
+        // Debug output masks value
+        let debug_text = format!("{resolved:?}");
+        assert!(!debug_text.contains("VALID_SECRET_VALUE"));
+        assert!(debug_text.contains("[REDACTED]"));
+    }
+
+    #[cfg(windows)]
+    struct Guard<'a> {
+        store: &'a crate::secrets::OsSecretStore,
+        name: &'a str,
+    }
+    #[cfg(windows)]
+    impl Drop for Guard<'_> {
+        fn drop(&mut self) {
+            let _ = self.store.delete_secret(self.name);
+        }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn acp_harness_adapter_resolves_real_windows_credential() {
+        let store = crate::secrets::OsSecretStore::new();
+        let test_ref_name = format!("sec_test_acp_adapter_{}", std::process::id());
+        let canary = "real_win_cred_canary_value_888";
+
+        store
+            .set_secret(&test_ref_name, canary)
+            .expect("write credential to Credential Manager");
+
+        let _guard = Guard {
+            store: &store,
+            name: &test_ref_name,
+        };
+
+        let adapter = AcpHarnessAdapter::new();
+        let binding = AcpHarnessBinding {
+            id: HarnessBindingId::try_from("hsb_0000000000000003").unwrap(),
+            agent_profile_id: altior_domain::AgentProfileId::try_from("agp_0000000000000003")
+                .unwrap(),
+            label: DisplayName::try_from("Test Binding 3").unwrap(),
+            command: BoundedPath::try_from("dummy_exe").unwrap(),
+            args: Vec::new(),
+            env_keys: vec![HarnessEnvKey::try_from("PROVIDER_KEY").unwrap()],
+            secret_refs: vec![HarnessSecretRef::try_from(test_ref_name.as_str()).unwrap()],
+            created_at: altior_domain::UnixMillis::from_millis(1_700_000_000_000),
+        };
+
+        let lc = parse_launch_config(&binding, None).unwrap();
+        let resolved = lc.resolve(&*adapter.secret_resolver).unwrap();
+
+        assert_eq!(resolved.env.get("PROVIDER_KEY").unwrap(), canary);
+        let debug_text = format!("{resolved:?}");
+        assert!(!debug_text.contains(canary));
     }
 }

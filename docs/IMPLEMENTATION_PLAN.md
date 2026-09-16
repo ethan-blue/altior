@@ -525,6 +525,19 @@ P2 acceptance:
 - forgetting removes it from future context — `forgetting_removes_memory_from_future_context`
 - credential fixtures never reach the journal or projection — `secret_shaped_memory_rejected_before_journal_and_projection` (zero-write fail-closed)
 
+### P2.3 Review hardening, context boundaries, CJK retrieval, and streaming performance (ADR 0019–0024)
+
+- **Identifier allocation boundaries (ADR 0019)**: Core generates entity IDs (`ThreadId`, `TurnId`, `AgentProfileId`, `HarnessBindingId`) using millisecond timestamp + process noise; Desktop generates operation IDs using CSPRNG; operations are idempotently retried without duplicate execution.
+- **Bounded timeline history records (ADR 0020)**: Bounded backward pagination over durable journal events instead of turn placeholders.
+- **Epoch-scoped stream deduplication (ADR 0021)**: Monotonic sequence tracking with epoch invalidation and bounded replay ringbuffers.
+- **Context scope trust boundaries & budgeting (ADR 0022)**: Multi-scope isolation (`Global`, `Personal`, `Project`, `Thread`), token estimator algorithm versioning, and transparent drop reasons.
+- **SQLite FTS5 trigram hybrid retrieval (ADR 0023)**: Schema V8 migration upgrading `memory_fts` to trigram tokenizer with sliding 3-grams for Chinese CJK, symbol-preserving code tokenization, and $O(K)$ min-heap candidate ranking.
+- **Projection digest fast path & turn settlement checkpointing (ADR 0024)**: Streaming `MessageDelta` events bypass the full-table digest scan, checkpointing authoritative digests on turn settlement (`TurnCompleted`, `TurnFailed`, `TurnCancelled`) with automatic crash self-healing on reopen.
+- **Desktop UI & Quality Gates**: 4-column workbench grid with narrow drawer overlay, WCAG 2.2 color contrast compliance, Chinese IME Enter key composition protection, full zh-CN/en bilingual support, sanitized safe Markdown rendering, and Playwright automated visual regression and geometry gates.
+
+Status: **complete (ADR 0019–0024)**.
+- Evidence: 26 Core unit tests, 13 Storage memory tests, 2 Storage performance evaluation tests, 5 retrieval relevance acceptance tests (`p25_memory_retrieval_relevance.rs`), 23 Desktop Vitest files (195 unit tests), contrast audit (24/24 passed), visual geometry gate (5/5 views passed), and Tauri crate tests (7 passed).
+
 ## P3: Personal Vault synchronization
 
 - device identity, pairing fingerprints, recovery, revocation, and key rotation

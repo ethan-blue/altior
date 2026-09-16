@@ -72,3 +72,17 @@ export class ProtocolError extends CoreTransportError {
     Object.setPrototypeOf(this, new.target.prototype);
   }
 }
+
+/**
+ * Thrown when a command envelope violates the protocol contract (identifier
+ * shape, payload bounds, or payload invariants). Mirrors the typed rejection
+ * real Core performs at the serde boundary (review task A01, ADR 0019):
+ * the fixture transport must refuse what production Core refuses.
+ */
+export class InvalidCommandError extends CoreTransportError {
+  constructor(message: string, details?: unknown) {
+    super(message, "INVALID_COMMAND", details);
+    this.name = "InvalidCommandError";
+    Object.setPrototypeOf(this, new.target.prototype);
+  }
+}

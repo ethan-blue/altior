@@ -17,6 +17,12 @@ serde_json = "1"
 [dev-dependencies]
 tempfile = "3"
 
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_Security_Credentials",
+] }
+
 [lib]
 name = "altior_core"
 path = "src/lib.rs"
@@ -57,5 +63,12 @@ path = "tests/p13_daemon_process.rs"
 name = "p14_acceptance_journey"
 path = "tests/p14_acceptance_journey.rs"
 
-[lints]
-workspace = true
+[lints.rust]
+unsafe_code = "allow"
+missing_debug_implementations = "warn"
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+module_name_repetitions = "allow"
+uninlined_format_args = "allow"

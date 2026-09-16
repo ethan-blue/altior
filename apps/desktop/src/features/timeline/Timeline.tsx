@@ -304,6 +304,16 @@ export function Timeline({
     }
   };
 
+  const handlePermissionDecision = useCallback(
+    (id: string, decision: PermissionDecision) => {
+      onPermissionDecision(id, decision);
+      setAnnouncement(
+        decision === "approved" ? "Permission approved" : "Permission denied",
+      );
+    },
+    [onPermissionDecision],
+  );
+
   return (
     <div className={styles.timelineShell}>
       <div
@@ -327,12 +337,7 @@ export function Timeline({
                 index={index}
                 focused={focusedRowId === row.id}
                 onFocus={onFocusChange}
-                onPermissionDecision={(id, decision) => {
-                  onPermissionDecision(id, decision);
-                  setAnnouncement(
-                    decision === "approved" ? "Permission approved" : "Permission denied",
-                  );
-                }}
+                onPermissionDecision={handlePermissionDecision}
               />
             </div>
           ))}

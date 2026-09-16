@@ -35,6 +35,12 @@ export interface TauriCoreTransportOptions {
   readonly isDev?: boolean;
   /** Initial fallback options if fallback is activated. */
   readonly fallbackOptions?: ConstructorParameters<typeof InMemoryTransport>[0];
+  /**
+   * Called when asynchronous bridge operations fail outside a command
+   * round-trip (e.g. the event listener registration). Commands still
+   * surface their own typed errors; this covers the fire-and-forget paths.
+   */
+  readonly onError?: (error: unknown) => void;
 }
 
 /**
@@ -55,16 +61,16 @@ export class TauriCoreTransport implements CoreTransport {
   #tauriUnlisten: (() => void) | null = null;
   readonly #fallbackToMemoryInDev: boolean;
   readonly #isDev: boolean;
+  readonly #onError?: (error: unknown) => void;
 
   constructor(options: TauriCoreTransportOptions = {}) {
     this.#fallbackToMemoryInDev = options.fallbackToMemoryInDev ?? true;
-    const isDevEnv =
-      options.isDev ??
-      (typeof process !== "undefined" && process.env?.NODE_ENV === "development") ??
-      false;
-    this.#isDev = isDevEnv;
+    // Explicit boolean resolution: never `false ?? fallback`, which keeps
+    // false and silently skips the Vite dev flag (review F02).
+    this.#isDev = options.isDev ?? viteDevFlag();
+    this.#onError = options.onError;
 
-    const detected = this.#resolveTauriBridge(options);
+    const detected = resolveTauriBridge(options);
     if (detected) {
       this.#invoke = detected.invoke;
       this.#listen = detected.listen;
@@ -146,13 +152,23 @@ export class TauriCoreTransport implements CoreTransport {
     this.#listeners.add(onEvent);
 
     if (this.#listeners.size === 1 && this.#listen) {
-      void this.#listen("core_event", ({ payload }) => {
-        for (const listener of this.#listeners) {
-          listener(payload);
-        }
-      }).then((unlisten) => {
-        this.#tauriUnlisten = unlisten;
-      });
+      // Asynchronous listener registration with ready/cancel handling: if
+      // the last subscriber leaves before the bridge confirms the listen,
+      // the registration is undone as soon as it arrives, so fast
+      // subscribe/unsubscribe cycles never leak a native listener.
+      void this.#listen("core_event", this.#dispatch)
+        .then((unlisten) => {
+          if (this.#listeners.size === 0) {
+            unlisten();
+            this.#tauriUnlisten = null;
+            return;
+          }
+          this.#tauriUnlisten = unlisten;
+        })
+        .catch((error: unknown) => {
+          this.#status = "unavailable";
+          this.#onError?.(error);
+        });
     }
 
     return () => {
@@ -163,6 +179,12 @@ export class TauriCoreTransport implements CoreTransport {
       }
     };
   }
+
+  #dispatch = (event: { payload: EventEnvelope }): void => {
+    for (const listener of [...this.#listeners]) {
+      listener(event.payload);
+    }
+  };
 
   async reconnect(cursor?: ReconnectCursor): Promise<NegotiatedHandshake> {
     if (this.#fallbackDelegate) {
@@ -215,66 +237,57 @@ export class TauriCoreTransport implements CoreTransport {
       );
     }
   }
-
-  #resolveTauriBridge(options: TauriCoreTransportOptions): {
-    invoke: TauriInvokeFn;
-    listen: TauriListenFn;
-  } | null {
-    if (options.invoke && options.listen) {
-      return { invoke: options.invoke, listen: options.listen };
-    }
-
-    // Check globals if available
-    const win = typeof window !== "undefined" ? (window as any) : null;
-    const tauriInternals = win?.__TAURI_INTERNALS__;
-    const tauriGlobal = win?.__TAURI__;
-
-    const invoke =
-      options.invoke ??
-      tauriInternals?.invoke ??
-      tauriGlobal?.core?.invoke ??
-      tauriGlobal?.invoke ??
-      null;
-
-    const listen =
-      options.listen ??
-      tauriInternals?.listen ??
-      tauriGlobal?.event?.listen ??
-      tauriGlobal?.listen ??
-      null;
-
-    if (typeof invoke === "function" && typeof listen === "function") {
-      return { invoke, listen };
-    }
-
-    return null;
-  }
 }
 
 /**
- * Factory creating the default transport for the current runtime environment.
+ * The Vite development flag, resolved as a plain boolean. Browser builds
+ * have no `process`, so a NODE_ENV check must never gate this (review F02:
+ * `false ?? dev` kept dev builds on the Tauri transport).
+ */
+function viteDevFlag(): boolean {
+  return typeof import.meta !== "undefined" && (import.meta as any).env?.DEV === true;
+}
+
+/**
+ * Resolves the Tauri bridge from explicit injection or, when the shell
+ * exposes it, from `__TAURI_INTERNALS__`/`__TAURI__`. With
+ * `withGlobalTauri: false` the production WebView only provides the
+ * internals object; there is deliberately no global-object fallback beyond
+ * that (ADR 0008 §6).
+ */
+export function resolveTauriBridge(options: TauriCoreTransportOptions): {
+  invoke: TauriInvokeFn;
+  listen: TauriListenFn;
+} | null {
+  if (options.invoke && options.listen) {
+    return { invoke: options.invoke, listen: options.listen };
+  }
+
+  const win = typeof window !== "undefined" ? (window as any) : null;
+  const invoke = win?.__TAURI_INTERNALS__?.invoke ?? null;
+  const listen = win?.__TAURI_INTERNALS__?.listen ?? null;
+
+  if (typeof invoke === "function" && typeof listen === "function") {
+    return { invoke, listen };
+  }
+  return null;
+}
+
+/**
+ * The single transport decision for the entry point (ADR 0008, review A02):
  *
- * In Tauri Desktop runtime: creates TauriCoreTransport configured for real Core IPC.
- * In browser development mode: falls back to InMemoryTransport for UI prototyping.
- * In non-Tauri production browser: creates TauriCoreTransport (fails with TransportUnavailableError).
+ * 1. Tauri bridge present (WebView runtime): real Core IPC, no fallback.
+ * 2. Vite dev server (no bridge): explicit development fixture entry.
+ * 3. Plain production browser: the Tauri transport, which fails loudly and
+ *    honestly — it never fabricates a working session.
  */
 export function createDefaultTransport(
   options: TauriCoreTransportOptions = {},
 ): CoreTransport {
-  const win = typeof window !== "undefined" ? (window as any) : null;
-  const isTauri =
-    win != null &&
-    (win.__TAURI_INTERNALS__ != null ||
-      win.__TAURI__ != null ||
-      typeof options.invoke === "function");
+  const bridge = resolveTauriBridge(options);
+  const isDev = options.isDev ?? viteDevFlag();
 
-  const isDev =
-    options.isDev ??
-    (typeof process !== "undefined" && process.env?.NODE_ENV === "development") ??
-    (typeof import.meta !== "undefined" && (import.meta as any).env?.DEV) ??
-    false;
-
-  if (isTauri) {
+  if (bridge) {
     return new TauriCoreTransport({
       ...options,
       fallbackToMemoryInDev: false,

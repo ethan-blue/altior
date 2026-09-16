@@ -1,23 +1,37 @@
 /*
- * Semantic design tokens (`docs/UI_ARCHITECTURE.md`).
+ * Semantic design tokens (`docs/UI_ARCHITECTURE.md`, DESIGN_I18N §3, review A10).
  *
  * Feature and component styles must reference these names; they must not
  * introduce raw colors, shadows, radii, or spacing values.
  */
 :root {
-  /* color */
+  color-scheme: light;
+
+  /* base color */
   --color-canvas: #f6f7f9;
   --color-surface: #ffffff;
   --color-elevated: #ffffff;
   --color-border: #d4d7dc;
+  --color-control-border: #858c97;
   --color-text: #1c1f24;
   --color-muted: #5b616b;
   --color-accent: #2f5fd7;
+  --color-accent-foreground: #ffffff;
   --color-danger: #b3362b;
   --color-warning: #946200;
   --color-success: #2e7d43;
   --color-selection: #dbe4fb;
   --color-focus: #2f5fd7;
+
+  /* interactive & state surfaces (DESIGN_I18N §3) */
+  --color-hover: rgba(28, 31, 36, 0.05);
+  --color-pressed: rgba(28, 31, 36, 0.1);
+  --color-warning-surface: #fff8eb;
+  --color-danger-surface: #fdf2f1;
+  --color-success-surface: #f0f8f3;
+  --color-overlay: rgba(28, 31, 36, 0.45);
+  --color-disabled-text: #8c929d;
+  --color-disabled-surface: #eaecf0;
 
   /* spacing */
   --spacing-2: 2px;
@@ -52,7 +66,7 @@
   --inspector-width-min: 280px;
   --inspector-width-max: 640px;
 
-  /* stacking order for the three elevated surfaces */
+  /* stacking order for the elevated surfaces */
   --z-menu: 20;
   --z-overlay: 30;
   --z-dialog: 40;
@@ -71,22 +85,35 @@
 
 /*
  * Dark theme: the same semantic names, overridden on the shell root.
- * Status color keeps a paired label/icon in components (never color
- * alone).
+ * Status color keeps a paired label/icon in components (never color alone).
  */
 [data-theme="dark"] {
+  color-scheme: dark;
+
   --color-canvas: #14161a;
   --color-surface: #1b1e24;
   --color-elevated: #22262d;
   --color-border: #333841;
+  --color-control-border: #707b8c;
   --color-text: #e4e7ec;
   --color-muted: #9aa1ac;
   --color-accent: #7ba0f0;
+  --color-accent-foreground: #14161a;
   --color-danger: #e2766c;
   --color-warning: #d8a53f;
   --color-success: #6fbf8a;
   --color-selection: #26314a;
   --color-focus: #7ba0f0;
+
+  --color-hover: rgba(228, 231, 236, 0.08);
+  --color-pressed: rgba(228, 231, 236, 0.14);
+  --color-warning-surface: #2a2315;
+  --color-danger-surface: #2e1a19;
+  --color-success-surface: #17261c;
+  --color-overlay: rgba(0, 0, 0, 0.65);
+  --color-disabled-text: #636b76;
+  --color-disabled-surface: #262a32;
+
   --elevation-menu: 0 2px 8px rgba(0, 0, 0, 0.5);
   --elevation-dialog: 0 8px 24px rgba(0, 0, 0, 0.6);
   --elevation-tooltip: 0 1px 4px rgba(0, 0, 0, 0.55);
@@ -97,5 +124,15 @@
     --motion-fast: 0ms;
     --motion-normal: 0ms;
     --motion-slow: 0ms;
+  }
+}
+
+@media (forced-colors: active) {
+  :root {
+    --color-focus: Highlight;
+    --color-control-border: ButtonBorder;
+    --color-border: ButtonBorder;
+    --color-disabled-text: GrayText;
+    --color-selection: Highlight;
   }
 }

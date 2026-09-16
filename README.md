@@ -100,8 +100,89 @@ windows (background turns survive UI disconnects); `apps/desktop/src-tauri`
 implements `SpawnOrAttach` discovering or launching the Core daemon; and
 `apps/desktop` runs the workbench with `TauriCoreTransport` and `applicationStore`
 managing real agents, threads, streaming turns, inline permission decisions,
-turn cancellation, and diagnostics. P1.4 Acceptance Journey (real third-party
-dual-ACP agent validation on clean OS profiles) is the next milestone.
+turn cancellation, and diagnostics. P1.4 delivers the full 8-step Acceptance Journey and Harness Binding v5 (ADR 0016):
+a single end-to-end integration test (`p14_acceptance_journey.rs`) validates the entire
+vertical stack against a live daemon process, physical named pipes / domain sockets,
+persistent SQLite, and mock ACP agents. It exercises agent configuration, thread
+creation, streaming prompt delivery, inline permission approval, cooperative turn
+cancellation, background turn continuity during UI detachment, abnormal exit with
+`Indeterminate` settlement, crash recovery forbidding automatic resend, and offline
+FTS5 search.
+
+P2 delivers Personal Identity and Memory: P2.1 (ADR 0017) introduces the long-term
+memory lifecycle (`memory.proposed`, `confirmed`, `rejected`, `superseded`, `forgotten`,
+`expired`), schema v6 persistence, fail-closed secret-shaped content rejection, and
+ranked FTS5 retrieval. P2.2 (ADR 0018) introduces identity documents, deterministic
+context snapshot assembly with token budgeting, and explainable context injection.
+Subsequent hardening slices establish:
+- ADR 0019: Deterministic Core entity ID generation and Desktop operation ID CSPRNG boundaries.
+- ADR 0020: Bounded timeline history pagination and journal-backed historical records.
+- ADR 0021: Epoch-scoped stream event deduplication and bounded replay ringbuffers.
+- ADR 0022: Multi-scope context trust boundaries (Global/Personal/Project/Thread) and token estimator versioning.
+- ADR 0023: SQLite FTS5 trigram hybrid retrieval and bounded O(K) heap candidate ranking for robust CJK/code search (Schema V8).
+- ADR 0024: Projection digest streaming bypass for MessageDelta with authoritative checkpointing upon turn settlement and automatic crash healing.
+
+## Component Acceptance Matrix
+
+| Component | Stack | Status | Verification & Gates |
+|---|---|---|---|
+| **Core Daemon & Domain** | Rust 2024 (`crates/altior-*`) | **Verified (Automated)** | `cargo test --workspace`, clippy `-D warnings`, fmt check passing 100% |
+| **Desktop Renderer** | Vite, React 19, TS (`apps/desktop`) | **Verified (Automated)** | `npm run gate`: typecheck, lint, format, 195 unit tests, WCAG contrast audit, visual regression |
+| **Packaged Shell** | Tauri v2, Rust 2021 (`src-tauri`) | **Verified (Dev / Test)** | `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml` (7 tests passed); `bundle.active=false` |
+| **Mock ACP Acceptance** | Pure Rust mock agents | **Verified (Automated)** | `p14_acceptance_journey.rs` passes 8/8 lifecycle steps |
+| **Real Third-Party ACP** | Live external agent CLIs | **Opt-in / Manual** | Requires local credentials; smoke gate reports `[SKIPPED]` when unconfigured |
+| **Multi-Device Sync** | Crypto / Relay / CRDT | **Spike (Pre-Production)** | Reference implementation; production sync remains disabled per ADR 0011/0012 |
+
+## Architecture & Rust Edition Alignment
+
+- **Workspace Crates**: Use **Rust Edition 2024** (`rust-version = "1.90"`). This applies to all domain, protocol, storage, runtime, acp, and ipc crates.
+- **Tauri Shell Exception**: `apps/desktop/src-tauri` uses **Rust Edition 2021** and is kept deliberately outside the root Cargo workspace (ADR 0008 §6). This keeps core repository gates fast and hermetic while decoupling the packaged UI shell from the backend runtime. It is independently tested via `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml`.
+
+## Supported Platforms & Build Prerequisites
+
+- **Supported Operating Systems**:
+  - Windows 10 / 11 (x64) with Microsoft Edge WebView2 (built-in)
+  - macOS 13+ (Apple Silicon and Intel x86_64)
+  - Linux x86_64 (glibc 2.35+; requires WebKitGTK 4.1)
+- **Toolchain Prerequisites**:
+  - Rust 1.90+ (`cargo`, `rustc`)
+  - Node.js v20+ / npm v10+
+  - Playwright Chromium (installed via `npx playwright install chromium`)
+
+## Runtime Discovery & Local Storage Architecture
+
+- **Core Discovery**: On launch, `altior-core` writes an atomic discovery file containing its IPC endpoint and a 32-byte hexadecimal launch token.
+  - Windows: `%LOCALAPPDATA%\Altior\ipc\core_discovery.json` (secured via per-user ACLs)
+  - Unix: `~/.local/share/altior/ipc/core_discovery.json` (secured with `0600` file permissions)
+- **Database & Vault**: SQLite database storing the append-only `domain_journal` and derived projections.
+  - Windows: `%LOCALAPPDATA%\Altior\data\altior.db`
+  - Unix: `~/.local/share/altior/data/altior.db`
+- **Diagnostics & Redaction**: Diagnostic logs are written with automatic redaction of API tokens, bearer keys, and sensitive environment variables before output.
+
+## Installation, Upgrade & Data Lifecycle Policy
+
+- **Clean Installation**: Run `npm --prefix apps/desktop run build` followed by `cargo build -p altior-core`. For packaged desktop testing, run `cargo tauri build` within `apps/desktop`.
+- **Schema Migration**: Migrations are strictly forward-only (`SCHEMA_V1` through `SCHEMA_V8`). Every migration preserves historical journal records and automatically upgrades projection tables and FTS indexes.
+- **Downgrade Invariant**: An older binary running against a newer database schema will fail cleanly with an explicit `UnsupportedNewerSchema` error; silent data downgrade or table deletion is strictly forbidden.
+- **Crash Recovery**: If the daemon terminates abruptly mid-turn, `Store::open` automatically detects the unfinalized projection state, replays the authoritative `domain_journal`, heals all projection tables, and restores digest consistency without data loss.
+- **Uninstallation**: Removing the application binary leaves the SQLite Personal Vault intact by default so user memories and history are preserved across reinstalls. To completely remove all data, delete the `Altior` data directory.
+
+## Quality Gates & Verification Runbook
+
+Run the complete, unified quality gate with a single command:
+```bash
+# On Windows (PowerShell):
+powershell -ExecutionPolicy Bypass -File scripts/quality-gate.ps1
+
+# On macOS / Linux:
+./scripts/quality-gate.sh
+```
+
+The gate automatically enforces:
+1. **Rust Workspace**: `cargo fmt`, `cargo clippy --all-targets --all-features -- -D warnings`, and `cargo test --workspace`.
+2. **Tauri Shell**: `cargo clippy` and `cargo test` on `apps/desktop/src-tauri/Cargo.toml`.
+3. **Desktop Frontend**: TypeScript typecheck, architectural linter, format check, Vitest unit suite, WCAG 2.2 color contrast audit, Playwright geometry and visual regression checks, and production bundle build.
+4. **Real ACP Opt-in**: Verifies whether `ALTIOR_ACP_SMOKE_AGENTS` is configured, executing live model tests if present or cleanly reporting `[SKIPPED]` without faking pass status.
 
 ## Design anchors
 

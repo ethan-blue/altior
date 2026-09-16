@@ -23,8 +23,22 @@
   cursor: pointer;
 }
 
+.railItem:hover:not(.railActive):not(:disabled) {
+  background: var(--color-hover);
+  color: var(--color-text);
+}
+
+.railItem:active:not(:disabled) {
+  background: var(--color-pressed);
+}
+
+.railItem:focus-visible {
+  outline: var(--focus-ring) solid var(--color-focus);
+  outline-offset: -2px;
+}
+
 .railItem:disabled {
-  opacity: 0.45;
+  color: var(--color-disabled-text);
   cursor: not-allowed;
 }
 
@@ -37,6 +51,12 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.railIcon {
+  flex-shrink: 0;
+  width: 20px;
+  height: 20px;
 }
 
 .threadsPane {
@@ -110,12 +130,15 @@
   cursor: pointer;
 }
 
-.threadRow:hover {
-  background: var(--color-selection);
+.threadRow:hover:not(.threadSelected) {
+  background: var(--color-hover);
 }
 
 .threadSelected {
   background: var(--color-selection);
+}
+
+.threadRow:focus-visible {
   outline: var(--focus-ring) solid var(--color-focus);
   outline-offset: calc(-1 * var(--focus-ring));
 }
@@ -367,7 +390,7 @@
   gap: var(--spacing-6);
   padding: var(--spacing-6) var(--spacing-8);
   border-radius: var(--border-radius);
-  background: rgba(148, 98, 0, 0.12);
+  background: var(--color-warning-surface);
   border: var(--divider-width) solid var(--color-warning);
   color: var(--color-warning);
   font-size: var(--font-size-ui);
@@ -460,11 +483,11 @@
 .modalOverlay {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.45);
+  background: var(--color-overlay);
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 1000;
+  z-index: var(--z-dialog);
 }
 
 .modalCard {
@@ -473,7 +496,7 @@
   background: var(--color-surface);
   border: var(--divider-width) solid var(--color-border);
   border-radius: var(--border-radius);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
+  box-shadow: var(--elevation-dialog);
   padding: var(--spacing-16);
   display: flex;
   flex-direction: column;
@@ -502,11 +525,16 @@
 .formInput {
   height: var(--control-height);
   padding: 0 var(--spacing-8);
-  border: var(--divider-width) solid var(--color-border);
+  border: var(--divider-width) solid var(--color-control-border);
   border-radius: var(--border-radius);
   background: var(--color-canvas);
   color: var(--color-text);
   font: var(--font-size-ui) / var(--line-height-compact) var(--font-ui);
+}
+
+.formInput:focus {
+  outline: var(--focus-ring) solid var(--color-focus);
+  outline-offset: -1px;
 }
 
 .secretNotice {
@@ -523,6 +551,29 @@
   margin-top: var(--spacing-8);
 }
 
+.modalActions button {
+  padding: var(--spacing-4) var(--spacing-12);
+  border-radius: var(--border-radius);
+  font: var(--font-size-ui) / var(--line-height-compact) var(--font-ui);
+  cursor: pointer;
+  border: 1px solid var(--color-border);
+  background: var(--color-surface);
+  color: var(--color-text);
+}
+
+.modalActions button[type="submit"] {
+  background: var(--color-accent);
+  color: var(--color-accent-foreground);
+  border-color: var(--color-accent);
+}
+
+.modalActions button:disabled {
+  background: var(--color-disabled-surface);
+  color: var(--color-disabled-text);
+  border-color: transparent;
+  cursor: not-allowed;
+}
+
 .testResultOk {
   color: var(--color-success);
   font-size: var(--font-size-ui);
@@ -531,4 +582,12 @@
 .testResultErr {
   color: var(--color-danger);
   font-size: var(--font-size-ui);
+}
+
+/* Empty thread-pane note (review A03): honest "nothing here" instead of
+   decorative demo rows. */
+.threadsEmpty {
+  margin: 8px 4px;
+  color: var(--color-muted);
+  font-size: var(--font-size-body);
 }

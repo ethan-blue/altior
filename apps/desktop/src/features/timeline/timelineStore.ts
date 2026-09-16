@@ -28,6 +28,12 @@ export interface PermissionRequest {
   /** The scope it would run in (path, command set, …). */
   readonly scope: string;
   readonly decision: PermissionDecision | null;
+  /**
+   * Decision-command flight status (A04): "submitting" while the command is
+   * in flight — buttons are disabled and no approval is announced; "failed"
+   * after a rejected command, keeping the row checkable.
+   */
+  readonly submission?: "submitting" | "failed" | null;
 }
 
 export interface TimelineRow {
@@ -62,6 +68,8 @@ export interface TimelineStore {
   finishStreaming(id: string): void;
   /** Records a provisional approval decision (ADR 0008 §5). */
   setPermissionDecision(id: string, decision: PermissionDecision): void;
+  /** Sets the decision-command flight status for a pending permission row. */
+  setPermissionSubmission(id: string, submission: "submitting" | "failed" | null): void;
   /** First unanswered permission row, for keyboard focus and a11y. */
   pendingPermission(): TimelineRow | null;
 }
@@ -84,12 +92,6 @@ export function createTimelineStore(
     rows: slots.map((slot) => slot.row),
     structureVersion,
   };
-  const notifyStructure = () => {
-    structureVersion += 1;
-    snapshot = { rows: slots.map((slot) => slot.row), structureVersion };
-    for (const listener of structureListeners) listener();
-  };
-
   const slotOf = (id: string): RowSlot | undefined => byId.get(id);
 
   return {
@@ -111,7 +113,12 @@ export function createTimelineStore(
       const slot: RowSlot = { row, listeners: new Set<() => void>() };
       slots.push(slot);
       byId.set(row.id, slot);
-      notifyStructure();
+      structureVersion += 1;
+      snapshot = {
+        rows: [...snapshot.rows, row],
+        structureVersion,
+      };
+      for (const listener of structureListeners) listener();
     },
     prependRows(rows) {
       const newSlots = rows.map((row) => ({
@@ -120,7 +127,12 @@ export function createTimelineStore(
       }));
       slots.unshift(...newSlots);
       for (const slot of newSlots) byId.set(slot.row.id, slot);
-      notifyStructure();
+      structureVersion += 1;
+      snapshot = {
+        rows: [...rows, ...snapshot.rows],
+        structureVersion,
+      };
+      for (const listener of structureListeners) listener();
     },
     appendDelta(id, text) {
       const slot = slotOf(id);
@@ -139,7 +151,16 @@ export function createTimelineStore(
       if (!slot?.row.permission) throw new Error(`row ${id} holds no permission request`);
       slot.row = {
         ...slot.row,
-        permission: { ...slot.row.permission, decision },
+        permission: { ...slot.row.permission, decision, submission: null },
+      };
+      for (const listener of slot.listeners) listener();
+    },
+    setPermissionSubmission(id, submission) {
+      const slot = slotOf(id);
+      if (!slot?.row.permission) return;
+      slot.row = {
+        ...slot.row,
+        permission: { ...slot.row.permission, submission },
       };
       for (const listener of slot.listeners) listener();
     },

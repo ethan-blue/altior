@@ -16,15 +16,17 @@ use ts_rs::TS;
 
 use altior_protocol::{
     AgentProfileDto, BoundedPayload, CancelTurnCommand, CapabilityId, CapabilitySet,
-    CapabilitySupport, CommandEnvelope, CommandKind, ConfigureAgentCommand, CoreGreeting,
-    CoreHello, CreateThreadCommand, DesktopHello, DiagnosticsCommand, EventBody, EventEnvelope,
-    GetHistoryCommand, HarnessBindingConfigDto, HarnessBindingDto, KnownEvent, LaunchToken,
-    ListThreadsCommand, NegotiatedHandshake, OpenThreadCommand, PermissionDto, ProductVersion,
-    ProtocolVersion, ProtocolVersionRange, RespondPermissionCommand, RetainedWindow,
-    RuntimeDiagnosticsDto, RuntimeStatusCommand, SearchThreadsCommand, Sequence, SnapshotEnvelope,
-    StartTurnCommand, TestHarnessBindingCommand, ThreadCursorDto, ThreadDto,
-    ThreadHistoryResponseDto, ThreadListResponseDto, ThreadSnapshotDto, ThreadSummaryDto,
-    TurnCursorDto, TurnDto,
+    CapabilitySupport, CommandEnvelope, CommandKind, ConfigureAgentCommand, ConfirmMemoryCommand,
+    CoreGreeting, CoreHello, CorrectMemoryCommand, CreateThreadCommand, DesktopHello,
+    DiagnosticsCommand, EventBody, EventEnvelope, ForgetMemoryCommand, GetHistoryCommand,
+    HarnessBindingConfigDto, HarnessBindingDto, HistoryCursorDto, HistoryEntryDto, KnownEvent,
+    LaunchToken, ListMemoriesCommand, ListThreadsCommand, MemoryCursorDto, MemoryListResponseDto,
+    MemoryRecordDto, NegotiatedHandshake, OpenThreadCommand, PermissionDto, ProductVersion,
+    ProposeMemoryCommand, ProtocolVersion, ProtocolVersionRange, RejectMemoryCommand,
+    RespondPermissionCommand, RetainedWindow, RuntimeDiagnosticsDto, RuntimeStatusCommand,
+    SearchThreadsCommand, Sequence, SnapshotEnvelope, StartTurnCommand, TestHarnessBindingCommand,
+    TestHarnessResponseDto, ThreadCursorDto, ThreadDto, ThreadHistoryResponseDto,
+    ThreadListResponseDto, ThreadSnapshotDto, ThreadSummaryDto, TurnCursorDto, TurnDto,
 };
 
 fn dto_export_dir() -> PathBuf {
@@ -36,6 +38,15 @@ fn dto_export_dir() -> PathBuf {
 
 fn export_all_types() {
     let cfg = ts_rs::Config::default();
+    ListMemoriesCommand::export_all(&cfg).expect("export ListMemoriesCommand");
+    ProposeMemoryCommand::export_all(&cfg).expect("export ProposeMemoryCommand");
+    ConfirmMemoryCommand::export_all(&cfg).expect("export ConfirmMemoryCommand");
+    RejectMemoryCommand::export_all(&cfg).expect("export RejectMemoryCommand");
+    CorrectMemoryCommand::export_all(&cfg).expect("export CorrectMemoryCommand");
+    ForgetMemoryCommand::export_all(&cfg).expect("export ForgetMemoryCommand");
+    MemoryCursorDto::export_all(&cfg).expect("export MemoryCursorDto");
+    MemoryRecordDto::export_all(&cfg).expect("export MemoryRecordDto");
+    MemoryListResponseDto::export_all(&cfg).expect("export MemoryListResponseDto");
     LaunchToken::export_all(&cfg).expect("export LaunchToken");
     BoundedPayload::export_all(&cfg).expect("export BoundedPayload");
     CapabilityId::export_all(&cfg).expect("export CapabilityId");
@@ -61,12 +72,15 @@ fn export_all_types() {
     AgentProfileDto::export_all(&cfg).expect("export AgentProfileDto");
     HarnessBindingConfigDto::export_all(&cfg).expect("export HarnessBindingConfigDto");
     HarnessBindingDto::export_all(&cfg).expect("export HarnessBindingDto");
+    TestHarnessResponseDto::export_all(&cfg).expect("export TestHarnessResponseDto");
     ThreadCursorDto::export_all(&cfg).expect("export ThreadCursorDto");
     TurnCursorDto::export_all(&cfg).expect("export TurnCursorDto");
     ThreadSummaryDto::export_all(&cfg).expect("export ThreadSummaryDto");
     ThreadSnapshotDto::export_all(&cfg).expect("export ThreadSnapshotDto");
     ThreadListResponseDto::export_all(&cfg).expect("export ThreadListResponseDto");
     ThreadHistoryResponseDto::export_all(&cfg).expect("export ThreadHistoryResponseDto");
+    HistoryEntryDto::export_all(&cfg).expect("export HistoryEntryDto");
+    HistoryCursorDto::export_all(&cfg).expect("export HistoryCursorDto");
     RuntimeDiagnosticsDto::export_all(&cfg).expect("export RuntimeDiagnosticsDto");
     KnownEvent::export_all(&cfg).expect("export KnownEvent");
     EventBody::export_all(&cfg).expect("export EventBody");

@@ -112,6 +112,8 @@ pub enum ProtocolError {
         /// The number of secret references.
         secret_refs_count: usize,
     },
+    /// An identifier parsing failure.
+    Id(altior_domain::IdParseError),
     /// A domain entity validation failure.
     Entity(altior_domain::EntityError),
     /// An envelope that could not be decoded or violates its contract.
@@ -191,6 +193,7 @@ impl fmt::Display for ProtocolError {
                 f,
                 "harness binding has {env_keys_count} env keys but {secret_refs_count} secret refs"
             ),
+            Self::Id(err) => write!(f, "{err}"),
             Self::Entity(err) => write!(f, "{err}"),
             Self::MalformedEnvelope { source } => write!(f, "malformed envelope: {source}"),
         }
@@ -201,9 +204,16 @@ impl std::error::Error for ProtocolError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             Self::MalformedEnvelope { source } => Some(source),
+            Self::Id(source) => Some(source),
             Self::Entity(source) => Some(source),
             _ => None,
         }
+    }
+}
+
+impl From<altior_domain::IdParseError> for ProtocolError {
+    fn from(err: altior_domain::IdParseError) -> Self {
+        Self::Id(err)
     }
 }
 

@@ -1,0 +1,244 @@
+.markdownContainer {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-8);
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: break-word;
+  color: var(--color-text);
+  font: var(--font-size-body) / var(--line-height-normal) var(--font-body);
+}
+
+.heading1 {
+  margin: var(--spacing-12) 0 var(--spacing-4) 0;
+  font-size: 1.25rem;
+  font-weight: 600;
+  color: var(--color-text);
+  border-bottom: 1px solid var(--color-border);
+  padding-bottom: var(--spacing-4);
+}
+
+.heading2 {
+  margin: var(--spacing-8) 0 var(--spacing-4) 0;
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.heading3 {
+  margin: var(--spacing-6) 0 var(--spacing-2) 0;
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.paragraph {
+  margin: 0;
+  line-height: var(--line-height-normal);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.inlineCode {
+  font-family: var(--font-code);
+  font-size: var(--font-size-code);
+  background: var(--color-canvas);
+  border: 1px solid var(--color-border);
+  padding: 1px 4px;
+  border-radius: var(--border-radius);
+  color: var(--color-text);
+}
+
+.codeBlock {
+  display: flex;
+  flex-direction: column;
+  margin: var(--spacing-4) 0;
+  border: 1px solid var(--color-border);
+  border-radius: var(--border-radius);
+  background: var(--color-canvas);
+  overflow: hidden;
+  max-width: 100%;
+}
+
+.codeHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: var(--spacing-2) var(--spacing-8);
+  background: var(--color-surface);
+  border-bottom: 1px solid var(--color-border);
+  font-size: 0.75rem;
+  color: var(--color-muted);
+}
+
+.codeLanguage {
+  text-transform: lowercase;
+  font-family: var(--font-code);
+  font-weight: 600;
+}
+
+.copyButton {
+  padding: 2px 8px;
+  border: 1px solid var(--color-control-border);
+  border-radius: var(--border-radius);
+  background: var(--color-surface);
+  color: var(--color-text);
+  font-size: 0.75rem;
+  cursor: pointer;
+  transition: background 0.1s ease;
+}
+
+.copyButton:hover {
+  background: var(--color-hover);
+}
+
+.codeContent {
+  margin: 0;
+  padding: var(--spacing-8);
+  overflow-x: auto;
+  font-family: var(--font-code);
+  font-size: var(--font-size-code);
+  line-height: var(--line-height-code);
+  color: var(--color-text);
+  white-space: pre;
+}
+
+.codeContent code {
+  font-family: inherit;
+  font-size: inherit;
+}
+
+.tableWrapper {
+  overflow-x: auto;
+  margin: var(--spacing-4) 0;
+  border: 1px solid var(--color-border);
+  border-radius: var(--border-radius);
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--font-size-ui);
+}
+
+.table th,
+.table td {
+  padding: var(--spacing-6) var(--spacing-8);
+  border: 1px solid var(--color-border);
+  text-align: left;
+}
+
+.table th {
+  background: var(--color-canvas);
+  font-weight: 600;
+}
+
+.table tr:nth-child(even) td {
+  background: var(--color-canvas);
+}
+
+.list {
+  margin: 0 0 0 var(--spacing-16);
+  padding: 0;
+  line-height: var(--line-height-normal);
+}
+
+.list li {
+  margin-bottom: var(--spacing-2);
+}
+
+.link {
+  color: var(--color-accent);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.link:hover {
+  filter: brightness(1.15);
+}
+
+.remoteImageNotice {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--spacing-4);
+  padding: var(--spacing-4) var(--spacing-8);
+  margin: var(--spacing-4) 0;
+  border: 1px dashed var(--color-border);
+  border-radius: var(--border-radius);
+  background: var(--color-canvas);
+  color: var(--color-muted);
+  font-size: 0.8rem;
+}
+
+.toolOutputContainer {
+  display: flex;
+  flex-direction: column;
+  margin: var(--spacing-4) 0;
+  border: 1px solid var(--color-border);
+  border-radius: var(--border-radius);
+  background: var(--color-canvas);
+  overflow: hidden;
+  max-width: 100%;
+}
+
+.toolHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: var(--spacing-4) var(--spacing-8);
+  background: var(--color-surface);
+  border-bottom: 1px solid var(--color-border);
+  font-size: 0.8rem;
+}
+
+.toolStatusBadge {
+  font-size: 0.75rem;
+  padding: 1px 6px;
+  border-radius: var(--border-radius);
+  font-weight: 500;
+}
+
+.statusCompleted {
+  background: var(--color-success-surface);
+  color: var(--color-success);
+  border: 1px solid var(--color-success);
+}
+
+.statusFailed {
+  background: var(--color-danger-surface);
+  color: var(--color-danger);
+  border: 1px solid var(--color-danger);
+}
+
+.statusRunning {
+  background: var(--color-warning-surface);
+  color: var(--color-warning);
+  border: 1px solid var(--color-warning);
+}
+
+.toolText {
+  margin: 0;
+  padding: var(--spacing-8);
+  font-family: var(--font-code);
+  font-size: var(--font-size-code);
+  line-height: var(--line-height-code);
+  white-space: pre-wrap;
+  word-break: break-all;
+  overflow-x: auto;
+}
+
+.expandToggleBtn {
+  align-self: flex-start;
+  margin: 0 var(--spacing-8) var(--spacing-8) var(--spacing-8);
+  padding: 2px 8px;
+  border: 1px solid var(--color-control-border);
+  border-radius: var(--border-radius);
+  background: var(--color-surface);
+  color: var(--color-accent);
+  font-size: 0.75rem;
+  cursor: pointer;
+}
+
+.expandToggleBtn:hover {
+  background: var(--color-hover);
+}

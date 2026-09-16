@@ -16,6 +16,7 @@ import {
   failureThread,
   hundredThousandRowThread,
   olderHistory,
+  standardThread,
 } from "../fixtures/timeline";
 import { InMemoryTransport } from "../ipc/inMemoryTransport";
 
@@ -32,10 +33,14 @@ function mountedRowIds(container: HTMLElement): string[] {
 describe("P0.4 evidence", () => {
   it("100,000 synthetic rows remain interactive", async () => {
     const { container } = render(
-      <App transport={new InMemoryTransport()} includeHugeThread timelineViewportHeight={600} />,
+      <App
+        transport={new InMemoryTransport({ includeHugeThread: true })}
+        fixtureTimelineRows={[hundredThousandRowThread(), failureThread]}
+        timelineViewportHeight={600}
+      />,
     );
 
-    fireEvent.click(screen.getByTestId(`thread-${hundredThousandRowThread().id}`));
+    fireEvent.click(await screen.findByTestId(`thread-${hundredThousandRowThread().id}`));
     await waitFor(() => {
       expect(scrollerOf(container).dataset.rowCount).toBe("100000");
     });
@@ -51,19 +56,23 @@ describe("P0.4 evidence", () => {
     scroller.focus();
     fireEvent.keyDown(scroller, { key: "ArrowDown" });
     await waitFor(() => {
-      expect(document.activeElement?.getAttribute("data-row-id")).toBe("big-0");
+      expect(document.activeElement?.getAttribute("data-row-id")).toBe("trn_big0000000000000");
     });
     fireEvent.keyDown(document.activeElement!, { key: "ArrowDown" });
     await waitFor(() => {
-      expect(document.activeElement?.getAttribute("data-row-id")).toBe("big-1");
+      expect(document.activeElement?.getAttribute("data-row-id")).toBe("trn_big0000000000001");
     });
   });
 
   it("focus survives row recycling across Home/End jumps", async () => {
     const { container } = render(
-      <App transport={new InMemoryTransport()} includeHugeThread timelineViewportHeight={600} />,
+      <App
+        transport={new InMemoryTransport({ includeHugeThread: true })}
+        fixtureTimelineRows={[hundredThousandRowThread(), failureThread]}
+        timelineViewportHeight={600}
+      />,
     );
-    fireEvent.click(screen.getByTestId(`thread-${hundredThousandRowThread().id}`));
+    fireEvent.click(await screen.findByTestId(`thread-${hundredThousandRowThread().id}`));
     await waitFor(() => {
       expect(scrollerOf(container).dataset.rowCount).toBe("100000");
     });
@@ -72,20 +81,20 @@ describe("P0.4 evidence", () => {
     scroller.focus();
     fireEvent.keyDown(scroller, { key: "ArrowDown" });
     await waitFor(() => {
-      expect(document.activeElement?.getAttribute("data-row-id")).toBe("big-0");
+      expect(document.activeElement?.getAttribute("data-row-id")).toBe("trn_big0000000000000");
     });
 
     // Jump to the end: big-0 unmounts.
     fireEvent.keyDown(document.activeElement!, { key: "End" });
     await waitFor(() => {
-      expect(document.activeElement?.getAttribute("data-row-id")).toBe("big-99999");
+      expect(document.activeElement?.getAttribute("data-row-id")).toBe("trn_big0000000099999");
     });
     expect(screen.queryByText("deterministic question 0")).toBeNull();
 
     // Jump home: big-0 remounts and retakes focus.
     fireEvent.keyDown(document.activeElement!, { key: "Home" });
     await waitFor(() => {
-      expect(document.activeElement?.getAttribute("data-row-id")).toBe("big-0");
+      expect(document.activeElement?.getAttribute("data-row-id")).toBe("trn_big0000000000000");
     });
   });
 
@@ -207,15 +216,19 @@ describe("P0.4 evidence", () => {
       expect(scroller.scrollTop).toBe(1200);
     });
     expect(seenFirst.at(-1)).toBe("p-50");
-    expect(store.getSnapshot().rows[0]?.id).toBe("old-10");
+    expect(store.getSnapshot().rows[0]?.id).toBe("trn_old0000000000010");
   });
 
   it("thread reopen restores the remembered scroll anchor", async () => {
     const huge = hundredThousandRowThread().id;
     const { container } = render(
-      <App transport={new InMemoryTransport()} includeHugeThread timelineViewportHeight={600} />,
+      <App
+        transport={new InMemoryTransport({ includeHugeThread: true })}
+        fixtureTimelineRows={[hundredThousandRowThread(), failureThread]}
+        timelineViewportHeight={600}
+      />,
     );
-    fireEvent.click(screen.getByTestId(`thread-${huge}`));
+    fireEvent.click(await screen.findByTestId(`thread-${huge}`));
     await waitFor(() => {
       expect(scrollerOf(container).dataset.rowCount).toBe("100000");
     });
@@ -228,11 +241,11 @@ describe("P0.4 evidence", () => {
     });
 
     // Navigate away and back.
-    fireEvent.click(screen.getByTestId(`thread-${failureThread.id}`));
+    fireEvent.click(await screen.findByTestId(`thread-${failureThread.id}`));
     await waitFor(() => {
       expect(scrollerOf(container).dataset.rowCount).toBe("4");
     });
-    fireEvent.click(screen.getByTestId(`thread-${huge}`));
+    fireEvent.click(await screen.findByTestId(`thread-${huge}`));
     await waitFor(() => {
       expect(scrollerOf(container).dataset.rowCount).toBe("100000");
     });
@@ -245,8 +258,10 @@ describe("P0.4 evidence", () => {
   });
 
   it("an inline approval records the decision and announces it", async () => {
-    render(<App transport={new InMemoryTransport()} />);
-    fireEvent.click(screen.getByTestId(`thread-${approvalThread.id}`));
+    render(
+      <App transport={new InMemoryTransport()} fixtureTimelineRows={[approvalThread]} />,
+    );
+    fireEvent.click(await screen.findByTestId(`thread-${approvalThread.id}`));
 
     const permissionRow = document.querySelector("[data-row-kind='permission']");
     expect(permissionRow).not.toBeNull();
@@ -264,8 +279,10 @@ describe("P0.4 evidence", () => {
   });
 
   it("keyboard shortcuts decide the approval from the focused row", async () => {
-    render(<App transport={new InMemoryTransport()} />);
-    fireEvent.click(screen.getByTestId(`thread-${approvalThread.id}`));
+    render(
+      <App transport={new InMemoryTransport()} fixtureTimelineRows={[approvalThread]} />,
+    );
+    fireEvent.click(await screen.findByTestId(`thread-${approvalThread.id}`));
 
     const row = document.querySelector<HTMLElement>("[data-row-kind='permission']");
     row?.focus();
@@ -281,7 +298,7 @@ describe("P0.4 evidence", () => {
 
   it("inspector resizing is keyboard-operable and clamped to the token range", async () => {
     render(<App transport={new InMemoryTransport()} />);
-    const handle = screen.getByTestId("inspector-resize");
+    const handle = await screen.findByTestId("inspector-resize");
     expect(handle).toHaveAttribute("aria-valuenow", "360");
 
     handle.focus();
@@ -300,8 +317,11 @@ describe("P0.4 evidence", () => {
     });
   });
 
-  it("unknown events render as preserved, inspectable rows", () => {
-    render(<App transport={new InMemoryTransport()} />);
+  it("unknown events render as preserved, inspectable rows", async () => {
+    render(
+      <App transport={new InMemoryTransport()} fixtureTimelineRows={[standardThread]} />,
+    );
+    await screen.findByRole("heading", { level: 1, name: /Contract fixture walkthrough/ });
     const unknown = document.querySelector("[data-row-kind='unknown']");
     expect(unknown?.textContent).toContain("acp.update.plan");
     expect(unknown?.textContent).toContain("preserved verbatim");

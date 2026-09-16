@@ -21,6 +21,7 @@ pub mod context;
 pub mod operations;
 pub mod ownership;
 pub mod runtime;
+pub mod secrets;
 pub mod supervision;
 
 pub use application::{
@@ -34,3 +35,4 @@ pub use context::{
     AssembleParams, AssembledContext, AssemblerError, ContextBudgetConfig,
     DEFAULT_IDENTITY_LIMIT_TOKENS, DEFAULT_MEMORY_LIMIT_TOKENS, assemble_context, estimate_tokens,
 };
+pub use secrets::{OsSecretStore, SecretStoreError, canonical_target_name};

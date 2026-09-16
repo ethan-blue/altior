@@ -12,8 +12,11 @@ import type { GetContextSnapshotCommand } from "./dto/GetContextSnapshotCommand"
 import type { GetHistoryCommand } from "./dto/GetHistoryCommand";
 import type { HarnessBindingConfigDto } from "./dto/HarnessBindingConfigDto";
 import type { HarnessBindingDto } from "./dto/HarnessBindingDto";
+import type { HistoryCursorDto } from "./dto/HistoryCursorDto";
+import type { HistoryEntryDto } from "./dto/HistoryEntryDto";
 import type { IdentityDocumentDto } from "./dto/IdentityDocumentDto";
 import type { ListIdentityDocumentsCommand } from "./dto/ListIdentityDocumentsCommand";
+import type { ListThreadsCommand } from "./dto/ListThreadsCommand";
 import type { NegotiatedHandshake } from "./dto/NegotiatedHandshake";
 import type { OpenThreadCommand } from "./dto/OpenThreadCommand";
 import type { PermissionDto } from "./dto/PermissionDto";
@@ -30,7 +33,16 @@ import type { ThreadListResponseDto } from "./dto/ThreadListResponseDto";
 import type { ThreadSnapshotDto } from "./dto/ThreadSnapshotDto";
 import type { ThreadSummaryDto } from "./dto/ThreadSummaryDto";
 import type { TurnDto } from "./dto/TurnDto";
-import { ConnectionClosedError } from "./errors";
+import type { ListMemoriesCommand } from "./dto/ListMemoriesCommand";
+import type { ProposeMemoryCommand } from "./dto/ProposeMemoryCommand";
+import type { ConfirmMemoryCommand } from "./dto/ConfirmMemoryCommand";
+import type { RejectMemoryCommand } from "./dto/RejectMemoryCommand";
+import type { CorrectMemoryCommand } from "./dto/CorrectMemoryCommand";
+import type { ForgetMemoryCommand } from "./dto/ForgetMemoryCommand";
+import type { MemoryRecordDto } from "./dto/MemoryRecordDto";
+import type { MemoryListResponseDto } from "./dto/MemoryListResponseDto";
+import { validateCommandEnvelope } from "./commandContract";
+import { ConnectionClosedError, InvalidCommandError } from "./errors";
 import { eventFixtures, negotiatedFixture } from "./fixtures";
 import {
   allThreads,
@@ -62,11 +74,13 @@ export interface InMemoryTransportOptions {
   readonly initialIdentityDocuments?: readonly IdentityDocumentDto[];
   /** Initial context snapshots fixtures. */
   readonly initialContextSnapshots?: readonly ContextSnapshotDto[];
+  /** Initial memory fixtures. */
+  readonly initialMemories?: readonly MemoryRecordDto[];
 }
 
 const DEFAULT_AGENTS_DTO: AgentProfileDto[] = [
   {
-    id: "agent-alpha",
+    id: "agp_fixture000000001",
     display_name: "alpha (ACP)",
     preferred_harness: "acp",
     memory_mode: "session",
@@ -74,7 +88,7 @@ const DEFAULT_AGENTS_DTO: AgentProfileDto[] = [
     updated_at: 1700000000000,
   },
   {
-    id: "agent-beta",
+    id: "agp_fixture000000002",
     display_name: "beta (ACP)",
     preferred_harness: "acp",
     memory_mode: "session",
@@ -85,8 +99,8 @@ const DEFAULT_AGENTS_DTO: AgentProfileDto[] = [
 
 const DEFAULT_BINDINGS_DTO: HarnessBindingDto[] = [
   {
-    id: "bin_alpha_01",
-    agent_profile_id: "agent-alpha",
+    id: "hsb_fixture000000001",
+    agent_profile_id: "agp_fixture000000001",
     program: "/usr/local/bin/acp-alpha",
     args: ["--mode", "server"],
     env_keys: ["ANTHROPIC_API_KEY"],
@@ -95,8 +109,8 @@ const DEFAULT_BINDINGS_DTO: HarnessBindingDto[] = [
     created_at: 1700000000000,
   },
   {
-    id: "bin_beta_01",
-    agent_profile_id: "agent-beta",
+    id: "hsb_fixture000000002",
+    agent_profile_id: "agp_fixture000000002",
     program: "/usr/local/bin/acp-beta",
     args: ["--mode", "server"],
     env_keys: ["ANTHROPIC_API_KEY"],
@@ -113,6 +127,15 @@ const DEFAULT_BINDINGS_DTO: HarnessBindingDto[] = [
  * commands execute the real protocol command contracts (no pseudo-actions),
  * and snapshots / streaming events are emitted accurately.
  */
+function isSecretShaped(text: string): boolean {
+  if (/sk-[a-zA-Z0-9_\-]{16,}/.test(text)) return true;
+  if (/AKIA[0-9A-Z]{16}/.test(text)) return true;
+  if (/-----BEGIN [A-Z ]*PRIVATE KEY-----/.test(text)) return true;
+  if (/gh[pousr]_[a-zA-Z0-9]{20,}/.test(text)) return true;
+  if (/(?:password|token|secret|api_key|apikey)\s*[:=]\s*["']?[^\s"';&]{8,}/i.test(text)) return true;
+  return false;
+}
+
 export class InMemoryTransport implements CoreTransport {
   readonly id = "in-memory";
   readonly #negotiated: NegotiatedHandshake;
@@ -122,15 +145,15 @@ export class InMemoryTransport implements CoreTransport {
   #status: TransportStatus;
   #commandHandler?: (command: CommandEnvelope) => Promise<unknown> | unknown;
   #nextSeq: number;
-  #threadSeq = 0;
-  #bindingSeq = 0;
   readonly #autoStreamReplies: boolean;
+  #mintSeq = 100;
 
   #threadFixtures: ThreadFixture[];
   #agents: AgentProfileDto[];
   #bindings = new Map<string, HarnessBindingDto>();
   #identityDocs: IdentityDocumentDto[] = [];
   #contextSnapshots = new Map<string, ContextSnapshotDto>();
+  #memories: MemoryRecordDto[] = [];
 
   constructor(options: InMemoryTransportOptions = {}) {
     this.#negotiated = options.negotiated ?? negotiatedFixture;
@@ -163,6 +186,51 @@ export class InMemoryTransport implements CoreTransport {
           this.#contextSnapshots.set(snap.turn_id, structuredClone(snap));
         }
       }
+    } else {
+      const defSnap1: ContextSnapshotDto = {
+        turn_id: "trn_p22store0000000000001",
+        thread_id: "thr_p22store0000000000000001",
+        memory_mode: "long_term",
+        created_at: Date.now(),
+        passthrough: false,
+        budget: {
+          identity_limit_tokens: 1024,
+          memory_limit_tokens: 2048,
+          prompt_tokens: 120,
+          identity_tokens: 250,
+          memory_tokens: 680,
+          total_tokens: 1050,
+        },
+        identity: [
+          {
+            document_id: "idd_fixture000000001",
+            kind: "about",
+            tokens: 250,
+          },
+        ],
+        memories: [
+          {
+            memory_id: "mem_fixture000000001",
+            kind: "preference",
+            scope_kind: "project",
+            scope_target: null,
+            confidence: 95,
+            explicit: true,
+            tokens: 680,
+            score: 0.95,
+            why_selected: "matched terms: rust, context, budget",
+            provenance_thread_id: "thr_p22store0000000000000001",
+            provenance_turn_id: "trn_p22store0000000000001",
+          },
+        ],
+        dropped: [],
+        degraded: null,
+        rendered_prompt: null,
+      };
+      this.#contextSnapshots.set(defSnap1.turn_id, defSnap1);
+    }
+    if (options.initialMemories) {
+      this.#memories = options.initialMemories.map((m) => structuredClone(m));
     }
   }
 
@@ -174,6 +242,16 @@ export class InMemoryTransport implements CoreTransport {
   /** Active identity documents in memory. */
   get identityDocuments(): readonly IdentityDocumentDto[] {
     return this.#identityDocs;
+  }
+
+  /** Active persistent memories in memory. */
+  get memories(): readonly MemoryRecordDto[] {
+    return this.#memories;
+  }
+
+  /** Sets memory fixtures in memory. */
+  setMemories(memories: readonly MemoryRecordDto[]): void {
+    this.#memories = memories.map((m) => structuredClone(m));
   }
 
   /** Commands sent through `send` or `command`, in dispatch order. */
@@ -199,6 +277,16 @@ export class InMemoryTransport implements CoreTransport {
   /** Active threads in memory. */
   get threadFixtures(): readonly ThreadFixture[] {
     return this.#threadFixtures;
+  }
+
+  /**
+   * Mints a deterministic, contract-valid entity identifier (ADR 0019).
+   * Bodies derive from a per-instance counter inside the `[0-9a-z]` body
+   * rules; the range starts above the checked-in fixture ids.
+   */
+  #mintId(prefix: "thr" | "trn" | "agp" | "hsb" | "evt" | "idd" | "mem"): string {
+    this.#mintSeq += 1;
+    return `${prefix}_minted${String(this.#mintSeq).padStart(10, "0")}`;
   }
 
   status(): TransportStatus {
@@ -229,12 +317,22 @@ export class InMemoryTransport implements CoreTransport {
     if (this.#status === "closed") {
       throw new ConnectionClosedError();
     }
+    // A01: the fixture transport enforces the same envelope contract as
+    // real Core serde — a command production would reject never executes.
+    const rejection = validateCommandEnvelope(envelope);
+    if (rejection !== null) {
+      throw new InvalidCommandError(`Command rejected by contract validation: ${rejection}`, envelope);
+    }
     const cloned = structuredClone(envelope);
     this.#sent.push(cloned);
 
     if (this.#commandHandler) {
       const result = await this.#commandHandler(cloned);
-      return result as T;
+      // A handler that answers `undefined` defers to the built-in protocol
+      // handling, so tests can override one command and keep the rest.
+      if (result !== undefined) {
+        return result as T;
+      }
     }
 
     // Default built-in handling for core protocol commands
@@ -271,7 +369,7 @@ export class InMemoryTransport implements CoreTransport {
 
       const replayedHeader: EventEnvelope = {
         protocol_version: handshake.selected_version,
-        event_id: `evt_replay_${Date.now()}_${from}`,
+        event_id: this.#mintId("evt"),
         operation_id: null,
         thread_id: null,
         turn_id: null,
@@ -293,7 +391,7 @@ export class InMemoryTransport implements CoreTransport {
 
     const readyEvent: EventEnvelope = {
       protocol_version: handshake.selected_version,
-      event_id: `evt_ready_${Date.now()}`,
+      event_id: this.#mintId("evt"),
       operation_id: null,
       thread_id: null,
       turn_id: null,
@@ -332,7 +430,7 @@ export class InMemoryTransport implements CoreTransport {
   emit(body: EventBody, overrides?: Partial<EventEnvelope>): EventEnvelope {
     const event: EventEnvelope = {
       protocol_version: overrides?.protocol_version ?? this.#negotiated.selected_version,
-      event_id: overrides?.event_id ?? `evt_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+      event_id: overrides?.event_id ?? this.#mintId("evt"),
       operation_id: overrides?.operation_id ?? null,
       thread_id: overrides?.thread_id ?? null,
       turn_id: overrides?.turn_id ?? null,
@@ -351,7 +449,7 @@ export class InMemoryTransport implements CoreTransport {
         this.#agents[0];
       const thread: ThreadDto = {
         id: fixture.id,
-        agent_profile_id: matchingAgent?.id ?? "agent-alpha",
+        agent_profile_id: matchingAgent?.id ?? "agp_fixture000000001",
         title: fixture.title,
         state: fixture.pinned ? "pinned" : "open",
         project_id: null,
@@ -359,10 +457,13 @@ export class InMemoryTransport implements CoreTransport {
         updated_at: 1700000000000,
       };
 
+      // Deterministic turn identities derived from the owning thread body,
+      // staying inside the trn_ body rules (ADR 0019).
+      const threadBody = fixture.id.slice("thr_".length);
       const lastTurn: TurnDto | null =
         fixture.rows.length > 0
           ? {
-              id: `trn_${fixture.id}_last`,
+              id: `trn_${threadBody}ls`,
               thread_id: fixture.id,
               state: fixture.status === "running" ? "active" : "completed",
               delivery_state: "confirmed",
@@ -375,7 +476,7 @@ export class InMemoryTransport implements CoreTransport {
       const activeTurn: TurnDto | null =
         fixture.status === "running"
           ? {
-              id: `trn_${fixture.id}_active`,
+              id: `trn_${threadBody}ac`,
               thread_id: fixture.id,
               state: "active",
               delivery_state: "confirmed",
@@ -401,16 +502,30 @@ export class InMemoryTransport implements CoreTransport {
         return { status: "ok", timestamp: Date.now() };
 
       case "list_threads": {
+        // Bounded pagination over the fixture summaries, mirroring the real
+        // Core handler: `limit` rows after `cursor.thread_id`.
+        const payload = command.payload as ListThreadsCommand | null;
+        const limit = payload?.limit ?? 20;
         const summaries = this.#getThreadSummaries();
+        let start = 0;
+        const cursor = payload?.cursor;
+        if (cursor?.thread_id) {
+          const anchor = summaries.findIndex((s) => s.thread.id === cursor.thread_id);
+          if (anchor >= 0) {
+            start = anchor + 1;
+          }
+        }
+        const page = summaries.slice(start, start + limit);
         const response: ThreadListResponseDto = {
-          threads: summaries,
-          next_cursor: summaries.length > 0
-            ? {
-                updated_at: summaries[summaries.length - 1]!.thread.updated_at,
-                thread_id: summaries[summaries.length - 1]!.thread.id,
-              }
-            : null,
-          has_more: false,
+          threads: page,
+          next_cursor:
+            page.length > 0
+              ? {
+                  updated_at: page[page.length - 1]!.thread.updated_at,
+                  thread_id: page[page.length - 1]!.thread.id,
+                }
+              : null,
+          has_more: start + limit < summaries.length,
         };
         const snapshot: SnapshotEnvelope = {
           protocol_version: version,
@@ -452,10 +567,10 @@ export class InMemoryTransport implements CoreTransport {
 
       case "open_thread": {
         const payload = command.payload as OpenThreadCommand | null;
-        const threadId = payload?.thread_id ?? this.#threadFixtures[0]?.id ?? "thread-1";
+        const threadId = payload?.thread_id ?? this.#threadFixtures[0]?.id;
         const fixture =
-          this.#threadFixtures.find((t) => t.id === threadId) ??
-          allThreads(true).find((t) => t.id === threadId) ??
+          (threadId ? this.#threadFixtures.find((t) => t.id === threadId) : undefined) ??
+          (threadId ? allThreads(true).find((t) => t.id === threadId) : undefined) ??
           this.#threadFixtures[0];
 
         const matchingAgent =
@@ -463,8 +578,8 @@ export class InMemoryTransport implements CoreTransport {
           this.#agents[0];
 
         const threadDto: ThreadDto = {
-          id: fixture?.id ?? threadId,
-          agent_profile_id: matchingAgent?.id ?? "agent-alpha",
+          id: fixture?.id ?? threadId!,
+          agent_profile_id: matchingAgent?.id ?? "agp_fixture000000001",
           title: fixture?.title ?? "Conversation",
           state: fixture?.pinned ? "pinned" : "open",
           project_id: null,
@@ -486,11 +601,12 @@ export class InMemoryTransport implements CoreTransport {
             ended_at: BigInt(1700000000000 + idx * 1000 + 500),
           }));
 
+        const threadBody = threadDto.id.slice("thr_".length);
         const permissions: PermissionDto[] = (fixture?.rows ?? [])
           .filter((r) => r.kind === "permission")
           .map((r) => ({
             event_id: r.id,
-            turn_id: `trn_${threadDto.id}`,
+            turn_id: `trn_${threadBody}pe`,
             thread_id: threadDto.id,
             kind: "execute",
             description: r.text,
@@ -522,7 +638,9 @@ export class InMemoryTransport implements CoreTransport {
         const fixture =
           this.#threadFixtures.find((t) => t.id === threadId) ??
           allThreads(true).find((t) => t.id === threadId);
-        const turns: TurnDto[] = (fixture?.rows ?? [])
+        const rows = fixture?.rows ?? [];
+
+        const turns: TurnDto[] = rows
           .filter((r) => r.kind === "user-message" || r.kind === "assistant-message")
           .map((r, idx) => ({
             id: r.id,
@@ -534,11 +652,78 @@ export class InMemoryTransport implements CoreTransport {
             ended_at: BigInt(1700000000000 + idx * 1000 + 500),
           }));
 
+        // Project journal entries (ADR 0020, review A05)
+        const allEntries: HistoryEntryDto[] = rows.map((r, idx) => {
+          const seq = idx + 1;
+          const occurred_at = 1700000000000 + idx * 1000;
+          const turn_id = r.id.startsWith("trn_")
+            ? r.id
+            : `trn_hist${String(seq).padStart(12, "0")}`;
+
+          if (r.kind === "user-message") {
+            return {
+              entry_kind: "user_message",
+              event_id: `evt_user${String(seq).padStart(12, "0")}`,
+              turn_id,
+              seq,
+              text: r.text,
+              occurred_at,
+            };
+          }
+          if (r.kind === "permission") {
+            return {
+              entry_kind: "permission",
+              event_id: r.id.startsWith("evt_") ? r.id : `evt_perm${String(seq).padStart(12, "0")}`,
+              turn_id,
+              seq,
+              permission_kind: r.permission?.scope ?? "execute",
+              description: r.text,
+              decision: r.permission?.decision ?? "pending",
+              occurred_at,
+            };
+          }
+          if (r.kind === "unknown") {
+            return {
+              entry_kind: "unknown",
+              event_id: `evt_unkn${String(seq).padStart(12, "0")}`,
+              seq,
+              kind: r.text.split(":")[0]?.trim() || "unknown.fact",
+              diagnostic: r.text,
+              occurred_at,
+            };
+          }
+          return {
+            entry_kind: "assistant_delta",
+            event_id: `evt_asst${String(seq).padStart(12, "0")}`,
+            turn_id,
+            seq,
+            text: r.text,
+            occurred_at,
+          };
+        });
+
+        const limit = Math.max(1, Math.min(payload?.limit ?? 50, 100));
+        const beforeSeq = payload?.before_seq ?? null;
+
+        const candidateEntries = beforeSeq != null
+          ? allEntries.filter((e) => e.seq < beforeSeq)
+          : allEntries;
+
+        const pagedEntries = candidateEntries.slice(-limit);
+        const hasOlder = candidateEntries.length > pagedEntries.length;
+        const nextSeqCursor: HistoryCursorDto | null = hasOlder && pagedEntries.length > 0
+          ? { seq: pagedEntries[0]!.seq }
+          : null;
+        const highWaterSeq = allEntries.length > 0 ? allEntries[allEntries.length - 1]!.seq : null;
+
         const response: ThreadHistoryResponseDto = {
           thread_id: threadId,
           turns,
           next_cursor: null,
-          has_more: false,
+          has_more: hasOlder,
+          entries: pagedEntries,
+          next_seq_cursor: nextSeqCursor,
+          high_water_seq: highWaterSeq,
         };
 
         const snapshot: SnapshotEnvelope = {
@@ -553,7 +738,7 @@ export class InMemoryTransport implements CoreTransport {
 
       case "create_thread": {
         const payload = command.payload as CreateThreadCommand | null;
-        const newId = `thread-${++this.#threadSeq}_${Date.now()}`;
+        const newId = this.#mintId("thr");
         const agentName =
           this.#agents.find((a) => a.id === payload?.agent_profile_id)?.display_name ??
           payload?.agent_profile_id ??
@@ -571,7 +756,7 @@ export class InMemoryTransport implements CoreTransport {
 
         const newThreadDto: ThreadDto = {
           id: newId,
-          agent_profile_id: payload?.agent_profile_id ?? this.#agents[0]?.id ?? "agent-alpha",
+          agent_profile_id: payload?.agent_profile_id ?? this.#agents[0]?.id ?? "agp_fixture000000001",
           title: newFixture.title,
           state: "open",
           project_id: payload?.project_id ?? null,
@@ -582,10 +767,11 @@ export class InMemoryTransport implements CoreTransport {
       }
 
       case "configure_agent": {
+        // Mirrors real Core (ADR 0019): a null agent_profile_id asks Core
+        // to mint the identity, and the response carries the configured
+        // profile and binding ids back to the client.
         const payload = command.payload as ConfigureAgentCommand | null;
-        const agentId =
-          payload?.agent_profile_id ??
-          `agent-${(payload?.display_name ?? "agent").toLowerCase().replace(/[^a-z0-9]+/g, "-")}-${Date.now().toString(36)}`;
+        const agentId = payload?.agent_profile_id ?? this.#mintId("agp");
 
         const profile: AgentProfileDto = {
           id: agentId,
@@ -603,13 +789,11 @@ export class InMemoryTransport implements CoreTransport {
           this.#agents.push(profile);
         }
 
-        let warning: string | null = null;
-        let bindingDto: HarnessBindingDto | null = null;
+        let bindingId: string | null = null;
         if (payload?.binding) {
           const bindingConfig: HarnessBindingConfigDto = payload.binding;
-          const bindingId =
-            bindingConfig.harness_binding_id ?? `bin_${++this.#bindingSeq}_${Date.now().toString(36)}`;
-          bindingDto = {
+          bindingId = bindingConfig.harness_binding_id ?? this.#mintId("hsb");
+          const bindingDto: HarnessBindingDto = {
             id: bindingId,
             agent_profile_id: bindingConfig.agent_profile_id ?? agentId,
             program: bindingConfig.program,
@@ -620,11 +804,12 @@ export class InMemoryTransport implements CoreTransport {
             created_at: Date.now(),
           };
           this.#bindings.set(bindingId, bindingDto);
-        } else {
-          warning = "Legacy configuration without harness binding";
         }
 
-        return { ok: true, profile, binding: bindingDto, warning };
+        return {
+          agent_profile_id: agentId,
+          harness_binding_id: bindingId,
+        };
       }
 
       case "test_harness_binding": {
@@ -632,17 +817,22 @@ export class InMemoryTransport implements CoreTransport {
         if (!payload?.program && !payload?.harness_binding_id) {
           throw new Error("Missing required harness binding program executable");
         }
+        const probedBindingId = payload?.harness_binding_id ?? this.#mintId("hsb");
         return {
           ok: true,
+          capabilities: {
+            "session.update": "supported",
+            "thread.streaming": "supported",
+          },
           diagnostics: null,
-          probed_binding_id: payload?.harness_binding_id ?? null,
+          probed_binding_id: probedBindingId,
         };
       }
 
       case "start_turn": {
         const payload = command.payload as StartTurnCommand | null;
         const threadId = payload?.thread_id ?? "";
-        const turnId = payload?.turn_id ?? `turn-${Date.now()}`;
+        const turnId = payload?.turn_id ?? this.#mintId("trn");
 
         if (this.#autoStreamReplies) {
           this.emit(
@@ -665,7 +855,7 @@ export class InMemoryTransport implements CoreTransport {
           });
         }
 
-        return { admission: "admitted" };
+        return { admission: "admitted", turn_id: turnId };
       }
 
       case "respond_permission": {
@@ -702,7 +892,7 @@ export class InMemoryTransport implements CoreTransport {
       case "diagnostics": {
         const payload = command.payload as DiagnosticsCommand | null;
         const diagDto: RuntimeDiagnosticsDto = {
-          instance_id: "core-mock-instance",
+          instance_id: "cor_fixture000000001",
           status: "ready",
           active_threads: this.#threadFixtures.length,
           active_turns: 0,
@@ -720,7 +910,7 @@ export class InMemoryTransport implements CoreTransport {
 
       case "request_snapshot": {
         const diagDto: RuntimeDiagnosticsDto = {
-          instance_id: "core-mock-instance",
+          instance_id: "cor_fixture000000001",
           status: "ready",
           active_threads: this.#threadFixtures.length,
           active_turns: 0,
@@ -749,8 +939,8 @@ export class InMemoryTransport implements CoreTransport {
           }
         }
         const fallbackSnap: ContextSnapshotDto = {
-          turn_id: turnId ?? "trn_default",
-          thread_id: threadId ?? "thread-1",
+          turn_id: turnId ?? "trn_fixture000000002",
+          thread_id: threadId ?? "thr_fixture000000001",
           memory_mode: "long_term",
           created_at: Date.now(),
           passthrough: false,
@@ -764,14 +954,14 @@ export class InMemoryTransport implements CoreTransport {
           },
           identity: [
             {
-              document_id: "idd_user_profile",
+              document_id: "idd_fixture000000001",
               kind: "about",
               tokens: 250,
             },
           ],
           memories: [
             {
-              memory_id: "mem_pref_testing",
+              memory_id: "mem_fixture000000001",
               kind: "preference",
               scope_kind: "project",
               scope_target: null,
@@ -780,8 +970,8 @@ export class InMemoryTransport implements CoreTransport {
               tokens: 180,
               score: 0.92,
               why_selected: 'matched terms: ["test", "vitest"], bm25: 2.140, total: 0.9200',
-              provenance_thread_id: "thread-old",
-              provenance_turn_id: "turn-42",
+              provenance_thread_id: "thr_fixture000000003",
+              provenance_turn_id: "trn_fixture000000004",
             },
           ],
           dropped: [
@@ -806,7 +996,7 @@ export class InMemoryTransport implements CoreTransport {
 
       case "put_identity_document": {
         const payload = command.payload as PutIdentityDocumentCommand | null;
-        const docId = payload?.document_id ?? `idd_${Date.now().toString(36)}`;
+        const docId = payload?.document_id ?? this.#mintId("idd");
         const now = Date.now();
         const doc: IdentityDocumentDto = {
           document_id: docId,
@@ -825,7 +1015,7 @@ export class InMemoryTransport implements CoreTransport {
         return structuredClone(doc);
       }
 
-      case "delete_identity_document": {
+              case "delete_identity_document": {
         const payload = command.payload as DeleteIdentityDocumentCommand | null;
         if (payload?.document_id) {
           this.#identityDocs = this.#identityDocs.filter(
@@ -833,6 +1023,154 @@ export class InMemoryTransport implements CoreTransport {
           );
         }
         return { ok: true };
+      }
+
+      case "list_memories": {
+        const payload = command.payload as ListMemoriesCommand | null;
+        const limit = payload?.limit ?? 50;
+        let filtered = [...this.#memories];
+        if (payload?.scope_kind) {
+          filtered = filtered.filter((m) => m.scope_kind === payload.scope_kind);
+          if (payload.scope_kind !== "global" && payload.scope_target) {
+            filtered = filtered.filter((m) => m.scope_target === payload.scope_target);
+          }
+        }
+        if (payload?.state) {
+          filtered = filtered.filter((m) => m.state === payload.state);
+        }
+        filtered.sort((a, b) => b.updated_at - a.updated_at || b.memory_id.localeCompare(a.memory_id));
+        let start = 0;
+        if (payload?.cursor) {
+          const cur = payload.cursor;
+          const anchor = filtered.findIndex(
+            (m) => m.updated_at === cur.updated_at && m.memory_id === cur.memory_id,
+          );
+          if (anchor >= 0) {
+            start = anchor + 1;
+          }
+        }
+        const page = filtered.slice(start, start + limit);
+        const has_more = start + limit < filtered.length;
+        const next_cursor =
+          has_more && page.length > 0
+            ? {
+                updated_at: page[page.length - 1]!.updated_at,
+                memory_id: page[page.length - 1]!.memory_id,
+              }
+            : null;
+        const response: MemoryListResponseDto = {
+          memories: page.map((m) => structuredClone(m)),
+          next_cursor,
+          has_more,
+        };
+        return response;
+      }
+
+      case "propose_memory": {
+        const payload = command.payload as ProposeMemoryCommand | null;
+        if (!payload) throw new Error("Missing propose_memory payload");
+        if (isSecretShaped(payload.content) || (payload.excerpt && isSecretShaped(payload.excerpt))) {
+          throw new Error("propose_memory failed: secret-shaped content rejected");
+        }
+        const now = Date.now();
+        const isExplicit = payload.source === "explicit";
+        const memoryId = this.#mintId("mem");
+        const record: MemoryRecordDto = {
+          memory_id: memoryId,
+          content: payload.content,
+          scope_kind: payload.scope_kind,
+          scope_target: payload.scope_target ?? null,
+          kind: payload.kind,
+          state: isExplicit ? "confirmed" : "candidate",
+          confidence: payload.confidence ?? (isExplicit ? 100 : 80),
+          sensitivity: payload.sensitivity ?? "normal",
+          source: payload.source ?? (isExplicit ? "explicit" : "inferred"),
+          explicit: isExplicit,
+          provenance_thread_id: payload.thread_id ?? null,
+          provenance_turn_id: payload.turn_id ?? null,
+          excerpt: payload.excerpt ?? null,
+          created_at: now,
+          updated_at: now,
+          expires_at: null,
+          superseded_by: null,
+        };
+        this.#memories.push(record);
+        return structuredClone(record);
+      }
+
+      case "confirm_memory": {
+        const payload = command.payload as ConfirmMemoryCommand | null;
+        if (!payload) throw new Error("Missing confirm_memory payload");
+        const existing = this.#memories.find((m) => m.memory_id === payload.memory_id);
+        if (!existing) {
+          throw new Error("Memory not found: " + payload.memory_id);
+        }
+        existing.state = "confirmed";
+        existing.updated_at = Date.now();
+        return structuredClone(existing);
+      }
+
+      case "reject_memory": {
+        const payload = command.payload as RejectMemoryCommand | null;
+        if (!payload) throw new Error("Missing reject_memory payload");
+        const existing = this.#memories.find((m) => m.memory_id === payload.memory_id);
+        if (!existing) {
+          throw new Error("Memory not found: " + payload.memory_id);
+        }
+        existing.state = "rejected";
+        existing.updated_at = Date.now();
+        return structuredClone(existing);
+      }
+
+      case "correct_memory": {
+        const payload = command.payload as CorrectMemoryCommand | null;
+        if (!payload) throw new Error("Missing correct_memory payload");
+        if (isSecretShaped(payload.content)) {
+          throw new Error("correct_memory failed: secret-shaped content rejected");
+        }
+        const existing = this.#memories.find((m) => m.memory_id === payload.memory_id);
+        if (!existing) {
+          throw new Error("Memory not found: " + payload.memory_id);
+        }
+        const now = Date.now();
+        const newId = this.#mintId("mem");
+        existing.state = "superseded";
+        existing.superseded_by = newId;
+        existing.updated_at = now;
+
+        const corrected: MemoryRecordDto = {
+          memory_id: newId,
+          content: payload.content,
+          scope_kind: payload.scope_kind ?? existing.scope_kind,
+          scope_target: payload.scope_target !== undefined ? payload.scope_target : existing.scope_target,
+          kind: payload.kind ?? existing.kind,
+          state: "confirmed",
+          confidence: 100,
+          sensitivity: payload.sensitivity ?? existing.sensitivity,
+          source: "explicit",
+          explicit: true,
+          provenance_thread_id: existing.provenance_thread_id,
+          provenance_turn_id: existing.provenance_turn_id,
+          excerpt: existing.excerpt,
+          created_at: now,
+          updated_at: now,
+          expires_at: existing.expires_at,
+          superseded_by: null,
+        };
+        this.#memories.push(corrected);
+        return structuredClone(corrected);
+      }
+
+      case "forget_memory": {
+        const payload = command.payload as ForgetMemoryCommand | null;
+        if (!payload) throw new Error("Missing forget_memory payload");
+        const existing = this.#memories.find((m) => m.memory_id === payload.memory_id);
+        if (!existing) {
+          throw new Error("Memory not found: " + payload.memory_id);
+        }
+        existing.state = "forgotten";
+        existing.updated_at = Date.now();
+        return structuredClone(existing);
       }
 
       default:

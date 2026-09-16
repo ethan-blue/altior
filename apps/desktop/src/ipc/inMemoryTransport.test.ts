@@ -1,13 +1,11 @@
 import { describe, expect, it } from "vitest";
-import type { AgentProfileDto } from "./dto/AgentProfileDto";
 import type { CommandEnvelope } from "./dto/CommandEnvelope";
 import type { ConfigureAgentCommand } from "./dto/ConfigureAgentCommand";
 import type { EventEnvelope } from "./dto/EventEnvelope";
 import type { HarnessBindingConfigDto } from "./dto/HarnessBindingConfigDto";
-import type { HarnessBindingDto } from "./dto/HarnessBindingDto";
 import type { Sequence } from "./dto/Sequence";
 import type { TestHarnessBindingCommand } from "./dto/TestHarnessBindingCommand";
-import { ConnectionClosedError } from "./errors";
+import { ConnectionClosedError, InvalidCommandError } from "./errors";
 import pingRaw from "../../../../crates/altior-protocol/fixtures/command-ping-v1.json";
 import { negotiatedFixture } from "./fixtures";
 import { InMemoryTransport } from "./inMemoryTransport";
@@ -89,12 +87,12 @@ describe("InMemoryTransport", () => {
     }
   });
 
-  it("handles configure_agent command with HarnessBindingConfigDto and updates bindings map", async () => {
+  it("handles configure_agent with HarnessBindingConfigDto and updates bindings map", async () => {
     const transport = new InMemoryTransport();
 
     const bindingConfig: HarnessBindingConfigDto = {
-      harness_binding_id: "bin_gamma_01",
-      agent_profile_id: "agent-gamma",
+      harness_binding_id: "hsb_fixture000000101",
+      agent_profile_id: null,
       program: "/usr/local/bin/gamma-agent",
       args: ["--port", "9000"],
       env_keys: ["GAMMA_API_KEY"],
@@ -104,10 +102,10 @@ describe("InMemoryTransport", () => {
 
     const configureCmd: CommandEnvelope = {
       protocol_version: 1,
-      operation_id: "op_cfg_gamma",
+      operation_id: "op_fixture000000101",
       kind: "configure_agent",
       payload: {
-        agent_profile_id: "agent-gamma",
+        agent_profile_id: null,
         display_name: "Gamma Agent",
         preferred_harness: "acp",
         memory_mode: "session",
@@ -116,32 +114,29 @@ describe("InMemoryTransport", () => {
       issued_at: Date.now(),
     };
 
+    // Mirrors real Core (ADR 0019): result data carries the configured
+    // profile and binding identities.
     const res = await transport.command<{
-      ok: boolean;
-      profile: AgentProfileDto;
-      binding: HarnessBindingDto | null;
-      warning: string | null;
+      agent_profile_id: string;
+      harness_binding_id: string | null;
     }>(configureCmd);
 
-    expect(res.ok).toBe(true);
-    expect(res.profile.id).toBe("agent-gamma");
-    expect(res.binding?.id).toBe("bin_gamma_01");
-    expect(res.binding?.program).toBe("/usr/local/bin/gamma-agent");
-    expect(res.binding?.env_keys).toEqual(["GAMMA_API_KEY"]);
-    expect(res.binding?.secret_refs).toEqual(["vault://gamma-sec"]);
-    expect(res.warning).toBeNull();
-    expect(transport.bindings.get("bin_gamma_01")?.program).toBe("/usr/local/bin/gamma-agent");
+    expect(res.agent_profile_id).toMatch(/^agp_[0-9a-z]{16,64}$/);
+    expect(res.harness_binding_id).toBe("hsb_fixture000000101");
+    expect(transport.agents.some((a) => a.id === res.agent_profile_id)).toBe(true);
+    expect(transport.bindings.get("hsb_fixture000000101")?.program).toBe("/usr/local/bin/gamma-agent");
+    expect(transport.bindings.get("hsb_fixture000000101")?.agent_profile_id).toBe(res.agent_profile_id);
   });
 
-  it("handles configure_agent without binding (legacy fallback) returning warning", async () => {
+  it("handles configure_agent without binding: Core mints the profile, no binding id", async () => {
     const transport = new InMemoryTransport();
 
     const configureCmd: CommandEnvelope = {
       protocol_version: 1,
-      operation_id: "op_cfg_legacy",
+      operation_id: "op_fixture000000102",
       kind: "configure_agent",
       payload: {
-        agent_profile_id: "agent-legacy",
+        agent_profile_id: null,
         display_name: "Legacy Agent",
         preferred_harness: "terminal",
         memory_mode: "session",
@@ -151,27 +146,24 @@ describe("InMemoryTransport", () => {
     };
 
     const res = await transport.command<{
-      ok: boolean;
-      profile: AgentProfileDto;
-      binding: HarnessBindingDto | null;
-      warning: string | null;
+      agent_profile_id: string;
+      harness_binding_id: string | null;
     }>(configureCmd);
 
-    expect(res.ok).toBe(true);
-    expect(res.profile.id).toBe("agent-legacy");
-    expect(res.binding).toBeNull();
-    expect(res.warning).toContain("Legacy configuration without harness binding");
+    expect(res.agent_profile_id).toMatch(/^agp_[0-9a-z]{16,64}$/);
+    expect(res.harness_binding_id).toBeNull();
+    expect(transport.agents.some((a) => a.id === res.agent_profile_id)).toBe(true);
   });
 
-  it("executes test_harness_binding command with full payload and rejects when program is empty", async () => {
+  it("executes test_harness_binding and echoes the probed binding id; rejects empty program", async () => {
     const transport = new InMemoryTransport();
 
     const testCmd: CommandEnvelope = {
       protocol_version: 1,
-      operation_id: "op_probe_gamma",
+      operation_id: "op_fixture000000103",
       kind: "test_harness_binding",
       payload: {
-        harness_binding_id: "bin_gamma_01",
+        harness_binding_id: "hsb_fixture000000101",
         program: "/usr/local/bin/gamma-agent",
         args: ["--port", "9000"],
         env_keys: ["GAMMA_API_KEY"],
@@ -183,12 +175,30 @@ describe("InMemoryTransport", () => {
 
     const res = await transport.command<{ ok: boolean; probed_binding_id: string }>(testCmd);
     expect(res.ok).toBe(true);
-    expect(res.probed_binding_id).toBe("bin_gamma_01");
+    expect(res.probed_binding_id).toBe("hsb_fixture000000101");
 
-    // Fails when neither program nor binding id is present
+    // A probe without a binding id gets a Core-minted one back (ADR 0019).
+    const mintedProbe: CommandEnvelope = {
+      ...testCmd,
+      operation_id: "op_fixture000000104",
+      payload: {
+        harness_binding_id: null,
+        program: "/usr/local/bin/gamma-agent",
+        args: [],
+        env_keys: [],
+        secret_refs: [],
+        label: null,
+      } as TestHarnessBindingCommand,
+    };
+    const mintedRes = await transport.command<{ ok: boolean; probed_binding_id: string | null }>(mintedProbe);
+    expect(mintedRes.ok).toBe(true);
+    expect(mintedRes.probed_binding_id).toMatch(/^hsb_[0-9a-z]{16,64}$/);
+
+    // An empty program is rejected at the contract boundary before any
+    // execution (A01).
     const emptyCmd: CommandEnvelope = {
       protocol_version: 1,
-      operation_id: "op_probe_empty",
+      operation_id: "op_fixture000000105",
       kind: "test_harness_binding",
       payload: {
         program: "",
@@ -199,7 +209,38 @@ describe("InMemoryTransport", () => {
       issued_at: Date.now(),
     };
 
-    await expect(transport.command(emptyCmd)).rejects.toThrow("Missing required harness binding program executable");
+    await expect(transport.command(emptyCmd)).rejects.toThrow(InvalidCommandError);
+  });
+
+  it("rejects commands that violate the identifier contract (A01)", async () => {
+    const transport = new InMemoryTransport();
+
+    const invalidOp: CommandEnvelope = {
+      protocol_version: 1,
+      operation_id: "op_start_turn_1",
+      kind: "list_threads",
+      payload: { cursor: null, limit: 50 },
+      issued_at: Date.now(),
+    };
+    const invalidAgent: CommandEnvelope = {
+      protocol_version: 1,
+      operation_id: "op_fixture000000106",
+      kind: "create_thread",
+      payload: { agent_profile_id: "agent-alpha", title: "x", project_id: null },
+      issued_at: Date.now(),
+    };
+    const invalidThread: CommandEnvelope = {
+      protocol_version: 1,
+      operation_id: "op_fixture000000107",
+      kind: "open_thread",
+      payload: { thread_id: "thread-1_1700000000000", history_limit: 100 },
+      issued_at: Date.now(),
+    };
+
+    await expect(transport.command(invalidOp)).rejects.toBeInstanceOf(InvalidCommandError);
+    await expect(transport.command(invalidAgent)).rejects.toBeInstanceOf(InvalidCommandError);
+    await expect(transport.command(invalidThread)).rejects.toBeInstanceOf(InvalidCommandError);
+    expect(transport.sentCommands).toHaveLength(0);
   });
 
   it("throws ConnectionClosedError on operations when closed", async () => {

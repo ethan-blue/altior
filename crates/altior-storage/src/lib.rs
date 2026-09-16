@@ -223,6 +223,27 @@ pub struct TurnRow {
     pub ended_at: Option<i64>,
 }
 
+/// One raw domain-journal row, the source of timeline history pages
+/// (ADR 0020). Payload is the stored JSON bytes; decoding happens in
+/// `altior-core`, which owns the event vocabulary.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct JournalEventRow {
+    /// Journal position (total, monotonic order).
+    pub seq: i64,
+    /// Journal event identity.
+    pub event_id: String,
+    /// Owning thread, when the fact is thread-scoped.
+    pub thread_id: Option<String>,
+    /// Owning turn, when the fact is turn-scoped.
+    pub turn_id: Option<String>,
+    /// Journal kind string (`DomainEventKind` wire form).
+    pub kind: String,
+    /// Stored JSON payload bytes.
+    pub payload: Vec<u8>,
+    /// When the fact was journaled (unix millis).
+    pub occurred_at: i64,
+}
+
 pub use altior_domain::ThreadCursor;
 
 /// Permission projection row.
@@ -655,17 +676,33 @@ impl Store {
 
         // Marker includes a deterministic projection digest, so equal journal
         // high-water marks cannot mask deleted/tampered cache rows.
-        let digest = domain_projection_digest(&tx)?;
-        tx.execute(
-            "INSERT INTO domain_projection_state (id, journal_max_seq, projection_version, rebuilt_at, projection_digest)
-             VALUES (1, ?1, ?2, ?3, ?4)
-             ON CONFLICT(id) DO UPDATE SET
-                 journal_max_seq = excluded.journal_max_seq,
-                 projection_version = excluded.projection_version,
-                 rebuilt_at = excluded.rebuilt_at, projection_digest = excluded.projection_digest",
-            params![seq, DOMAIN_PROJECTION_VERSION, occurred_at, digest],
-        )
-        .map_err(|error| StorageError::from_sqlite("append_domain_event", error))?;
+        // High-frequency in-turn message deltas bypass the O(N) full digest table scan
+        // (ADR 0024); authoritative digest checkpointing occurs upon turn settlement.
+        if matches!(event.kind, DomainEventKind::MessageDelta) {
+            tx.execute(
+                "INSERT INTO domain_projection_state (id, journal_max_seq, projection_version, rebuilt_at, projection_digest)
+                 VALUES (1, ?1, ?2, ?3, '')
+                 ON CONFLICT(id) DO UPDATE SET
+                     journal_max_seq = excluded.journal_max_seq,
+                     projection_version = excluded.projection_version,
+                     rebuilt_at = excluded.rebuilt_at",
+                params![seq, DOMAIN_PROJECTION_VERSION, occurred_at],
+            )
+            .map_err(|error| StorageError::from_sqlite("append_domain_event stream delta", error))?;
+        } else {
+            let digest = domain_projection_digest(&tx)?;
+            tx.execute(
+                "INSERT INTO domain_projection_state (id, journal_max_seq, projection_version, rebuilt_at, projection_digest)
+                 VALUES (1, ?1, ?2, ?3, ?4)
+                 ON CONFLICT(id) DO UPDATE SET
+                     journal_max_seq = excluded.journal_max_seq,
+                     projection_version = excluded.projection_version,
+                     rebuilt_at = excluded.rebuilt_at,
+                     projection_digest = excluded.projection_digest",
+                params![seq, DOMAIN_PROJECTION_VERSION, occurred_at, digest],
+            )
+            .map_err(|error| StorageError::from_sqlite("append_domain_event", error))?;
+        }
 
         tx.commit()
             .map_err(|error| StorageError::from_sqlite("append_domain_event", error))?;
@@ -1519,6 +1556,96 @@ impl Store {
             )
             .map_err(|error| StorageError::from_sqlite("turns_for_thread", error))?;
         collect(rows, "turns_for_thread")
+    }
+
+    /// Reads the newest `limit` domain-journal rows for a thread with
+    /// `seq < before_seq` (or all rows when `before_seq` is absent),
+    /// oldest first (ADR 0020). Also returns the thread's journal
+    /// high-water seq so clients know the live catch-up point.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`StorageError::Sqlite`] on query failures.
+    pub fn journal_events_for_thread(
+        &self,
+        thread_id: &str,
+        before_seq: Option<u64>,
+        limit: i64,
+    ) -> Result<(Vec<JournalEventRow>, Option<u64>), StorageError> {
+        let before = before_seq
+            .and_then(|s| i64::try_from(s).ok())
+            .unwrap_or(i64::MAX);
+        let mut statement = self
+            .conn
+            .prepare(
+                "SELECT seq, event_id, thread_id, turn_id, kind, payload, occurred_at
+                 FROM domain_journal
+                 WHERE thread_id = ?1 AND seq < ?2
+                 ORDER BY seq DESC
+                 LIMIT ?3",
+            )
+            .map_err(|error| StorageError::from_sqlite("journal_events_for_thread", error))?;
+        let mut rows = statement
+            .query_map(params![thread_id, before, limit], |row| {
+                Ok(JournalEventRow {
+                    seq: row.get(0)?,
+                    event_id: row.get(1)?,
+                    thread_id: row.get(2)?,
+                    turn_id: row.get(3)?,
+                    kind: row.get(4)?,
+                    payload: row.get(5)?,
+                    occurred_at: row.get(6)?,
+                })
+            })
+            .map_err(|error| StorageError::from_sqlite("journal_events_for_thread", error))?;
+        let mut page: Vec<JournalEventRow> = Vec::new();
+        for row in rows.by_ref() {
+            page.push(
+                row.map_err(|error| StorageError::from_sqlite("journal_events_for_thread", error))?,
+            );
+        }
+        page.reverse();
+
+        // High-water: the newest journal seq for the thread (independent
+        // of the page window).
+        let mut high_water_statement = self
+            .conn
+            .prepare("SELECT MAX(seq) FROM domain_journal WHERE thread_id = ?1")
+            .map_err(|error| StorageError::from_sqlite("journal_high_water_for_thread", error))?;
+        let high_water: Option<i64> = high_water_statement
+            .query_row(params![thread_id], |row| row.get(0))
+            .map_err(|error| StorageError::from_sqlite("journal_high_water_for_thread", error))?;
+
+        Ok((page, high_water.and_then(|s| u64::try_from(s).ok())))
+    }
+
+    /// Returns `true` when journal rows for `thread_id` exist with
+    /// `seq < before_seq` — the `has_more` signal of a history page.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`StorageError::Sqlite`] on query failures.
+    pub fn journal_has_older(
+        &self,
+        thread_id: &str,
+        before_seq: u64,
+    ) -> Result<bool, StorageError> {
+        let before = i64::try_from(before_seq).unwrap_or(i64::MAX);
+        let mut statement = self
+            .conn
+            .prepare(
+                "SELECT 1 FROM domain_journal
+                 WHERE thread_id = ?1 AND seq < ?2
+                 LIMIT 1",
+            )
+            .map_err(|error| StorageError::from_sqlite("journal_has_older", error))?;
+        let mut rows = statement
+            .query(params![thread_id, before])
+            .map_err(|error| StorageError::from_sqlite("journal_has_older", error))?;
+        let found = rows
+            .next()
+            .map_err(|error| StorageError::from_sqlite("journal_has_older", error))?;
+        Ok(found.is_some())
     }
 
     // ── Domain projections & metadata: AgentProfile CRUD ───────────

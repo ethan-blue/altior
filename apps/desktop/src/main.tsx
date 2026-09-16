@@ -1,8 +1,7 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./app/App";
-import { InMemoryTransport } from "./ipc/inMemoryTransport";
-import { TauriCoreTransport } from "./ipc/tauriTransport";
+import { createDefaultTransport } from "./ipc/tauriTransport";
 import "./styles/reset.css";
 import "./styles/tokens.css";
 
@@ -11,20 +10,10 @@ if (!rootElement) {
   throw new Error("index.html must provide a #root element");
 }
 
-const win = typeof window !== "undefined" ? (window as any) : null;
-const isTauri =
-  win != null && (win.__TAURI_INTERNALS__ != null || win.__TAURI__ != null);
-
-const isDev =
-  (typeof process !== "undefined" && process.env?.NODE_ENV === "development") ??
-  (typeof import.meta !== "undefined" && (import.meta as any).env?.DEV) ??
-  false;
-
-const transport = isTauri
-  ? new TauriCoreTransport({ fallbackToMemoryInDev: false })
-  : isDev
-    ? new InMemoryTransport()
-    : new TauriCoreTransport({ fallbackToMemoryInDev: false });
+// One transport decision for the whole app (review A02): Tauri WebView →
+// real Core IPC; Vite dev server → explicit fixture entry; plain production
+// browser → a transport that fails loudly instead of faking a connection.
+const transport = createDefaultTransport();
 
 createRoot(rootElement).render(
   <StrictMode>

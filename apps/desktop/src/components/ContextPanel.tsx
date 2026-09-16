@@ -1,8 +1,11 @@
+import { useI18n } from "../i18n";
 import type { ContextSnapshotDto } from "../ipc/dto/ContextSnapshotDto";
 import shell from "./shell.module.css";
 
 export interface ContextPanelProps {
   readonly snapshot?: ContextSnapshotDto | null;
+  readonly status?: "idle" | "loading" | "loaded" | "not_found" | "error";
+  readonly error?: string | null;
 }
 
 /**
@@ -13,14 +16,40 @@ export interface ContextPanelProps {
  * - Selected memories with explainability (why_selected rationale, provenance, score)
  * - Dropped memory candidates with reasons
  * - Degraded assembly badge when retrieval was truncated or impaired
- * - Empty states when no record exists or memory is disabled
+ * - Distinct states: loading, error, not_found / empty, memory disabled (off), and loaded
  */
-export function ContextPanel({ snapshot }: ContextPanelProps) {
-  if (!snapshot) {
+export function ContextPanel({ snapshot, status, error }: ContextPanelProps) {
+  const { t } = useI18n();
+
+  if (status === "loading") {
+    return (
+      <div className={shell.contextPanel} data-testid="context-panel">
+        <p className={shell.inspectorEmpty} data-testid="context-loading">
+          {t.contextPanel.loading}
+        </p>
+      </div>
+    );
+  }
+
+  if (status === "error") {
+    return (
+      <div className={shell.contextPanel} data-testid="context-panel">
+        <p
+          className={shell.inspectorEmpty}
+          data-testid="context-error"
+          style={{ color: "var(--color-danger, #b3362b)" }}
+        >
+          {error || t.contextPanel.loadFailed}
+        </p>
+      </div>
+    );
+  }
+
+  if (!snapshot || status === "not_found") {
     return (
       <div className={shell.contextPanel} data-testid="context-panel">
         <p className={shell.inspectorEmpty} data-testid="context-empty">
-          未记录（暂无上下文快照）
+          {t.contextPanel.empty}
         </p>
       </div>
     );
@@ -30,7 +59,7 @@ export function ContextPanel({ snapshot }: ContextPanelProps) {
     return (
       <div className={shell.contextPanel} data-testid="context-panel">
         <p className={shell.inspectorEmpty} data-testid="context-memory-off">
-          记忆关闭（未启用记忆检索）
+          {t.contextPanel.memoryOff}
         </p>
       </div>
     );
@@ -41,7 +70,7 @@ export function ContextPanel({ snapshot }: ContextPanelProps) {
       {/* Degraded Badge */}
       {snapshot.degraded ? (
         <div className={shell.degradedBadge} data-testid="context-degraded-badge">
-          <span>⚠️ 降级: {snapshot.degraded.code}</span>
+          <span>{t.contextPanel.degraded(snapshot.degraded.code)}</span>
           {snapshot.degraded.detail ? (
             <span className={shell.degradedDetail}>({snapshot.degraded.detail})</span>
           ) : null}
@@ -49,35 +78,35 @@ export function ContextPanel({ snapshot }: ContextPanelProps) {
       ) : null}
 
       {/* Token Budget Accounting */}
-      <section className={shell.contextSection} aria-label="Token Budget" data-testid="context-budget">
-        <h3 className={shell.sectionSubtitle}>Token Budget</h3>
+      <section className={shell.contextSection} aria-label={t.contextPanel.tokenBudget} data-testid="context-budget">
+        <h3 className={shell.sectionSubtitle}>{t.contextPanel.tokenBudget}</h3>
         <dl className={shell.inspectorFields}>
-          <dt>Identity Limit</dt>
+          <dt>{t.contextPanel.identityLimit}</dt>
           <dd className={shell.mono}>{snapshot.budget.identity_limit_tokens}</dd>
-          <dt>Memory Limit</dt>
+          <dt>{t.contextPanel.memoryLimit}</dt>
           <dd className={shell.mono}>{snapshot.budget.memory_limit_tokens}</dd>
-          <dt>Identity</dt>
+          <dt>{t.contextPanel.identityTokens}</dt>
           <dd className={shell.mono}>
             {snapshot.budget.identity_tokens} / {snapshot.budget.identity_limit_tokens} tokens
           </dd>
-          <dt>Memory</dt>
+          <dt>{t.contextPanel.memoryTokens}</dt>
           <dd className={shell.mono}>
             {snapshot.budget.memory_tokens} / {snapshot.budget.memory_limit_tokens} tokens
           </dd>
-          <dt>Prompt</dt>
+          <dt>{t.contextPanel.promptTokens}</dt>
           <dd className={shell.mono}>{snapshot.budget.prompt_tokens} tokens</dd>
-          <dt>Total</dt>
+          <dt>{t.contextPanel.totalTokens}</dt>
           <dd className={shell.mono}>{snapshot.budget.total_tokens} tokens</dd>
         </dl>
       </section>
 
       {/* Selected Memories */}
-      <section className={shell.contextSection} aria-label="Selected Memories" data-testid="context-memories">
+      <section className={shell.contextSection} aria-label={t.contextPanel.selectedMemories(snapshot.memories.length)} data-testid="context-memories">
         <h3 className={shell.sectionSubtitle}>
-          Selected Memories ({snapshot.memories.length})
+          {t.contextPanel.selectedMemories(snapshot.memories.length)}
         </h3>
         {snapshot.memories.length === 0 ? (
-          <p className={shell.inspectorEmpty}>无选中的记忆条目</p>
+          <p className={shell.inspectorEmpty}>{t.contextPanel.zeroSelected}</p>
         ) : (
           <div className={shell.memoryList}>
             {snapshot.memories.map((mem) => {
@@ -97,13 +126,13 @@ export function ContextPanel({ snapshot }: ContextPanelProps) {
                     <span className={shell.memoryConfidence}>{mem.confidence}%</span>
                   </div>
                   <dl className={shell.inspectorFields} style={{ marginTop: "var(--spacing-6)" }}>
-                    <dt>内容摘要</dt>
+                    <dt>{t.contextPanel.summary}</dt>
                     <dd data-testid="memory-summary">{customSummary}</dd>
 
-                    <dt>Kind</dt>
+                    <dt>{t.inspector.kind}</dt>
                     <dd>{mem.kind}</dd>
 
-                    <dt>Confidence</dt>
+                    <dt>{t.contextPanel.confidence}</dt>
                     <dd>{mem.confidence}%</dd>
 
                     <dt>Tokens / Score</dt>
@@ -111,14 +140,14 @@ export function ContextPanel({ snapshot }: ContextPanelProps) {
                       {mem.tokens} tokens · total_score: {mem.score}
                     </dd>
 
-                    <dt>Why selected</dt>
+                    <dt>{t.contextPanel.whySelected}</dt>
                     <dd>
                       <div className={shell.mono} data-testid="memory-why-selected">
                         {mem.why_selected}
                       </div>
                     </dd>
 
-                    <dt>来源 Provenance</dt>
+                    <dt>{t.contextPanel.provenance}</dt>
                     <dd data-testid="memory-provenance">
                       <div>thread_id: <span className={shell.mono}>{mem.provenance_thread_id ?? "unknown"}</span></div>
                       <div>turn_id: <span className={shell.mono}>{mem.provenance_turn_id ?? "unknown"}</span></div>
@@ -134,9 +163,9 @@ export function ContextPanel({ snapshot }: ContextPanelProps) {
 
       {/* Dropped Entries */}
       {snapshot.dropped && snapshot.dropped.length > 0 ? (
-        <section className={shell.contextSection} aria-label="Dropped Entries" data-testid="context-dropped">
+        <section className={shell.contextSection} aria-label={t.contextPanel.droppedMemories(snapshot.dropped.length)} data-testid="context-dropped">
           <h3 className={shell.sectionSubtitle}>
-            Dropped Entries ({snapshot.dropped.length})
+            {t.contextPanel.droppedMemories(snapshot.dropped.length)}
           </h3>
           <ul className={shell.droppedList} data-testid="context-dropped-list">
             {snapshot.dropped.map((item, idx) => (

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { approvalThread, standardThread } from "../fixtures/timeline";
-import type { AgentProfileDto } from "../ipc/dto/AgentProfileDto";
+import { approvalThread, failureThread, standardThread } from "../fixtures/timeline";
+import { validateCommandEnvelope } from "../ipc/commandContract";
 import type { CommandEnvelope } from "../ipc/dto/CommandEnvelope";
 import type { ConfigureAgentCommand } from "../ipc/dto/ConfigureAgentCommand";
 import type { CreateThreadCommand } from "../ipc/dto/CreateThreadCommand";
@@ -11,6 +11,8 @@ import type { Sequence } from "../ipc/dto/Sequence";
 import type { StartTurnCommand } from "../ipc/dto/StartTurnCommand";
 import type { TestHarnessBindingCommand } from "../ipc/dto/TestHarnessBindingCommand";
 import { InMemoryTransport } from "../ipc/inMemoryTransport";
+import { ConnectionClosedError, InvalidCommandError } from "../ipc/errors";
+import { createOperationId, isValidOperationId } from "../ipc/operationId";
 import {
   createApplicationStore,
   sanitizeSecretRef,
@@ -36,36 +38,42 @@ describe("ApplicationStore", () => {
   });
 
   describe("Agent Onboarding & Testing with Opaque Secret References", () => {
-    it("sanitizes plaintext secrets into opaque references without persisting plaintext", () => {
+    it("accepts valid opaque secret references and rejects plaintext secrets", () => {
+      expect(sanitizeSecretRef("sec_anthropic_vault_01")).toBe("sec_anthropic_vault_01");
       expect(sanitizeSecretRef("vault://key-123")).toBe("vault://key-123");
       expect(sanitizeSecretRef("env:ANTHROPIC_API_KEY")).toBe("env:ANTHROPIC_API_KEY");
       expect(sanitizeSecretRef("ref:secret-456")).toBe("ref:secret-456");
 
-      // Plaintext API key is converted to opaque reference
-      const sanitized = sanitizeSecretRef("sk-proj-1234567890abcdef");
-      expect(sanitized).toMatch(/^ref:opaque-sec-/);
-      expect(sanitized).not.toContain("sk-proj");
+      // Plaintext API key is rejected with an explicit error (F27 / user rules)
+      expect(() => sanitizeSecretRef("sk-proj-1234567890abcdef")).toThrow(
+        /credentials must be stored in the OS secret store/i,
+      );
     });
 
-    it("canary: plaintext secrets never enter stream log, state, or command payloads", async () => {
+    it("canary: plaintext secrets are rejected up front and never enter stream log, state, or command payloads", async () => {
       const transport = new InMemoryTransport();
       const store = createApplicationStore(transport);
       await store.init();
 
       const canarySecret = "SUPER-SECRET-PLAINTEXT-KEY-CANARY-12345";
 
-      await store.onboardAgent({
-        name: "Canary Agent",
-        provider: "acp",
-        model: "claude-3-7-sonnet",
-        secretRef: canarySecret,
-      });
+      await expect(
+        store.onboardAgent({
+          name: "Canary Agent",
+          provider: "acp",
+          model: "claude-3-7-sonnet",
+          envKeys: ["ANTHROPIC_API_KEY"],
+          secretRef: canarySecret,
+        }),
+      ).rejects.toThrow(/credentials must be stored in the OS secret store/i);
 
-      await store.testAgent({
+      const testResult = await store.testAgent({
         provider: "acp",
         model: "claude-3-7-sonnet",
+        envKeys: ["ANTHROPIC_API_KEY"],
         secretRef: canarySecret,
       });
+      expect(testResult.success).toBe(false);
 
       // 1. Inspect state
       const stateStr = JSON.stringify(store.getState());
@@ -80,7 +88,7 @@ describe("ApplicationStore", () => {
       expect(sentCmdsStr).not.toContain(canarySecret);
     });
 
-    it("onboards a new agent using configure_agent command and sets it active", async () => {
+    it("onboards a new agent: Core mints the identity and the store adopts it", async () => {
       const transport = new InMemoryTransport();
       const store = createApplicationStore(transport);
       await store.init();
@@ -89,22 +97,30 @@ describe("ApplicationStore", () => {
         name: "Custom Agent",
         provider: "acp",
         model: "claude-3-7-sonnet",
+        envKeys: ["ANTHROPIC_API_KEY"],
         secretRef: "vault://custom-key",
       });
 
-      expect(newAgent.id).toContain("custom-agent");
-      expect(newAgent.secretRef).toBe("vault://custom-key");
+      // The agent identity is Core-minted (ADR 0019), not a client slug.
+      expect(newAgent.id).toMatch(/^agp_[0-9a-z]{16,64}$/);
 
       const state = store.getState();
       expect(state.agents.some((a) => a.id === newAgent.id)).toBe(true);
       expect(state.selectedAgentId).toBe(newAgent.id);
+      expect(newAgent.bindingId).toMatch(/^hsb_[0-9a-z]{16,64}$/);
+      expect(transport.agents.some((a) => a.id === newAgent.id)).toBe(true);
 
-      // Verify configure_agent command envelope
+      // Verify configure_agent command envelope: null identities ask Core
+      // to allocate, and the command itself is contract-valid.
       const configCmd = transport.sentCommands.find((c) => c.kind === "configure_agent");
       expect(configCmd).toBeDefined();
+      expect(validateCommandEnvelope(configCmd!)).toBeNull();
       const payload = configCmd?.payload as ConfigureAgentCommand;
       expect(payload.display_name).toBe("Custom Agent");
       expect(payload.preferred_harness).toBe("acp");
+      expect(payload.agent_profile_id).toBeNull();
+      expect(payload.binding?.harness_binding_id).toBeNull();
+      expect(payload.binding?.agent_profile_id).toBeNull();
     });
 
     it("tests agent connection via test_harness_binding command with secret_refs", async () => {
@@ -115,6 +131,7 @@ describe("ApplicationStore", () => {
       const result = await store.testAgent({
         provider: "/path/to/acp-binary",
         model: "claude-3-7-sonnet",
+        envKeys: ["ANTHROPIC_API_KEY"],
         secretRef: "vault://test-key",
       });
 
@@ -124,23 +141,30 @@ describe("ApplicationStore", () => {
 
       const testCmd = transport.sentCommands.find((c) => c.kind === "test_harness_binding");
       expect(testCmd).toBeDefined();
+      expect(validateCommandEnvelope(testCmd!)).toBeNull();
       const payload = testCmd?.payload as TestHarnessBindingCommand;
       expect(payload.program).toBe("/path/to/acp-binary");
       expect(payload.secret_refs).toEqual(["vault://test-key"]);
+      expect(payload.harness_binding_id).toBeNull();
+
+      // Core returns the binding identity it probed with (ADR 0019).
+      expect(store.getState().onboardingStatus.bindingId).toMatch(/^hsb_[0-9a-z]{16,64}$/);
     });
 
-    it("configures dual agents sequentially with full binding DTOs and retains tested binding ID", async () => {
+    it("configures dual agents sequentially and retains the tested binding identity", async () => {
       const transport = new InMemoryTransport();
       const store = createApplicationStore(transport);
       await store.init();
 
-      // 1. Probe Agent A with test_harness_binding
+      // 1. Probe Agent A with test_harness_binding (one env key per ref —
+      // the protocol requires env_keys.length === secret_refs.length; the
+      // multi-key mapping UX is task A07).
       const testResultA = await store.testAgent({
         provider: "acp",
         model: "claude-3-7-sonnet",
         program: "/opt/bin/agent-alpha",
         args: ["--mode", "server", "--port", "8001"],
-        envKeys: ["ANTHROPIC_API_KEY", "DEBUG"],
+        envKeys: ["ANTHROPIC_API_KEY"],
         secretRef: "vault://sec-alpha-01",
         label: "Alpha Primary Binding",
       });
@@ -148,23 +172,24 @@ describe("ApplicationStore", () => {
 
       const testCmdA = transport.sentCommands.find((c) => c.kind === "test_harness_binding");
       expect(testCmdA).toBeDefined();
+      expect(validateCommandEnvelope(testCmdA!)).toBeNull();
       const testPayloadA = testCmdA?.payload as TestHarnessBindingCommand;
       expect(testPayloadA.program).toBe("/opt/bin/agent-alpha");
       expect(testPayloadA.args).toEqual(["--mode", "server", "--port", "8001"]);
-      expect(testPayloadA.env_keys).toEqual(["ANTHROPIC_API_KEY", "DEBUG"]);
+      expect(testPayloadA.env_keys).toEqual(["ANTHROPIC_API_KEY"]);
       expect(testPayloadA.secret_refs).toEqual(["vault://sec-alpha-01"]);
       expect(testPayloadA.label).toBe("Alpha Primary Binding");
-      const probedBindingIdA = testPayloadA.harness_binding_id;
-      expect(probedBindingIdA).toBeTruthy();
+      const probedBindingIdA = store.getState().onboardingStatus.bindingId;
+      expect(probedBindingIdA).toMatch(/^hsb_[0-9a-z]{16,64}$/);
 
-      // Save Agent A -> should use the exact same binding ID
+      // Save Agent A -> should use the exact same Core-probed binding ID
       const agentA = await store.onboardAgent({
         name: "Agent Alpha Custom",
         provider: "acp",
         model: "claude-3-7-sonnet",
         program: "/opt/bin/agent-alpha",
         args: ["--mode", "server", "--port", "8001"],
-        envKeys: ["ANTHROPIC_API_KEY", "DEBUG"],
+        envKeys: ["ANTHROPIC_API_KEY"],
         secretRef: "vault://sec-alpha-01",
         label: "Alpha Primary Binding",
       });
@@ -178,7 +203,7 @@ describe("ApplicationStore", () => {
       expect(configPayloadA.binding?.harness_binding_id).toBe(probedBindingIdA);
       expect(configPayloadA.binding?.program).toBe("/opt/bin/agent-alpha");
       expect(configPayloadA.binding?.args).toEqual(["--mode", "server", "--port", "8001"]);
-      expect(configPayloadA.binding?.env_keys).toEqual(["ANTHROPIC_API_KEY", "DEBUG"]);
+      expect(configPayloadA.binding?.env_keys).toEqual(["ANTHROPIC_API_KEY"]);
       expect(configPayloadA.binding?.secret_refs).toEqual(["vault://sec-alpha-01"]);
       expect(configPayloadA.binding?.label).toBe("Alpha Primary Binding");
 
@@ -203,28 +228,28 @@ describe("ApplicationStore", () => {
       expect(configPayloadB.binding?.args).toEqual(["--interactive"]);
       expect(configPayloadB.binding?.secret_refs).toEqual(["env:OPENAI_API_KEY"]);
 
-      // Verify both agents exist in application store state
+      // Verify both agents exist in application store state with Core-minted ids
       const state = store.getState();
       expect(state.agents.some((a) => a.id === agentA.id)).toBe(true);
       expect(state.agents.some((a) => a.id === agentB.id)).toBe(true);
       expect(state.selectedAgentId).toBe(agentB.id);
 
       // Verify transport in-memory bindings map has both bindings
-      expect(transport.bindings.has(configPayloadA.binding!.harness_binding_id!)).toBe(true);
-      expect(transport.bindings.has(configPayloadB.binding!.harness_binding_id!)).toBe(true);
+      expect(transport.bindings.has(agentA.bindingId!)).toBe(true);
+      expect(transport.bindings.has(agentB.bindingId!)).toBe(true);
     });
 
-    it("supports configure_agent without binding for backward compatibility", async () => {
+    it("configures an agent without binding and mirrors the real Core result shape", async () => {
       const transport = new InMemoryTransport();
       const store = createApplicationStore(transport);
       await store.init();
 
       const configureEnvelope: CommandEnvelope = {
         protocol_version: 1,
-        operation_id: "op_legacy_config",
+        operation_id: createOperationId(),
         kind: "configure_agent",
         payload: {
-          agent_profile_id: "agent-legacy",
+          agent_profile_id: null,
           display_name: "Legacy Agent",
           preferred_harness: "acp",
           memory_mode: "session",
@@ -233,13 +258,14 @@ describe("ApplicationStore", () => {
         issued_at: Date.now(),
       };
 
-      const res = await transport.command<{ ok: boolean; profile: AgentProfileDto; warning: string | null }>(
+      // The fixture transport answers exactly like real Core (ADR 0019):
+      // result data carries the configured profile id and no binding id.
+      const res = await transport.command<{ agent_profile_id: string; harness_binding_id: string | null }>(
         configureEnvelope,
       );
-      expect(res.ok).toBe(true);
-      expect(res.profile.id).toBe("agent-legacy");
-      expect(res.warning).toContain("Legacy configuration without harness binding");
-      expect(transport.agents.some((a) => a.id === "agent-legacy")).toBe(true);
+      expect(res.agent_profile_id).toMatch(/^agp_[0-9a-z]{16,64}$/);
+      expect(res.harness_binding_id).toBeNull();
+      expect(transport.agents.some((a) => a.id === res.agent_profile_id)).toBe(true);
     });
 
     it("displays error notice when testing without required binding program", async () => {
@@ -260,8 +286,8 @@ describe("ApplicationStore", () => {
     });
 
     it("shows onboarding modal when initialized on a clean profile with 0 agents", async () => {
-      const transport = new InMemoryTransport({ initialAgents: [] });
-      const store = createApplicationStore(transport, { initialAgents: [] });
+      const transport = new InMemoryTransport({ initialAgents: [], initialThreads: [] });
+      const store = createApplicationStore(transport);
 
       await store.init();
 
@@ -276,8 +302,10 @@ describe("ApplicationStore", () => {
       const store = createApplicationStore(transport);
       await store.init();
 
-      const thread = await store.createThread("Spike Investigation", "agent-beta");
+      const thread = await store.createThread("Spike Investigation", "agp_fixture000000002");
       expect(thread.title).toBe("Spike Investigation");
+      // The thread identity is Core-minted (ADR 0019).
+      expect(thread.id).toMatch(/^thr_[0-9a-z]{16,64}$/);
 
       const state = store.getState();
       expect(state.threads.some((t) => t.id === thread.id)).toBe(true);
@@ -285,13 +313,38 @@ describe("ApplicationStore", () => {
 
       const createCmd = transport.sentCommands.find((c) => c.kind === "create_thread");
       expect(createCmd).toBeDefined();
+      expect(validateCommandEnvelope(createCmd!)).toBeNull();
       const payload = createCmd?.payload as CreateThreadCommand;
       expect(payload.title).toBe("Spike Investigation");
-      expect(payload.agent_profile_id).toBe("agent-beta");
+      expect(payload.agent_profile_id).toBe("agp_fixture000000002");
 
       // Verify open_thread was sent for the new thread
       const openCmds = transport.sentCommands.filter((c) => c.kind === "open_thread");
       expect(openCmds.some((c) => (c.payload as OpenThreadCommand).thread_id === thread.id)).toBe(true);
+    });
+
+    it("adds no fabricated thread when create_thread is rejected", async () => {
+      const transport = new InMemoryTransport();
+      transport.setCommandHandler((cmd) => {
+        if (cmd.kind === "create_thread") {
+          throw new Error("Core rejected thread creation");
+        }
+        return undefined;
+      });
+      const store = createApplicationStore(transport);
+      await store.init();
+
+      const before = store.getState().threads.length;
+      const selectedBefore = store.getState().selectedThreadId;
+
+      await expect(store.createThread("Ghost thread", "agp_fixture000000001")).rejects.toThrow(
+        "Core rejected thread creation",
+      );
+
+      const state = store.getState();
+      expect(state.threads).toHaveLength(before);
+      expect(state.threads.some((t) => t.title === "Ghost thread")).toBe(false);
+      expect(state.selectedThreadId).toBe(selectedBefore);
     });
 
     it("selects thread and opens it via open_thread command", async () => {
@@ -346,7 +399,7 @@ describe("ApplicationStore", () => {
   });
 
   describe("Prompt Streaming & Turn Cancellation", () => {
-    it("dispatches prompt via start_turn and streams incoming deltas to the assistant reply row", async () => {
+    it("dispatches prompt with a Core-allocated turn id and streams deltas to the reply row", async () => {
       const transport = new InMemoryTransport({ autoStreamReplies: false });
       const store = createApplicationStore(transport);
       await store.init();
@@ -354,13 +407,17 @@ describe("ApplicationStore", () => {
       await store.sendPrompt("Explain length-prefixed framing");
 
       const state = store.getState();
-      expect(state.activeTurn).not.toBeNull();
-      expect(state.activeTurn?.isStreaming).toBe(true);
+      expect(state.activeTurns).toHaveLength(1);
+      expect(state.activeTurns[0]?.isStreaming).toBe(true);
+      // The response-resolved turn identity is Core-minted (ADR 0019).
+      expect(state.activeTurns[0]?.turnId).toMatch(/^trn_[0-9a-z]{16,64}$/);
 
       const startCmd = transport.sentCommands.find((c) => c.kind === "start_turn");
       expect(startCmd).toBeDefined();
+      expect(validateCommandEnvelope(startCmd!)).toBeNull();
       const startPayload = startCmd?.payload as StartTurnCommand;
       expect(startPayload.prompt).toBe("Explain length-prefixed framing");
+      expect(startPayload.turn_id).toBeNull();
 
       const threadStore = store.getTimelineStore(state.selectedThreadId);
       const rows = threadStore.getSnapshot().rows;
@@ -374,10 +431,10 @@ describe("ApplicationStore", () => {
       // Dispatch delta event from transport
       const deltaEvent: EventEnvelope = {
         protocol_version: 1,
-        event_id: "evt_delta_1",
-        operation_id: "op_start_turn_1",
+        event_id: "evt_fixture000000201",
+        operation_id: "op_fixture000000210",
         thread_id: state.selectedThreadId,
-        turn_id: "turn-1",
+        turn_id: state.activeTurns[0]?.turnId ?? null,
         sequence: 10 as any,
         occurred_at: Date.now(),
         body: { kind: "message.delta", text: "Frames have 4-byte headers." },
@@ -389,10 +446,10 @@ describe("ApplicationStore", () => {
       // Second delta
       const deltaEvent2: EventEnvelope = {
         protocol_version: 1,
-        event_id: "evt_delta_2",
-        operation_id: "op_start_turn_1",
+        event_id: "evt_fixture000000202",
+        operation_id: "op_fixture000000210",
         thread_id: state.selectedThreadId,
-        turn_id: "turn-1",
+        turn_id: state.activeTurns[0]?.turnId ?? null,
         sequence: 11 as any,
         occurred_at: Date.now(),
         body: { kind: "message.delta", text: " Max payload is 256 KiB." },
@@ -406,10 +463,10 @@ describe("ApplicationStore", () => {
       // Complete turn
       const completeEvent: EventEnvelope = {
         protocol_version: 1,
-        event_id: "evt_comp_1",
-        operation_id: "op_start_turn_1",
+        event_id: "evt_fixture000000203",
+        operation_id: "op_fixture000000210",
         thread_id: state.selectedThreadId,
-        turn_id: "turn-1",
+        turn_id: state.activeTurns[0]?.turnId ?? null,
         sequence: 12 as any,
         occurred_at: Date.now(),
         body: { kind: "turn.completed" },
@@ -417,7 +474,7 @@ describe("ApplicationStore", () => {
       store._handleEvent(completeEvent);
 
       expect(threadStore.getRow("send-1-reply")?.streaming).toBe(false);
-      expect(store.getState().activeTurn).toBeNull();
+      expect(store.getState().activeTurns).toHaveLength(0);
     });
 
     it("cancels an active streaming turn using cancel_turn command", async () => {
@@ -426,13 +483,14 @@ describe("ApplicationStore", () => {
       await store.init();
 
       await store.sendPrompt("Long running task");
-      expect(store.getState().activeTurn?.isStreaming).toBe(true);
+      expect(store.getState().activeTurns[0]?.isStreaming).toBe(true);
 
       await store.cancelActiveTurn();
-      expect(store.getState().activeTurn).toBeNull();
+      expect(store.getState().activeTurns).toHaveLength(0);
 
       const lastCommand = transport.sentCommands.at(-1);
       expect(lastCommand?.kind).toBe("cancel_turn");
+      expect(validateCommandEnvelope(lastCommand!)).toBeNull();
     });
   });
 
@@ -443,15 +501,16 @@ describe("ApplicationStore", () => {
       await store.init();
       await store.selectThread(approvalThread.id);
 
-      await store.decidePermission("apr-3", "approved");
+      await store.decidePermission("evt_fixture000000111", "approved");
 
       const timelineStore = store.getTimelineStore(approvalThread.id);
-      expect(timelineStore.getRow("apr-3")?.permission?.decision).toBe("approved");
+      expect(timelineStore.getRow("evt_fixture000000111")?.permission?.decision).toBe("approved");
 
       const lastCommand = transport.sentCommands.at(-1);
       expect(lastCommand?.kind).toBe("respond_permission");
+      expect(validateCommandEnvelope(lastCommand!)).toBeNull();
       const payload = lastCommand?.payload as RespondPermissionCommand;
-      expect(payload.event_id).toBe("apr-3");
+      expect(payload.event_id).toBe("evt_fixture000000111");
       expect(payload.decision).toBe("approved");
     });
 
@@ -461,15 +520,15 @@ describe("ApplicationStore", () => {
       await store.init();
       await store.selectThread(approvalThread.id);
 
-      await store.decidePermission("apr-3", "denied");
+      await store.decidePermission("evt_fixture000000111", "denied");
 
       const timelineStore = store.getTimelineStore(approvalThread.id);
-      expect(timelineStore.getRow("apr-3")?.permission?.decision).toBe("denied");
+      expect(timelineStore.getRow("evt_fixture000000111")?.permission?.decision).toBe("denied");
 
       const lastCommand = transport.sentCommands.at(-1);
       expect(lastCommand?.kind).toBe("respond_permission");
       const payload = lastCommand?.payload as RespondPermissionCommand;
-      expect(payload.event_id).toBe("apr-3");
+      expect(payload.event_id).toBe("evt_fixture000000111");
       expect(payload.decision).toBe("denied");
     });
 
@@ -479,19 +538,19 @@ describe("ApplicationStore", () => {
         if (cmd.kind === "respond_permission") {
           throw new Error("Core rejected permission response");
         }
-        return { ok: true };
+        return undefined; // built-in responses keep the snapshot flow real
       });
 
       const store = createApplicationStore(transport);
       await store.init();
       await store.selectThread(approvalThread.id);
 
-      await expect(store.decidePermission("apr-3", "approved")).rejects.toThrow(
+      await expect(store.decidePermission("evt_fixture000000111", "approved")).rejects.toThrow(
         "Core rejected permission response",
       );
 
       const timelineStore = store.getTimelineStore(approvalThread.id);
-      expect(timelineStore.getRow("apr-3")?.permission?.decision).toBeNull();
+      expect(timelineStore.getRow("evt_fixture000000111")?.permission?.decision).toBeNull();
       expect(store.getState().error).toContain("Core rejected permission response");
     });
   });
@@ -502,13 +561,14 @@ describe("ApplicationStore", () => {
       const store = createApplicationStore(transport);
       await store.init();
       await store.sendPrompt("Test deduplication");
+      const liveTurnId = store.getState().activeTurns[0]?.turnId ?? null;
 
       const deltaEvent: EventEnvelope = {
         protocol_version: 1,
-        event_id: "evt_dup_1",
-        operation_id: "op_1",
+        event_id: "evt_fixture000000301",
+        operation_id: "op_fixture000000310",
         thread_id: store.getState().selectedThreadId,
-        turn_id: "turn-1",
+        turn_id: liveTurnId,
         sequence: 20 as any,
         occurred_at: Date.now(),
         body: { kind: "message.delta", text: "Unique chunk" },
@@ -519,7 +579,7 @@ describe("ApplicationStore", () => {
       // Deliver duplicate with same event_id
       store._handleEvent(deltaEvent);
       // Deliver duplicate with same sequence
-      store._handleEvent({ ...deltaEvent, event_id: "evt_dup_2" });
+      store._handleEvent({ ...deltaEvent, event_id: "evt_fixture000000302" });
 
       const threadStore = store.getTimelineStore(store.getState().selectedThreadId);
       expect(threadStore.getRow("send-1-reply")?.text).toBe("Unique chunk");
@@ -533,7 +593,7 @@ describe("ApplicationStore", () => {
       // Emit stream.replayed
       store._handleEvent({
         protocol_version: 1,
-        event_id: "evt_replay_ctrl",
+        event_id: "evt_fixture000000311",
         operation_id: null,
         thread_id: null,
         turn_id: null,
@@ -547,7 +607,7 @@ describe("ApplicationStore", () => {
       // Emit stream.ready
       store._handleEvent({
         protocol_version: 1,
-        event_id: "evt_ready_ctrl",
+        event_id: "evt_fixture000000312",
         operation_id: null,
         thread_id: null,
         turn_id: null,
@@ -566,15 +626,15 @@ describe("ApplicationStore", () => {
 
       store._handleEvent({
         protocol_version: 1,
-        event_id: "evt_err_1",
-        operation_id: "op_err_1",
+        event_id: "evt_fixture000000321",
+        operation_id: "op_fixture000000321",
         thread_id: null,
         turn_id: null,
         sequence: 40 as Sequence,
         occurred_at: Date.now(),
         body: {
           kind: "command.error",
-          operation_id: "op_err_1",
+          operation_id: "op_fixture000000321",
           code: "AGENT_NOT_FOUND",
           message: "The requested agent does not exist",
         },
@@ -594,7 +654,7 @@ describe("ApplicationStore", () => {
       // Deliver stream.gap event
       store._handleEvent({
         protocol_version: 1,
-        event_id: "evt_gap_1",
+        event_id: "evt_fixture000000331",
         operation_id: null,
         thread_id: null,
         turn_id: null,
@@ -624,7 +684,7 @@ describe("ApplicationStore", () => {
       // Deliver core.greeting event
       store._handleEvent({
         protocol_version: 1,
-        event_id: "evt_greeting_restart",
+        event_id: "evt_fixture000000341",
         operation_id: null,
         thread_id: null,
         turn_id: null,
@@ -652,13 +712,13 @@ describe("ApplicationStore", () => {
       await store.init();
 
       // 1. Select Agent Alpha and create Thread 1
-      store.selectAgent("agent-alpha");
-      const thread1 = await store.createThread("Alpha Task", "agent-alpha");
+      store.selectAgent("agp_fixture000000001");
+      const thread1 = await store.createThread("Alpha Task", "agp_fixture000000001");
       expect(thread1.agent).toBe("alpha (ACP)");
 
       // 2. Select Agent Beta and create Thread 2
-      store.selectAgent("agent-beta");
-      const thread2 = await store.createThread("Beta Task", "agent-beta");
+      store.selectAgent("agp_fixture000000002");
+      const thread2 = await store.createThread("Beta Task", "agp_fixture000000002");
       expect(thread2.agent).toBe("beta (ACP)");
 
       // 3. Switch between threads
@@ -671,6 +731,503 @@ describe("ApplicationStore", () => {
       expect(store.getState().selectedThreadId).toBe(thread2.id);
       const activeThread2 = store.getState().threads.find((t) => t.id === thread2.id);
       expect(activeThread2?.agent).toBe("beta (ACP)");
+    });
+  });
+
+  describe("A01 command identity contract", () => {
+    it("every command the store emits satisfies the desktop contract validator", async () => {
+      const transport = new InMemoryTransport();
+      const store = createApplicationStore(transport);
+      await store.init();
+
+      await store.createThread("Contract sweep", "agp_fixture000000001");
+      await store.selectThread(approvalThread.id);
+      await store.setThreadFilter("audit");
+      await store.setThreadFilter("");
+      await store.getHistory(approvalThread.id, 20);
+      await store.testAgent({
+        provider: "acp",
+        program: "/opt/bin/agent-alpha",
+        envKeys: ["ANTHROPIC_API_KEY"],
+        secretRef: "vault://sec-alpha-01",
+        label: "Alpha Binding",
+      });
+      await store.onboardAgent({
+        name: "中文代理",
+        provider: "acp",
+        program: "C:\\Agents\\My Agent\\acp-agent.exe",
+        args: ["--mode", "server"],
+        envKeys: ["ANTHROPIC_API_KEY"],
+        secretRef: "vault://acp-alpha",
+        label: "Alpha Binding",
+      });
+      await store.sendPrompt("请帮我总结这份文档的三个要点");
+      await store.cancelActiveTurn();
+      await store.decidePermission("evt_fixture000000111", "approved");
+      await store.getDiagnostics();
+      await store.getContextSnapshot(approvalThread.id);
+      await store.putIdentityDocument({ kind: "about", content: "用户偏好深色主题" });
+      await store.listIdentityDocuments();
+      await store.deleteIdentityDocument("idd_fixture000000013");
+      await store.reconnect();
+
+      expect(transport.sentCommands.length).toBeGreaterThan(10);
+      for (const cmd of transport.sentCommands) {
+        const rejection = validateCommandEnvelope(cmd);
+        expect(rejection, `command ${cmd.kind} violated the contract`).toBeNull();
+        expect(isValidOperationId(cmd.operation_id), `bad operation id ${cmd.operation_id}`).toBe(true);
+      }
+    });
+
+    it("the fixture transport rejects the historical invalid command shapes", async () => {
+      const transport = new InMemoryTransport();
+      const validOp = createOperationId();
+
+      const invalidCommands: CommandEnvelope[] = [
+        {
+          protocol_version: 1,
+          operation_id: "op_start_turn_1",
+          kind: "start_turn",
+          payload: { thread_id: standardThread.id, turn_id: null, prompt: "x" },
+          issued_at: 1700000000000,
+        },
+        {
+          protocol_version: 1,
+          operation_id: validOp,
+          kind: "create_thread",
+          payload: { agent_profile_id: "agent-alpha", title: "demo", project_id: null },
+          issued_at: 1700000000000,
+        },
+        {
+          protocol_version: 1,
+          operation_id: validOp,
+          kind: "start_turn",
+          payload: { thread_id: standardThread.id, turn_id: "trn_1700000000000_1", prompt: "x" },
+          issued_at: 1700000000000,
+        },
+        {
+          protocol_version: 1,
+          operation_id: "op_list_threads_1_1700000000000",
+          kind: "list_threads",
+          payload: { cursor: null, limit: 50 },
+          issued_at: 1700000000000,
+        },
+        {
+          protocol_version: 2,
+          operation_id: validOp,
+          kind: "list_threads",
+          payload: { cursor: null, limit: 50 },
+          issued_at: 1700000000000,
+        },
+      ];
+
+      for (const cmd of invalidCommands) {
+        await expect(transport.command(cmd)).rejects.toBeInstanceOf(InvalidCommandError);
+        expect(transport.sentCommands).not.toContain(cmd);
+      }
+    });
+
+    it("operation identities stay unique across store instances (renderer restart)", async () => {
+      const seen = new Set<string>();
+
+      for (let i = 0; i < 3; i += 1) {
+        const transport = new InMemoryTransport();
+        const store = createApplicationStore(transport);
+        await store.init();
+        for (const cmd of transport.sentCommands) {
+          expect(seen.has(cmd.operation_id)).toBe(false);
+          seen.add(cmd.operation_id);
+        }
+        store.disconnect();
+      }
+      expect(seen.size).toBeGreaterThan(0);
+    });
+  });
+
+  describe("A03 authority, empty state & search", () => {
+    it("a clean vault starts empty: no demo agents, no demo threads, no selection", async () => {
+      const transport = new InMemoryTransport({ initialThreads: [], initialAgents: [] });
+      const store = createApplicationStore(transport);
+      await store.init();
+
+      const state = store.getState();
+      expect(state.threads).toHaveLength(0);
+      expect(state.agents).toHaveLength(0);
+      expect(state.selectedThreadId).toBe("");
+      expect(state.selectedThread).toBeNull();
+      expect(state.isOnboardingOpen).toBe(true);
+      // No list extras may survive the authoritative empty response.
+      expect(state.threads.some((t) => t.title.includes("Contract"))).toBe(false);
+    });
+
+    it("a late search response never overwrites a newer one (A/B out of order)", async () => {
+      const transport = new InMemoryTransport();
+      const timer: ReturnType<typeof setTimeout>[] = [];
+      transport.setCommandHandler((cmd) => {
+        if (cmd.kind === "search_threads") {
+          const query = (cmd.payload as { query: string }).query;
+          if (query === "slow-query") {
+            // Resolve late to `undefined`, deferring to the built-in
+            // handler — after request B has already won.
+            return new Promise((resolve) => {
+              timer.push(setTimeout(() => resolve(undefined), 20));
+            });
+          }
+        }
+        return undefined;
+      });
+      const store = createApplicationStore(transport);
+      await store.init();
+
+      // Request A is slow, request B resolves first and must win.
+      const slow = store.setThreadFilter("slow-query");
+      const fast = store.setThreadFilter("audit");
+      await fast;
+      expect(store.getState().searchActive).toBe(true);
+      expect(store.getState().threads.map((t) => t.id)).toEqual([approvalThread.id]);
+
+      await slow;
+      // The stale A response arrives and must not replace B's results.
+      expect(store.getState().threads.map((t) => t.id)).toEqual([approvalThread.id]);
+      timer.forEach(clearTimeout);
+    });
+
+    it("clearing the query restores the authoritative list and selection stays stable", async () => {
+      const transport = new InMemoryTransport();
+      const store = createApplicationStore(transport);
+      await store.init();
+      await store.selectThread(approvalThread.id);
+      expect(store.getState().selectedThread?.id).toBe(approvalThread.id);
+
+      await store.setThreadFilter("audit");
+      expect(store.getState().threads.map((t) => t.id)).toEqual([approvalThread.id]);
+      expect(store.getState().selectedThread?.id).toBe(approvalThread.id);
+
+      await store.setThreadFilter("   ");
+      const state = store.getState();
+      expect(state.searchActive).toBe(false);
+      expect(state.threads.map((t) => t.id)).toEqual([
+        standardThread.id,
+        approvalThread.id,
+        failureThread.id,
+      ]);
+      expect(state.selectedThread?.id).toBe(approvalThread.id);
+    });
+
+    it("a search failure is surfaced in place instead of faking client filter success", async () => {
+      const transport = new InMemoryTransport();
+      transport.setCommandHandler((cmd) => {
+        if (cmd.kind === "search_threads") {
+          throw new Error("search index unavailable");
+        }
+        return undefined;
+      });
+      const store = createApplicationStore(transport);
+      await store.init();
+      await store.selectThread(approvalThread.id);
+
+      await store.setThreadFilter("anything");
+
+      expect(store.getState().error).toContain("search index unavailable");
+      // The list itself is untouched: no pretend results.
+      expect(store.getState().searchActive).toBe(false);
+      expect(store.getState().threads.map((t) => t.id)).toEqual([
+        standardThread.id,
+        approvalThread.id,
+        failureThread.id,
+      ]);
+    });
+
+    it("paginates 50+ threads with has_more and the stored cursor", async () => {
+      const threads = Array.from({ length: 55 }, (_, i) => ({
+        id: `thr_bulk${String(1000 + i).padStart(12, "0")}`,
+        title: `Bulk conversation ${i}`,
+        agent: "alpha (ACP)",
+        status: "completed" as const,
+        pinned: false,
+        rows: [],
+      }));
+      const transport = new InMemoryTransport({ initialThreads: threads });
+      const store = createApplicationStore(transport);
+      await store.init();
+
+      // The fake defaults to limit 20 when only cursor is absent... the
+      // store requests 50 per page, so page one holds 50 rows.
+      let state = store.getState();
+      expect(state.threads).toHaveLength(50);
+      expect(state.hasMoreThreads).toBe(true);
+
+      await store.loadMoreThreads();
+      state = store.getState();
+      expect(state.threads).toHaveLength(55);
+      expect(state.hasMoreThreads).toBe(false);
+
+      // No duplicates after paging to the end.
+      const ids = state.threads.map((t) => t.id);
+      expect(new Set(ids).size).toBe(ids.length);
+    });
+
+    it("selecting a thread while searching keeps the search results visible", async () => {
+      const transport = new InMemoryTransport();
+      const store = createApplicationStore(transport);
+      await store.init();
+
+      await store.setThreadFilter("audit");
+      expect(store.getState().threads.map((t) => t.id)).toEqual([approvalThread.id]);
+
+      await store.selectThread(approvalThread.id);
+      const state = store.getState();
+      // The nav list still shows the search results…
+      expect(state.searchActive).toBe(true);
+      expect(state.threads.map((t) => t.id)).toEqual([approvalThread.id]);
+      // …while the read conversation is the selected one.
+      expect(state.selectedThread?.id).toBe(approvalThread.id);
+    });
+  });
+
+  describe("A04 delivery, cancellation & permissions", () => {
+    it("tracks two background turns independently and routes deltas by thread/turn", async () => {
+      const transport = new InMemoryTransport({ autoStreamReplies: false });
+      const store = createApplicationStore(transport);
+      await store.init();
+
+      const threadA = standardThread.id;
+      const threadB = approvalThread.id;
+      await store.selectThread(threadA);
+      await store.sendPrompt("Prompt for A", threadA);
+      await store.sendPrompt("Prompt for B", threadB);
+
+      const turns = store.getState().activeTurns;
+      expect(turns).toHaveLength(2);
+      const turnA = turns.find((t) => t.threadId === threadA)!;
+      const turnB = turns.find((t) => t.threadId === threadB)!;
+      expect(turnA.turnId).toMatch(/^trn_[0-9a-z]{16,64}$/);
+      expect(turnB.turnId).toMatch(/^trn_[0-9a-z]{16,64}$/);
+      expect(turnA.turnId).not.toBe(turnB.turnId);
+
+      // A's delta lands only in A's reply row…
+      store._handleEvent({
+        protocol_version: 1,
+        event_id: "evt_fixture000000401",
+        operation_id: "op_fixture000000410",
+        thread_id: threadA,
+        turn_id: turnA.turnId,
+        sequence: 100 as Sequence,
+        occurred_at: Date.now(),
+        body: { kind: "message.delta", text: "chunk-for-A" },
+      });
+      // …and B's delta only in B's reply row.
+      store._handleEvent({
+        protocol_version: 1,
+        event_id: "evt_fixture000000402",
+        operation_id: "op_fixture000000410",
+        thread_id: threadB,
+        turn_id: turnB.turnId,
+        sequence: 101 as Sequence,
+        occurred_at: Date.now(),
+        body: { kind: "message.delta", text: "chunk-for-B" },
+      });
+
+      expect(store.getTimelineStore(threadA).getRow(turnA.replyRowId)?.text).toBe("chunk-for-A");
+      expect(store.getTimelineStore(threadB).getRow(turnB.replyRowId)?.text).toBe("chunk-for-B");
+
+      // A completes: only A's turn clears.
+      store._handleEvent({
+        protocol_version: 1,
+        event_id: "evt_fixture000000403",
+        operation_id: "op_fixture000000410",
+        thread_id: threadA,
+        turn_id: turnA.turnId,
+        sequence: 102 as Sequence,
+        occurred_at: Date.now(),
+        body: { kind: "turn.completed" },
+      });
+      expect(store.getState().activeTurns.map((t) => t.threadId)).toEqual([threadB]);
+    });
+
+    it("rejects a double send while a turn is unsettled, without new rows", async () => {
+      const transport = new InMemoryTransport({ autoStreamReplies: false });
+      const store = createApplicationStore(transport);
+      await store.init();
+      const threadId = standardThread.id;
+
+      const first = await store.sendPrompt("First dispatch", threadId);
+      expect(first.status).toBe("admitted");
+      const rowsBefore = store.getTimelineStore(threadId).rowCount();
+
+      const second = await store.sendPrompt("Second dispatch", threadId);
+      if (second.status !== "rejected") throw new Error("expected rejected dispatch");
+      expect(second.reason).toContain("already running");
+      expect(store.getTimelineStore(threadId).rowCount()).toBe(rowsBefore);
+      expect(store.getState().activeTurns).toHaveLength(1);
+    });
+
+    it("distinguishes not-delivered from indeterminate dispatch failures", async () => {
+      // Hard rejection before Core executes: prompt was not delivered.
+      const transportA = new InMemoryTransport({ autoStreamReplies: false });
+      transportA.setCommandHandler((cmd) => {
+        if (cmd.kind === "start_turn") throw new Error("agent refused the turn");
+        return undefined;
+      });
+      const storeA = createApplicationStore(transportA);
+      await storeA.init();
+      const rejected = await storeA.sendPrompt("hello", standardThread.id);
+      if (rejected.status !== "rejected") throw new Error("expected rejected dispatch");
+      expect(rejected.reason).toContain("agent refused");
+      expect(
+        storeA.getTimelineStore(standardThread.id).getSnapshot().rows.some(
+          (r) => r.kind === "error" && r.text.startsWith("Prompt not delivered"),
+        ),
+      ).toBe(true);
+      expect(storeA.getState().activeTurns).toHaveLength(0);
+
+      // Connection dropped mid-dispatch: delivery is indeterminate, never
+      // auto-retried.
+      const transportB = new InMemoryTransport({ autoStreamReplies: false });
+      transportB.setCommandHandler((cmd) => {
+        if (cmd.kind === "start_turn") throw new ConnectionClosedError();
+        return undefined;
+      });
+      const storeB = createApplicationStore(transportB);
+      await storeB.init();
+      const indeterminate = await storeB.sendPrompt("hello", standardThread.id);
+      if (indeterminate.status !== "indeterminate") throw new Error("expected indeterminate dispatch");
+      expect(
+        storeB.getTimelineStore(standardThread.id).getSnapshot().rows.some(
+          (r) => r.kind === "error" && r.text.includes("Delivery indeterminate"),
+        ),
+      ).toBe(true);
+      expect(storeB.getState().activeTurns).toHaveLength(0);
+    });
+
+    it("keeps the turn running when the cancel request fails, then settles on the authoritative event", async () => {
+      const transport = new InMemoryTransport({ autoStreamReplies: false });
+      transport.setCommandHandler((cmd) => {
+        if (cmd.kind === "cancel_turn") throw new Error("cancel channel lost");
+        return undefined;
+      });
+      const store = createApplicationStore(transport);
+      await store.init();
+      const threadId = standardThread.id;
+      await store.sendPrompt("Long task", threadId);
+
+      await store.cancelActiveTurn(threadId);
+      // The turn is NOT locally finished: Core may still be running it.
+      expect(store.getState().activeTurns).toHaveLength(1);
+      expect(store.getState().activeTurns[0]?.cancelState).toBe("failed");
+      expect(store.getState().activeTurns[0]?.notice).toContain("may still be running");
+
+      // The authoritative settlement clears the turn.
+      const turnId = store.getState().activeTurns[0]?.turnId ?? null;
+      store._handleEvent({
+        protocol_version: 1,
+        event_id: "evt_fixture000000411",
+        operation_id: "op_fixture000000411",
+        thread_id: threadId,
+        turn_id: turnId,
+        sequence: 120 as Sequence,
+        occurred_at: Date.now(),
+        body: { kind: "turn.cancelled", reason: "cancelled after reconnect" },
+      });
+      expect(store.getState().activeTurns).toHaveLength(0);
+    });
+
+    it("marks cancel as requested and waits for Core before clearing", async () => {
+      const transport = new InMemoryTransport({ autoStreamReplies: false });
+      const store = createApplicationStore(transport);
+      await store.init();
+      const threadId = standardThread.id;
+      await store.sendPrompt("Task", threadId);
+
+      // The cancel command stays in flight: the turn must already read as
+      // "requested", and it must remain active until Core settles it.
+      let releaseCancel: (() => void) | null = null;
+      const gate = new Promise<void>((resolve) => {
+        releaseCancel = resolve;
+      });
+      transport.setCommandHandler((cmd) => {
+        if (cmd.kind === "cancel_turn") {
+          return gate.then(() => undefined);
+        }
+        return undefined;
+      });
+
+      const cancelling = store.cancelActiveTurn(threadId);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      expect(store.getState().activeTurns[0]?.cancelState).toBe("requested");
+      // Still running until Core settles it.
+      expect(store.getState().activeTurns).toHaveLength(1);
+
+      const cancelCmd = transport.sentCommands.find((c) => c.kind === "cancel_turn");
+      expect(cancelCmd).toBeDefined();
+      expect(validateCommandEnvelope(cancelCmd!)).toBeNull();
+
+      releaseCancel!();
+      await cancelling;
+      // The built-in handler settles the cancellation by emitting the
+      // authoritative turn.cancelled event — that, not the RPC result, is
+      // what finally clears the turn.
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(store.getState().activeTurns).toHaveLength(0);
+    });
+
+    it("ignores duplicate permission submissions while one is in flight", async () => {
+      const transport = new InMemoryTransport();
+      let release!: () => void;
+      const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      transport.setCommandHandler((cmd) => {
+        if (cmd.kind === "respond_permission") {
+          return gate.then(() => ({ ok: true }));
+        }
+        return undefined;
+      });
+      const store = createApplicationStore(transport);
+      await store.init();
+      await store.selectThread(approvalThread.id);
+      const permRowId = "evt_fixture000000111";
+
+      const first = store.decidePermission(permRowId, "approved");
+      // Second click while the first is in flight is a no-op.
+      await store.decidePermission(permRowId, "denied");
+      release();
+      await first;
+
+      const permissionCommands = transport.sentCommands.filter(
+        (c) => c.kind === "respond_permission",
+      );
+      expect(permissionCommands).toHaveLength(1);
+      expect(
+        store.getTimelineStore(approvalThread.id).getRow(permRowId)?.permission?.decision,
+      ).toBe("approved");
+      expect(
+        store.getTimelineStore(approvalThread.id).getRow(permRowId)?.permission?.submission,
+      ).toBeNull();
+    });
+
+    it("shows a failed permission decision as still unanswered and checkable", async () => {
+      const transport = new InMemoryTransport();
+      transport.setCommandHandler((cmd) => {
+        if (cmd.kind === "respond_permission") {
+          throw new Error("permission window closed");
+        }
+        return undefined;
+      });
+      const store = createApplicationStore(transport);
+      await store.init();
+      await store.selectThread(approvalThread.id);
+      const permRowId = "evt_fixture000000111";
+
+      await expect(store.decidePermission(permRowId, "approved")).rejects.toThrow(
+        "permission window closed",
+      );
+
+      const row = store.getTimelineStore(approvalThread.id).getRow(permRowId);
+      expect(row?.permission?.decision).toBeNull();
+      expect(row?.permission?.submission).toBe("failed");
+      expect(store.getState().error).toContain("permission window closed");
     });
   });
 });

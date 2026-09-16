@@ -7,9 +7,16 @@
   "scripts": {
     "dev": "vite",
     "typecheck": "tsc --noEmit",
+    "lint": "node scripts/check-lint.mjs",
+    "format:check": "node scripts/check-format.mjs",
     "build": "tsc --noEmit && vite build",
     "test": "vitest run",
-    "baselines": "node scripts/baselines.mjs"
+    "test:unit": "vitest run",
+    "test:contrast": "node scripts/check-contrast.mjs",
+    "test:visual": "node scripts/check-visual.mjs",
+    "test:tauri": "cargo test --manifest-path src-tauri/Cargo.toml",
+    "baselines": "node scripts/baselines.mjs",
+    "gate": "npm run typecheck && npm run lint && npm run format:check && npm run test && npm run test:contrast && npm run test:visual && npm run build"
   },
   "dependencies": {
     "react": "19.2.8",
@@ -24,7 +31,9 @@
     "@types/react-dom": "19.2.5",
     "@vitejs/plugin-react": "6.1.1",
     "jsdom": "30.0.1",
+    "pixelmatch": "^7.2.0",
     "playwright": "1.56",
+    "pngjs": "^7.0.0",
     "typescript": "7.0.2",
     "vite": "8.2.2",
     "vitest": "4.1.11"

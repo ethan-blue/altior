@@ -1,0 +1,80 @@
+// Audit probes: assertions intentionally describe observed defects, not acceptance targets.
+// Archived under docs/reviews after execution; do not retain as product regression tests.
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { afterEach, expect, it, vi } from "vitest";
+import { Composer } from "../components/shell";
+import { InMemoryTransport } from "../ipc/inMemoryTransport";
+import { createApplicationStore, sanitizeSecretRef } from "../stores/applicationStore";
+import { App } from "../app/App";
+afterEach(cleanup);
+
+it("observed: IME composition Enter invokes send", () => {
+  const send = vi.fn();
+  render(<Composer draft="中文输入" onDraftChange={() => {}} onSend={send} disabledReason={null} />);
+  fireEvent.keyDown(screen.getByTestId("composer"), { key: "Enter", isComposing: true, keyCode: 229 });
+  expect(send).toHaveBeenCalledOnce();
+});
+
+it("observed: failed create resolves with an invented thread", async () => {
+  const transport = new InMemoryTransport();
+  vi.spyOn(transport, "command").mockRejectedValue(new Error("synthetic unavailable"));
+  const store = createApplicationStore(transport);
+  const thread = await store.createThread("Must not appear as saved");
+  expect(store.getState().threads.some(t => t.id === thread.id)).toBe(true);
+  expect(thread.id).toMatch(/^thread-/);
+});
+
+it("observed: failed cancel clears active turn", async () => {
+  const transport = new InMemoryTransport();
+  const command = vi.spyOn(transport, "command").mockResolvedValue({});
+  const store = createApplicationStore(transport);
+  await store.sendPrompt("synthetic request");
+  expect(store.getState().activeTurn).not.toBeNull();
+  command.mockRejectedValue(new Error("synthetic unavailable"));
+  await store.cancelActiveTurn();
+  expect(store.getState().activeTurn).toBeNull();
+});
+
+it("observed: prompt identifiers violate the domain body alphabet", async () => {
+  const transport = new InMemoryTransport();
+  const command = vi.spyOn(transport, "command").mockResolvedValue({});
+  const store = createApplicationStore(transport);
+  await store.sendPrompt("synthetic request");
+  const envelope = command.mock.calls[0]![0];
+  expect(envelope.operation_id).not.toMatch(/^op_[0-9a-z]{16,64}$/);
+  expect((envelope.payload as { turn_id: string }).turn_id).not.toMatch(/^trn_[0-9a-z]{16,64}$/);
+});
+
+it("observed: invalid secret reference silently becomes a fabricated pointer", () => {
+  expect(sanitizeSecretRef("not-a-secret-and-not-a-reference")).toMatch(/^ref:opaque-sec-/);
+});
+
+it("observed: subscribe throw bypasses init catch and leaves connecting state", async () => {
+  const transport = new InMemoryTransport();
+  vi.spyOn(transport, "subscribe").mockImplementation(() => { throw new Error("synthetic unavailable"); });
+  const store = createApplicationStore(transport);
+  await expect(store.init()).rejects.toThrow("synthetic unavailable");
+  expect(store.getState().connectionStatus).toBe("connecting");
+});
+
+it("observed: an empty search result crashes active-thread rendering", async () => {
+  const transport = new InMemoryTransport();
+  const original = transport.command.bind(transport);
+  vi.spyOn(transport, "command").mockImplementation(async (envelope) => {
+    if (envelope.kind === "search_threads") return {
+      protocol_version: 1, operation_id: envelope.operation_id,
+      data: { threads: [], next_cursor: null, has_more: false },
+    };
+    return original(envelope);
+  });
+  const store = createApplicationStore(transport);
+  await store.setThreadFilter("no-match-synthetic");
+  expect(store.getState().threads).toEqual([]);
+  // App has no store injection. Confirm the dereference pattern independently,
+  // leaving actual App crash classified as a direct code-path inference.
+  expect(() => {
+    const state = store.getState();
+    const current = state.threads.find(t => t.id === state.selectedThreadId) ?? state.threads[0]!;
+    return current.id;
+  }).toThrow(TypeError);
+});

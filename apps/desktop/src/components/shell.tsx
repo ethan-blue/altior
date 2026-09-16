@@ -4,11 +4,19 @@
  * per docs/UI_ARCHITECTURE.md; panes resize by drag or keyboard within
  * their token clamps.
  */
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { TimelineRow } from "../features/timeline/timelineStore";
-import type { ThreadFixture, ThreadStatus } from "../fixtures/timeline";
 import type { ContextSnapshotDto } from "../ipc/dto/ContextSnapshotDto";
-import type { AgentProfile } from "../stores/applicationStore";
+import type { RuntimeDiagnosticsDto } from "../ipc/dto/RuntimeDiagnosticsDto";
+import {
+  parseCommandLineArgs,
+  parseStringList,
+  type AgentProfile,
+  type EnvSecretMapping,
+  type TestAgentResult,
+  type ThreadStatus,
+  type ThreadSummaryView,
+} from "../stores/applicationStore";
 import {
   INSPECTOR_MAX,
   INSPECTOR_MIN,
@@ -16,9 +24,12 @@ import {
   NAV_MIN,
 } from "../app/uiStore";
 import { ContextPanel, type ContextPanelProps } from "./ContextPanel";
+import { useI18n } from "../i18n";
+import type { ThemeSource, LocaleSource } from "../app/uiStore";
 import shell from "./shell.module.css";
 
 export { ContextPanel, type ContextPanelProps };
+export { MemoryPane, type MemoryPaneProps } from "./MemoryPane";
 
 const statusLabel: Record<ThreadStatus, string> = {
   running: "running",
@@ -39,15 +50,67 @@ export interface ActivityRailProps {
   readonly onNavigate?: (destination: string) => void;
 }
 
+function RailIcon({ id }: { readonly id: string }) {
+  switch (id) {
+    case "threads":
+      return (
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className={shell.railIcon}>
+          <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+        </svg>
+      );
+    case "agents":
+      return (
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className={shell.railIcon}>
+          <rect x="3" y="11" width="18" height="10" rx="2" />
+          <circle cx="12" cy="5" r="2" />
+          <path d="M12 7v4" />
+          <line x1="8" y1="16" x2="8.01" y2="16" />
+          <line x1="16" y1="16" x2="16.01" y2="16" />
+        </svg>
+      );
+    case "projects":
+      return (
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className={shell.railIcon}>
+          <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
+        </svg>
+      );
+    case "memory":
+      return (
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className={shell.railIcon}>
+          <rect x="3" y="3" width="18" height="18" rx="2" />
+          <path d="M7 8h10M7 12h10M7 16h6" />
+        </svg>
+      );
+    case "devices":
+      return (
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className={shell.railIcon}>
+          <rect x="2" y="3" width="20" height="14" rx="2" />
+          <line x1="8" y1="21" x2="16" y2="21" />
+          <line x1="12" y1="17" x2="12" y2="21" />
+        </svg>
+      );
+    case "settings":
+      return (
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className={shell.railIcon}>
+          <circle cx="12" cy="12" r="3" />
+          <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" />
+        </svg>
+      );
+    default:
+      return null;
+  }
+}
+
 /** Activity rail: Threads and Agents; others arrive with subsequent phases. */
 export function ActivityRail({ active, onNavigate }: ActivityRailProps) {
+  const { t } = useI18n();
   const destinations: { id: string; label: string; arrives: string | null }[] = [
-    { id: "threads", label: "Threads", arrives: null },
-    { id: "agents", label: "Agents", arrives: null },
-    { id: "projects", label: "Projects", arrives: "P1" },
-    { id: "memory", label: "Memory", arrives: "P2" },
-    { id: "devices", label: "Devices", arrives: "P3" },
-    { id: "settings", label: "Settings", arrives: "P1" },
+    { id: "threads", label: t.rail.threads, arrives: null },
+    { id: "agents", label: t.rail.agents, arrives: null },
+    { id: "projects", label: t.rail.projects, arrives: "P4" },
+    { id: "memory", label: t.rail.memory, arrives: null },
+    { id: "devices", label: t.rail.devices, arrives: "P3" },
+    { id: "settings", label: t.rail.settings, arrives: null },
   ];
   return (
     <nav className={shell.rail} aria-label="Activity">
@@ -60,12 +123,13 @@ export function ActivityRail({ active, onNavigate }: ActivityRailProps) {
             className={`${shell.railItem} ${active === id ? shell.railActive : ""}`}
             aria-current={active === id ? "page" : undefined}
             aria-disabled={!enabled}
+            aria-label={label}
             disabled={!enabled}
             onClick={() => enabled && onNavigate?.(id)}
-            title={enabled ? label : `${label} — arrives with ${arrives}`}
+            title={enabled ? label : `${label} — ${t.rail.arrivesWith(arrives!)}`}
             data-testid={`rail-${id}`}
           >
-            <span aria-hidden="true">{label.slice(0, 2)}</span>
+            <RailIcon id={id} />
             <span className={shell.railLabel}>{label}</span>
           </button>
         );
@@ -75,12 +139,19 @@ export function ActivityRail({ active, onNavigate }: ActivityRailProps) {
 }
 
 export interface ThreadsPaneProps {
-  readonly threads: readonly ThreadFixture[];
+  readonly threads: readonly ThreadSummaryView[];
   readonly selectedThreadId: string;
   readonly onSelect: (id: string) => void;
   readonly filter: string;
   readonly onFilterChange: (value: string) => void;
   readonly onCreateThread?: () => void;
+  /** Authoritative list has more pages (hidden while searching). */
+  readonly hasMoreThreads?: boolean;
+  readonly onLoadMore?: () => void;
+  /** True while `threads` holds search results instead of the list. */
+  readonly searchActive?: boolean;
+  /** Debounce delay in milliseconds (default: 280ms). Set to 0 in tests for immediate dispatch. */
+  readonly debounceMs?: number;
 }
 
 /** Navigation pane: pinned and recent threads with search and thread creation. */
@@ -91,14 +162,66 @@ export function ThreadsPane({
   filter,
   onFilterChange,
   onCreateThread,
+  hasMoreThreads = false,
+  onLoadMore,
+  searchActive = false,
+  debounceMs = 280,
 }: ThreadsPaneProps) {
-  const matches = threads.filter(
-    (thread) =>
-      thread.title.toLowerCase().includes(filter.toLowerCase()) ||
-      thread.agent.toLowerCase().includes(filter.toLowerCase()),
+  const { t } = useI18n();
+  const [localFilter, setLocalFilter] = useState(filter);
+  const isComposingRef = useRef(false);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    setLocalFilter(filter);
+  }, [filter]);
+
+  useEffect(() => {
+    return () => {
+      if (timerRef.current != null) {
+        clearTimeout(timerRef.current);
+      }
+    };
+  }, []);
+
+  const dispatchDebounced = useCallback(
+    (value: string) => {
+      if (timerRef.current != null) {
+        clearTimeout(timerRef.current);
+      }
+      if (debounceMs <= 0) {
+        onFilterChange(value);
+      } else {
+        timerRef.current = setTimeout(() => {
+          onFilterChange(value);
+        }, debounceMs);
+      }
+    },
+    [debounceMs, onFilterChange],
   );
-  const pinned = matches.filter((thread) => thread.pinned);
-  const recent = matches.filter((thread) => !thread.pinned);
+
+  const handleInputChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const nextValue = event.target.value;
+    setLocalFilter(nextValue);
+    if (!isComposingRef.current) {
+      dispatchDebounced(nextValue);
+    }
+  };
+
+  const handleCompositionStart = () => {
+    isComposingRef.current = true;
+  };
+
+  const handleCompositionEnd = (event: React.CompositionEvent<HTMLInputElement>) => {
+    isComposingRef.current = false;
+    dispatchDebounced(event.currentTarget.value);
+  };
+
+  // The visible list is already the authority — the Core list/search
+  // responses. No client-side second filtering that could drop legitimate
+  // backend hits (review A03, F06).
+  const pinned = threads.filter((thread) => thread.pinned);
+  const recent = threads.filter((thread) => !thread.pinned);
 
   return (
     <section className={shell.threadsPane} aria-label="Threads">
@@ -106,10 +229,12 @@ export function ThreadsPane({
         <input
           type="search"
           className={shell.search}
-          placeholder="Filter threads"
-          value={filter}
-          onChange={(event) => onFilterChange(event.target.value)}
-          aria-label="Filter threads"
+          placeholder={t.nav.filterPlaceholder}
+          value={localFilter}
+          onChange={handleInputChange}
+          onCompositionStart={handleCompositionStart}
+          onCompositionEnd={handleCompositionEnd}
+          aria-label={t.nav.filterPlaceholder}
           data-testid="thread-filter"
         />
         {onCreateThread ? (
@@ -118,26 +243,41 @@ export function ThreadsPane({
             className={shell.newThreadBtn}
             onClick={onCreateThread}
             data-testid="new-thread"
-            title="Create new thread"
+            title={t.inspector.createThreadTitle}
           >
-            + New
+            {t.nav.newThread}
           </button>
         ) : null}
       </div>
+      {threads.length === 0 ? (
+        <p className={shell.threadsEmpty} role="status">
+          {searchActive ? t.nav.noMatches : t.nav.empty}
+        </p>
+      ) : null}
       {pinned.length > 0 ? (
         <ThreadSection
-          title="Pinned"
+          title={t.nav.pinned}
           threads={pinned}
           selectedThreadId={selectedThreadId}
           onSelect={onSelect}
         />
       ) : null}
       <ThreadSection
-        title="Recent"
+        title={t.nav.recent}
         threads={recent}
         selectedThreadId={selectedThreadId}
         onSelect={onSelect}
       />
+      {hasMoreThreads && onLoadMore ? (
+        <button
+          type="button"
+          className={shell.newThreadBtn}
+          onClick={onLoadMore}
+          data-testid="load-more-threads"
+        >
+          Load more
+        </button>
+      ) : null}
     </section>
   );
 }
@@ -149,7 +289,7 @@ function ThreadSection({
   onSelect,
 }: {
   readonly title: string;
-  readonly threads: readonly ThreadFixture[];
+  readonly threads: readonly ThreadSummaryView[];
   readonly selectedThreadId: string;
   readonly onSelect: (id: string) => void;
 }) {
@@ -207,6 +347,7 @@ export function ThreadHeader({
   isStreaming,
   onCancel,
 }: ThreadHeaderProps) {
+  const { t } = useI18n();
   return (
     <header className={shell.threadHeader}>
       <h1 className={shell.threadTitleMain}>{title}</h1>
@@ -221,7 +362,7 @@ export function ThreadHeader({
               agents[0]?.id
             }
             onChange={(e) => onSelectAgent(e.target.value)}
-            aria-label="Select agent"
+            aria-label={t.workbench.selectAgent}
             data-testid="agent-selector"
           >
             {agents.map((a) => (
@@ -238,7 +379,7 @@ export function ThreadHeader({
               data-testid="add-agent-btn"
               title="Add agent"
             >
-              + Agent
+              {t.workbench.addAgent}
             </button>
           ) : null}
         </div>
@@ -258,10 +399,10 @@ export function ThreadHeader({
           </button>
         ) : null}
         <button type="button" onClick={onToggleTheme} data-testid="theme-toggle">
-          {theme === "light" ? "Dark theme" : "Light theme"}
+          {t.workbench.themeToggle(theme)}
         </button>
         <button type="button" onClick={onToggleInspector} data-testid="inspector-toggle">
-          {inspectorOpen ? "Hide inspector" : "Show inspector"}
+          {inspectorOpen ? t.workbench.hideInspector : t.workbench.showInspector}
         </button>
       </div>
     </header>
@@ -274,6 +415,8 @@ export interface ComposerProps {
   readonly onSend: () => void;
   readonly onCancel?: () => void;
   readonly isStreaming?: boolean;
+  /** True while a cancel_turn is in flight (button reads "Cancelling…"). */
+  readonly cancelPending?: boolean;
   readonly disabledReason: string | null;
 }
 
@@ -284,17 +427,32 @@ export function Composer({
   onSend,
   onCancel,
   isStreaming,
+  cancelPending = false,
   disabledReason,
 }: ComposerProps) {
+  const { t } = useI18n();
+  const [isComposing, setIsComposing] = useState(false);
+
   return (
     <div className={shell.composer}>
       <textarea
         className={shell.composerInput}
-        placeholder={disabledReason ?? "Message the agent… (Enter to send)"}
+        placeholder={disabledReason ?? t.composer.placeholder}
         value={draft}
         disabled={disabledReason != null}
         onChange={(event) => onDraftChange(event.target.value)}
+        onCompositionStart={() => setIsComposing(true)}
+        onCompositionEnd={() => setIsComposing(false)}
         onKeyDown={(event) => {
+          // Chinese IME / composition protection (A09 / F16):
+          // Never send on Enter when confirming IME candidates (isComposing or Windows keyCode 229)
+          if (
+            isComposing ||
+            event.nativeEvent.isComposing ||
+            event.keyCode === 229
+          ) {
+            return;
+          }
           if (event.key === "Enter" && !event.shiftKey) {
             event.preventDefault();
             if (disabledReason == null) onSend();
@@ -308,9 +466,10 @@ export function Composer({
           type="button"
           className={shell.cancelBtn}
           onClick={onCancel}
+          disabled={cancelPending}
           data-testid="cancel-turn"
         >
-          Cancel
+          {cancelPending ? t.composer.requestingStop : t.composer.stop}
         </button>
       ) : null}
       <button
@@ -320,8 +479,90 @@ export function Composer({
         disabled={disabledReason != null || draft.trim().length === 0}
         data-testid="send"
       >
-        Send
+        {t.composer.send}
       </button>
+    </div>
+  );
+}
+
+export interface RuntimeDiagnosticsViewProps {
+  readonly diagnostics?: RuntimeDiagnosticsDto | null;
+  readonly status?: "idle" | "loading" | "loaded" | "error";
+  readonly error?: string | null;
+  readonly onRefresh?: () => void;
+}
+
+export function RuntimeDiagnosticsView({
+  diagnostics,
+  status = "idle",
+  error,
+  onRefresh,
+}: RuntimeDiagnosticsViewProps) {
+  const { t } = useI18n();
+
+  if (status === "loading") {
+    return (
+      <div data-testid="diagnostics-loading">
+        <p className={shell.inspectorEmpty} role="status">
+          {t.inspector.loadingDiagnostics}
+        </p>
+      </div>
+    );
+  }
+
+  if (status === "error") {
+    return (
+      <div data-testid="diagnostics-error">
+        <p className={shell.inspectorEmpty} role="alert" style={{ color: "var(--color-danger, #b3362b)" }}>
+          {error || t.inspector.diagnosticsFailed}
+        </p>
+      </div>
+    );
+  }
+
+  if (!diagnostics) {
+    return (
+      <div data-testid="diagnostics-empty">
+        <p className={shell.inspectorEmpty} role="status">
+          {t.inspector.noDiagnostics}
+        </p>
+        {onRefresh ? (
+          <button type="button" className={shell.btnAction} onClick={onRefresh} style={{ display: "block", margin: "8px auto" }}>
+            Refresh
+          </button>
+        ) : null}
+      </div>
+    );
+  }
+
+  return (
+    <div data-testid="diagnostics-panel">
+      <dl className={shell.inspectorFields}>
+        <dt>{t.inspector.instanceId}</dt>
+        <dd className={shell.mono} data-testid="diag-instance-id">{diagnostics.instance_id}</dd>
+
+        <dt>{t.inspector.status}</dt>
+        <dd data-testid="diag-status">
+          <span className={shell.memoryKindBadge}>{diagnostics.status}</span>
+        </dd>
+
+        <dt>{t.inspector.activeThreads}</dt>
+        <dd className={shell.mono} data-testid="diag-active-threads">{diagnostics.active_threads}</dd>
+
+        <dt>{t.inspector.activeTurns}</dt>
+        <dd className={shell.mono} data-testid="diag-active-turns">{diagnostics.active_turns}</dd>
+
+        <dt>{t.inspector.diagnosticsSummary}</dt>
+        <dd className={shell.mono} data-testid="diag-summary">{diagnostics.summary ?? t.inspector.none}</dd>
+      </dl>
+      <p style={{ fontSize: "0.75rem", color: "var(--color-muted)", marginTop: "12px", borderTop: "1px solid var(--color-border)", paddingTop: "8px" }} data-testid="diag-redacted-notice">
+        {t.inspector.redactedNotice}
+      </p>
+      {onRefresh ? (
+        <button type="button" className={shell.btnAction} onClick={onRefresh} style={{ marginTop: "8px" }} data-testid="diag-refresh-btn">
+          Refresh
+        </button>
+      ) : null}
     </div>
   );
 }
@@ -333,7 +574,13 @@ export interface InspectorProps {
   readonly focusedRow: TimelineRow | null;
   readonly activeAgent?: AgentProfile | null;
   readonly contextSnapshot?: ContextSnapshotDto | null;
-  readonly initialTab?: "details" | "context";
+  readonly contextSnapshotStatus?: "idle" | "loading" | "loaded" | "not_found" | "error";
+  readonly contextSnapshotError?: string | null;
+  readonly diagnostics?: RuntimeDiagnosticsDto | null;
+  readonly diagnosticsStatus?: "idle" | "loading" | "loaded" | "error";
+  readonly diagnosticsError?: string | null;
+  readonly onRefreshDiagnostics?: () => void;
+  readonly initialTab?: "details" | "context" | "diagnostics";
 }
 
 /**
@@ -347,9 +594,16 @@ export function Inspector({
   focusedRow,
   activeAgent,
   contextSnapshot,
+  contextSnapshotStatus,
+  contextSnapshotError,
+  diagnostics,
+  diagnosticsStatus,
+  diagnosticsError,
+  onRefreshDiagnostics,
   initialTab = "details",
 }: InspectorProps) {
-  const [activeTab, setActiveTab] = useState<"details" | "context">(initialTab);
+  const { t } = useI18n();
+  const [activeTab, setActiveTab] = useState<"details" | "context" | "diagnostics">(initialTab);
   const dragState = useRef<{ startX: number; startWidth: number } | null>(null);
 
   const onPointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
@@ -400,33 +654,96 @@ export function Inspector({
             <button
               type="button"
               role="tab"
+              id="inspector-tab-details"
+              aria-controls="inspector-panel-details"
               aria-selected={activeTab === "details"}
+              tabIndex={activeTab === "details" ? 0 : -1}
               className={`${shell.inspectorTab} ${activeTab === "details" ? shell.inspectorTabActive : ""}`}
               onClick={() => setActiveTab("details")}
+              onKeyDown={(e) => {
+                if (e.key === "ArrowRight") {
+                  e.preventDefault();
+                  setActiveTab("context");
+                } else if (e.key === "ArrowLeft") {
+                  e.preventDefault();
+                  setActiveTab("diagnostics");
+                }
+              }}
               data-testid="inspector-tab-details"
             >
-              Turn details
+              {t.inspector.turnDetails}
             </button>
             <button
               type="button"
               role="tab"
+              id="inspector-tab-context"
+              aria-controls="inspector-panel-context"
               aria-selected={activeTab === "context"}
+              tabIndex={activeTab === "context" ? 0 : -1}
               className={`${shell.inspectorTab} ${activeTab === "context" ? shell.inspectorTabActive : ""}`}
               onClick={() => setActiveTab("context")}
+              onKeyDown={(e) => {
+                if (e.key === "ArrowRight") {
+                  e.preventDefault();
+                  setActiveTab("diagnostics");
+                } else if (e.key === "ArrowLeft") {
+                  e.preventDefault();
+                  setActiveTab("details");
+                }
+              }}
               data-testid="inspector-tab-context"
             >
-              Context
+              {t.inspector.context}
+            </button>
+            <button
+              type="button"
+              role="tab"
+              id="inspector-tab-diagnostics"
+              aria-controls="inspector-panel-diagnostics"
+              aria-selected={activeTab === "diagnostics"}
+              tabIndex={activeTab === "diagnostics" ? 0 : -1}
+              className={`${shell.inspectorTab} ${activeTab === "diagnostics" ? shell.inspectorTabActive : ""}`}
+              onClick={() => {
+                setActiveTab("diagnostics");
+                onRefreshDiagnostics?.();
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "ArrowRight") {
+                  e.preventDefault();
+                  setActiveTab("details");
+                } else if (e.key === "ArrowLeft") {
+                  e.preventDefault();
+                  setActiveTab("context");
+                }
+              }}
+              data-testid="inspector-tab-diagnostics"
+            >
+              {t.inspector.diagnostics}
             </button>
           </div>
-          <button type="button" onClick={onClose} data-testid="inspector-close">
-            Close
+          <button type="button" onClick={onClose} aria-label={t.common.close} data-testid="inspector-close">
+            {t.common.close}
           </button>
         </div>
-        {activeTab === "details" ? (
-          <InspectorDetails row={focusedRow} activeAgent={activeAgent} />
-        ) : (
-          <ContextPanel snapshot={contextSnapshot} />
-        )}
+        <div
+          role="tabpanel"
+          id={`inspector-panel-${activeTab}`}
+          aria-labelledby={`inspector-tab-${activeTab}`}
+          tabIndex={0}
+        >
+          {activeTab === "details" ? (
+            <InspectorDetails row={focusedRow} activeAgent={activeAgent} />
+          ) : activeTab === "context" ? (
+            <ContextPanel snapshot={contextSnapshot} status={contextSnapshotStatus} error={contextSnapshotError} />
+          ) : (
+            <RuntimeDiagnosticsView
+              diagnostics={diagnostics}
+              status={diagnosticsStatus}
+              error={diagnosticsError}
+              onRefresh={onRefreshDiagnostics}
+            />
+          )}
+        </div>
       </div>
     </aside>
   );
@@ -439,17 +756,18 @@ function InspectorDetails({
   readonly row: TimelineRow | null;
   readonly activeAgent?: AgentProfile | null;
 }) {
+  const { t } = useI18n();
   if (!row) {
     return (
       <div>
-        <p className={shell.inspectorEmpty}>Select a timeline row to inspect it.</p>
+        <p className={shell.inspectorEmpty}>{t.inspector.selectRowToInspect}</p>
         {activeAgent ? (
           <dl className={shell.inspectorFields} style={{ marginTop: "1rem" }}>
-            <dt>Agent</dt>
+            <dt>{t.inspector.agent}</dt>
             <dd>{activeAgent.name}</dd>
-            <dt>Model</dt>
+            <dt>{t.inspector.model}</dt>
             <dd className={shell.mono}>{activeAgent.model}</dd>
-            <dt>Provider</dt>
+            <dt>{t.inspector.provider}</dt>
             <dd>{activeAgent.provider}</dd>
             {activeAgent.program ? (
               <>
@@ -469,9 +787,9 @@ function InspectorDetails({
                 <dd className={shell.mono}>{activeAgent.bindingId}</dd>
               </>
             ) : null}
-            <dt>Secret Ref</dt>
+            <dt>{t.inspector.secretRef}</dt>
             <dd className={shell.mono}>
-              {activeAgent.secretRef ? activeAgent.secretRef : "none"}
+              {activeAgent.secretRef ? activeAgent.secretRef : t.inspector.none}
             </dd>
           </dl>
         ) : null}
@@ -480,29 +798,29 @@ function InspectorDetails({
   }
   return (
     <dl className={shell.inspectorFields}>
-      <dt>Kind</dt>
+      <dt>{t.inspector.kind}</dt>
       <dd>{row.kind}</dd>
-      <dt>Row id</dt>
+      <dt>{t.inspector.rowId}</dt>
       <dd className={shell.mono}>{row.id}</dd>
       {row.status ? (
         <>
-          <dt>Tool status</dt>
+          <dt>{t.inspector.toolStatus}</dt>
           <dd>{row.status}</dd>
         </>
       ) : null}
       {row.permission ? (
         <>
-          <dt>Requested action</dt>
+          <dt>{t.inspector.requestedAction}</dt>
           <dd className={shell.mono}>{row.permission.requestedAction}</dd>
-          <dt>Scope</dt>
+          <dt>{t.inspector.scope}</dt>
           <dd className={shell.mono}>{row.permission.scope}</dd>
-          <dt>Decision</dt>
+          <dt>{t.inspector.decision}</dt>
           <dd>{row.permission.decision ?? "pending"}</dd>
-          <dt>Decision authority</dt>
-          <dd>Provisional UI decision; the P1 runtime owns the real command.</dd>
+          <dt>{t.inspector.decisionAuthority}</dt>
+          <dd>{t.inspector.decisionAuthorityDesc}</dd>
         </>
       ) : null}
-      <dt>Text</dt>
+      <dt>{t.inspector.text}</dt>
       <dd>{row.text}</dd>
     </dl>
   );
@@ -564,13 +882,14 @@ export function StatusBar({
   readonly streamState?: string;
   readonly onReconnect?: () => void;
 }) {
+  const { t } = useI18n();
   const isDisconnected = coreState.includes("disconnected") || coreState.includes("unavailable");
   return (
     <footer className={shell.statusBar} data-testid="status-bar">
       <span>Core · {coreState}</span>
       <span>Thread · {threadStatus}</span>
       {streamState ? <span>Stream · {streamState}</span> : null}
-      <span>Local · no sync (P3)</span>
+      <span>{t.statusBar.localNoSync}</span>
       {isDisconnected && onReconnect ? (
         <button
           type="button"
@@ -591,11 +910,13 @@ export interface AgentOnboardingModalProps {
   readonly onSave: (data: {
     name: string;
     provider: string;
-    model: string;
+    model?: string;
     program?: string;
     args?: string[] | string;
     envKeys?: string[] | string;
     secretRef?: string;
+    secretRefs?: string[] | string;
+    envMappings?: readonly EnvSecretMapping[];
     label?: string;
   }) => Promise<void>;
   readonly onTest: (data: {
@@ -605,10 +926,12 @@ export interface AgentOnboardingModalProps {
     args?: string[] | string;
     envKeys?: string[] | string;
     secretRef?: string;
+    secretRefs?: string[] | string;
+    envMappings?: readonly EnvSecretMapping[];
     label?: string;
-  }) => Promise<{ success: boolean; latencyMs?: number; error?: string }>;
+  }) => Promise<TestAgentResult>;
   readonly isTesting: boolean;
-  readonly testResult: { success: boolean; latencyMs?: number; error?: string } | null;
+  readonly testResult: TestAgentResult | null;
 }
 
 /** Minimal Agent Onboarding modal with opaque secret reference handling. */
@@ -620,31 +943,124 @@ export function AgentOnboardingModal({
   isTesting,
   testResult,
 }: AgentOnboardingModalProps) {
+  const { t } = useI18n();
   const [name, setName] = useState("");
   const [provider, setProvider] = useState("acp");
-  const [model, setModel] = useState("claude-3-7-sonnet");
+  const [model, setModel] = useState("");
   const [program, setProgram] = useState("");
   const [args, setArgs] = useState("");
   const [envKeys, setEnvKeys] = useState("");
   const [secretRef, setSecretRef] = useState("");
+  const [extraMappings, setExtraMappings] = useState<{ id: string; envKey: string; secretRef: string }[]>([]);
   const [label, setLabel] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const modalRef = useRef<HTMLDivElement | null>(null);
+  const triggerRef = useRef<Element | null>(null);
+
+  useEffect(() => {
+    if (isOpen) {
+      triggerRef.current = document.activeElement;
+      const firstInput = modalRef.current?.querySelector<HTMLElement>(
+        "input, button, select, textarea",
+      );
+      firstInput?.focus();
+    } else if (triggerRef.current && "focus" in triggerRef.current) {
+      (triggerRef.current as HTMLElement).focus();
+    }
+  }, [isOpen]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.stopPropagation();
+        onClose();
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [isOpen, onClose]);
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === "Tab") {
+      const focusables = modalRef.current?.querySelectorAll<HTMLElement>(
+        'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
+      );
+      if (!focusables || focusables.length === 0) return;
+      const first = focusables[0]!;
+      const last = focusables[focusables.length - 1]!;
+      if (e.shiftKey) {
+        if (document.activeElement === first) {
+          e.preventDefault();
+          last.focus();
+        }
+      } else {
+        if (document.activeElement === last) {
+          e.preventDefault();
+          first.focus();
+        }
+      }
+    }
+  };
 
   if (!isOpen) return null;
+
+  const gatherMappings = () => {
+    const list: EnvSecretMapping[] = [];
+    const keys: string[] = [];
+    const refs: string[] = [];
+
+    const pk = envKeys.trim();
+    const pr = secretRef.trim();
+    if (pk || pr) {
+      const pKeys = parseStringList(pk);
+      if (pKeys.length > 1) {
+        for (const k of pKeys) {
+          keys.push(k);
+        }
+        if (pr) {
+          refs.push(pr);
+        }
+      } else if (pk) {
+        keys.push(pk);
+        if (pr) refs.push(pr);
+        if (pk && pr) list.push({ envKey: pk, secretRef: pr });
+      }
+    }
+
+    for (const extra of extraMappings) {
+      const ek = extra.envKey.trim();
+      const er = extra.secretRef.trim();
+      if (ek || er) {
+        if (ek) keys.push(ek);
+        if (er) refs.push(er);
+        if (ek && er) list.push({ envKey: ek, secretRef: er });
+      }
+    }
+
+    return {
+      envKeys: keys,
+      secretRefs: refs,
+      envMappings: list,
+    };
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!name.trim()) return;
     setSubmitting(true);
     try {
+      const m = gatherMappings();
       await onSave({
         name: name.trim(),
         provider: provider.trim(),
-        model: model.trim(),
+        model: model.trim() || undefined,
         program: program.trim() || provider.trim(),
-        args: args.trim() ? args.trim().split(/\s+/) : [],
-        envKeys: envKeys.trim() ? envKeys.trim().split(/[,\s]+/) : [],
-        secretRef: secretRef.trim() || undefined,
+        args: parseCommandLineArgs(args),
+        envKeys: m.envKeys,
+        secretRef: m.secretRefs[0] || undefined,
+        secretRefs: m.secretRefs,
+        envMappings: m.envMappings,
         label: label.trim() || name.trim() || undefined,
       });
       onClose();
@@ -654,23 +1070,39 @@ export function AgentOnboardingModal({
   };
 
   const handleTest = async () => {
+    const m = gatherMappings();
     await onTest({
       provider: provider.trim(),
-      model: model.trim(),
+      model: model.trim() || undefined,
       program: program.trim() || provider.trim(),
-      args: args.trim() ? args.trim().split(/\s+/) : [],
-      envKeys: envKeys.trim() ? envKeys.trim().split(/[,\s]+/) : [],
-      secretRef: secretRef.trim() || undefined,
+      args: parseCommandLineArgs(args),
+      envKeys: m.envKeys,
+      secretRef: m.secretRefs[0] || undefined,
+      secretRefs: m.secretRefs,
+      envMappings: m.envMappings,
       label: label.trim() || name.trim() || undefined,
     });
   };
 
   return (
-    <div className={shell.modalOverlay} role="dialog" aria-modal="true" aria-label="Agent Onboarding">
+    <div
+      className={shell.modalOverlay}
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="onboarding-modal-title"
+      ref={modalRef}
+      onKeyDown={handleKeyDown}
+    >
       <div className={shell.modalCard}>
         <div className={shell.modalHeader}>
-          <h2>Agent Onboarding</h2>
-          <button type="button" onClick={onClose} data-testid="onboarding-close">
+          <h2 id="onboarding-modal-title">{t.onboarding.title}</h2>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close onboarding modal"
+            title="Close"
+            data-testid="onboarding-close"
+          >
             ×
           </button>
         </div>
@@ -689,26 +1121,35 @@ export function AgentOnboardingModal({
             />
 
             <label htmlFor="agent-provider">Provider</label>
-            <input
-              id="agent-provider"
-              className={shell.formInput}
-              value={provider}
-              onChange={(e) => setProvider(e.target.value)}
-              placeholder="acp / terminal / native"
-              required
-              data-testid="agent-provider-input"
-            />
+            <div>
+              <input
+                id="agent-provider"
+                className={shell.formInput}
+                value={provider}
+                onChange={(e) => setProvider(e.target.value)}
+                placeholder="acp"
+                required
+                data-testid="agent-provider-input"
+              />
+              <span style={{ fontSize: "0.75rem", color: "var(--color-fg-muted)", display: "block", marginTop: "2px" }}>
+                {t.agents.acpHarnessNote}
+              </span>
+            </div>
 
             <label htmlFor="agent-model">Model</label>
-            <input
-              id="agent-model"
-              className={shell.formInput}
-              value={model}
-              onChange={(e) => setModel(e.target.value)}
-              placeholder="claude-3-7-sonnet"
-              required
-              data-testid="agent-model-input"
-            />
+            <div>
+              <input
+                id="agent-model"
+                className={shell.formInput}
+                value={model}
+                onChange={(e) => setModel(e.target.value)}
+                placeholder="optional (agent-managed)"
+                data-testid="agent-model-input"
+              />
+              <span style={{ fontSize: "0.75rem", color: "var(--color-fg-muted)", display: "block", marginTop: "2px" }}>
+                {t.agents.modelOptionalNote}
+              </span>
+            </div>
 
             <label htmlFor="agent-program">Program</label>
             <input
@@ -716,7 +1157,7 @@ export function AgentOnboardingModal({
               className={shell.formInput}
               value={program}
               onChange={(e) => setProgram(e.target.value)}
-              placeholder="/usr/local/bin/acp-agent or command"
+              placeholder="/usr/local/bin/acp-agent or acp-agent.exe"
               data-testid="agent-program-input"
             />
 
@@ -726,19 +1167,77 @@ export function AgentOnboardingModal({
               className={shell.formInput}
               value={args}
               onChange={(e) => setArgs(e.target.value)}
-              placeholder="--mode server --verbose"
+              placeholder='--mode server --config "C:\path with spaces\config.json"'
               data-testid="agent-args-input"
             />
 
-            <label htmlFor="agent-env-keys">Env Keys</label>
-            <input
-              id="agent-env-keys"
-              className={shell.formInput}
-              value={envKeys}
-              onChange={(e) => setEnvKeys(e.target.value)}
-              placeholder="ANTHROPIC_API_KEY, DEBUG"
-              data-testid="agent-env-keys-input"
-            />
+            <label htmlFor="agent-env-keys">Env Keys & Secret Refs</label>
+            <div>
+              <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+                <input
+                  id="agent-env-keys"
+                  className={shell.formInput}
+                  value={envKeys}
+                  onChange={(e) => setEnvKeys(e.target.value)}
+                  placeholder="e.g. ANTHROPIC_API_KEY (leave blank if no auth)"
+                  data-testid="agent-env-keys-input"
+                  style={{ flex: 1 }}
+                />
+                <input
+                  id="agent-secret"
+                  className={shell.formInput}
+                  value={secretRef}
+                  onChange={(e) => setSecretRef(e.target.value)}
+                  placeholder="sec_... or vault://..."
+                  data-testid="agent-secret-ref"
+                  style={{ flex: 1 }}
+                />
+                <button
+                  type="button"
+                  onClick={() => setExtraMappings((prev) => [...prev, { id: `extra-${Date.now()}-${Math.random()}`, envKey: "", secretRef: "" }])}
+                  data-testid="add-env-mapping-btn"
+                  style={{ padding: "0 var(--spacing-8)", height: "var(--control-height)", cursor: "pointer" }}
+                >
+                  + Add
+                </button>
+              </div>
+
+              {extraMappings.map((row, idx) => (
+                <div key={row.id} style={{ display: "flex", gap: "8px", marginTop: "6px", alignItems: "center" }} data-testid={`env-mapping-row-${idx}`}>
+                  <input
+                    className={shell.formInput}
+                    value={row.envKey}
+                    onChange={(e) => {
+                      const v = e.target.value;
+                      setExtraMappings((prev) => prev.map((r) => r.id === row.id ? { ...r, envKey: v } : r));
+                    }}
+                    placeholder="Variable Key"
+                    data-testid={`env-key-input-${idx}`}
+                    style={{ flex: 1 }}
+                  />
+                  <input
+                    className={shell.formInput}
+                    value={row.secretRef}
+                    onChange={(e) => {
+                      const v = e.target.value;
+                      setExtraMappings((prev) => prev.map((r) => r.id === row.id ? { ...r, secretRef: v } : r));
+                    }}
+                    placeholder="Secret Ref (sec_..., vault://...)"
+                    data-testid={`secret-ref-input-${idx}`}
+                    style={{ flex: 1 }}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setExtraMappings((prev) => prev.filter((r) => r.id !== row.id))}
+                    data-testid={`remove-mapping-btn-${idx}`}
+                    style={{ background: "transparent", border: "none", color: "var(--color-danger, #b3362b)", cursor: "pointer", fontSize: "1.2rem", padding: "0 4px" }}
+                    title="Remove mapping"
+                  >
+                    ×
+                  </button>
+                </div>
+              ))}
+            </div>
 
             <label htmlFor="agent-label">Label</label>
             <input
@@ -750,27 +1249,27 @@ export function AgentOnboardingModal({
               data-testid="agent-label-input"
             />
 
-            <label htmlFor="agent-secret">Secret Ref</label>
-            <input
-              id="agent-secret"
-              className={shell.formInput}
-              value={secretRef}
-              onChange={(e) => setSecretRef(e.target.value)}
-              placeholder="vault://key-id or env:VAR"
-              data-testid="agent-secret-ref"
-            />
-
             <p className={shell.secretNotice}>
-              🔒 Plaintext keys are never stored. Only opaque reference pointers (e.g. vault://..., env:...) are accepted.
+              🔒 Credentials must reside in the OS secret store; enter only the opaque reference pointer (sec_..., vault://..., env:...). Plaintext API keys are rejected.
+            </p>
+            <p style={{ fontSize: "0.75rem", color: "var(--color-muted)", marginTop: "4px" }} data-testid="agent-deferred-notice">
+              ℹ️ {t.agents.deferredNotice}
             </p>
           </div>
 
           <div style={{ marginTop: "0.5rem" }}>
             {testResult ? (
               testResult.success ? (
-                <span className={shell.testResultOk}>
-                  ✓ Connection verified ({testResult.latencyMs}ms)
-                </span>
+                <div>
+                  <span className={shell.testResultOk}>
+                    ✓ Connection verified ({testResult.latencyMs}ms)
+                  </span>
+                  {testResult.capabilities && Object.keys(testResult.capabilities).length > 0 ? (
+                    <div style={{ fontSize: "0.75rem", color: "var(--color-fg-muted)", marginTop: "4px" }} data-testid="tested-capabilities">
+                      Capabilities: {Object.entries(testResult.capabilities).map(([k, v]) => `${k}: ${v}`).join(", ")}
+                    </div>
+                  ) : null}
+                </div>
               ) : (
                 <span className={shell.testResultErr}>
                   × Test failed: {testResult.error}
@@ -786,14 +1285,14 @@ export function AgentOnboardingModal({
               disabled={isTesting}
               data-testid="agent-test-button"
             >
-              {isTesting ? "Testing…" : "Test Connection"}
+              {isTesting ? t.onboarding.testing : t.onboarding.testConnection}
             </button>
             <button
               type="submit"
               disabled={submitting || !name.trim()}
               data-testid="agent-save-button"
             >
-              {submitting ? "Saving…" : "Save Agent"}
+              {submitting ? t.common.save : t.onboarding.saveAgent}
             </button>
           </div>
         </form>
@@ -801,3 +1300,153 @@ export function AgentOnboardingModal({
     </div>
   );
 }
+
+export interface SettingsModalProps {
+  readonly isOpen: boolean;
+  readonly onClose: () => void;
+  readonly themeSource: ThemeSource;
+  readonly onThemeSourceChange: (theme: ThemeSource) => void;
+  readonly localeSource: LocaleSource;
+  readonly onLocaleSourceChange: (locale: LocaleSource) => void;
+  readonly diagnostics?: RuntimeDiagnosticsDto | null;
+  readonly diagnosticsStatus?: "idle" | "loading" | "loaded" | "error";
+  readonly onRefreshDiagnostics?: () => void;
+}
+
+export function SettingsModal({
+  isOpen,
+  onClose,
+  themeSource,
+  onThemeSourceChange,
+  localeSource,
+  onLocaleSourceChange,
+  diagnostics,
+  diagnosticsStatus,
+  onRefreshDiagnostics,
+}: SettingsModalProps) {
+  const { t } = useI18n();
+  const modalRef = useRef<HTMLDivElement | null>(null);
+  const triggerRef = useRef<Element | null>(null);
+
+  useEffect(() => {
+    if (isOpen) {
+      triggerRef.current = document.activeElement;
+      const firstInput = modalRef.current?.querySelector<HTMLElement>(
+        "input, button, select, textarea",
+      );
+      firstInput?.focus();
+    } else if (triggerRef.current && "focus" in triggerRef.current) {
+      (triggerRef.current as HTMLElement).focus();
+    }
+  }, [isOpen]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.stopPropagation();
+        onClose();
+      } else if (e.key === "Tab") {
+        if (!modalRef.current) return;
+        const focusable = modalRef.current.querySelectorAll<HTMLElement>(
+          'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
+        );
+        if (focusable.length === 0) return;
+        const first = focusable[0];
+        const last = focusable[focusable.length - 1];
+        if (e.shiftKey) {
+          if (document.activeElement === first) {
+            e.preventDefault();
+            last?.focus();
+          }
+        } else {
+          if (document.activeElement === last) {
+            e.preventDefault();
+            first?.focus();
+          }
+        }
+      }
+    };
+    window.addEventListener("keydown", onKeyDown, true);
+    return () => window.removeEventListener("keydown", onKeyDown, true);
+  }, [isOpen, onClose]);
+
+  if (!isOpen) return null;
+
+  return (
+    <div
+      className={shell.modalOverlay}
+      role="dialog"
+      aria-modal="true"
+      aria-label={t.settings.title}
+      ref={modalRef}
+      data-testid="settings-modal"
+    >
+      <div className={shell.modalCard}>
+        <div className={shell.modalHeader}>
+          <h2>{t.settings.title}</h2>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label={t.common.close}
+            data-testid="settings-close-btn"
+          >
+            ×
+          </button>
+        </div>
+
+        <div className={shell.formGrid}>
+          <label htmlFor="settings-theme">{t.settings.theme}</label>
+          <select
+            id="settings-theme"
+            className={shell.formInput}
+            value={themeSource}
+            onChange={(e) => onThemeSourceChange(e.target.value as ThemeSource)}
+            data-testid="settings-theme-select"
+          >
+            <option value="system">{t.settings.themeSystem}</option>
+            <option value="light">{t.settings.themeLight}</option>
+            <option value="dark">{t.settings.themeDark}</option>
+          </select>
+
+          <label htmlFor="settings-language">{t.settings.language}</label>
+          <select
+            id="settings-language"
+            className={shell.formInput}
+            value={localeSource}
+            onChange={(e) => onLocaleSourceChange(e.target.value as LocaleSource)}
+            data-testid="settings-locale-select"
+          >
+            <option value="system">{t.settings.langSystem}</option>
+            <option value="en">{t.settings.langEn}</option>
+            <option value="zh-CN">{t.settings.langZh}</option>
+          </select>
+
+          <div className={shell.secretNotice} style={{ marginTop: "var(--spacing-8)" }}>
+            {t.settings.deviceNotice}
+          </div>
+        </div>
+
+        <div style={{ marginTop: "16px", borderTop: "1px solid var(--color-border)", paddingTop: "12px" }} data-testid="settings-diagnostics-section">
+          <h3 style={{ fontSize: "0.875rem", marginBottom: "8px" }}>{t.inspector.diagnostics}</h3>
+          <RuntimeDiagnosticsView
+            diagnostics={diagnostics}
+            status={diagnosticsStatus}
+            onRefresh={onRefreshDiagnostics}
+          />
+        </div>
+
+        <div className={shell.modalActions}>
+          <button
+            type="button"
+            onClick={onClose}
+            data-testid="settings-done-button"
+          >
+            {t.common.close}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+

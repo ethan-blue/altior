@@ -29,6 +29,10 @@ describe("Transport Integration & UI Workflow", () => {
     fireEvent.change(screen.getByTestId("agent-secret-ref"), {
       target: { value: "vault://delta-sec-key" },
     });
+    // One credential reference per environment key (protocol invariant).
+    fireEvent.change(screen.getByTestId("agent-env-keys-input"), {
+      target: { value: "DELTA_API_KEY" },
+    });
 
     // Test connection
     fireEvent.click(screen.getByTestId("agent-test-button"));
@@ -52,6 +56,9 @@ describe("Transport Integration & UI Workflow", () => {
     const transport = new InMemoryTransport();
     render(<App transport={transport} />);
 
+    // Wait for the authoritative list and the snapshot-provided agent
+    // profile before creating (A03: no local defaults to lean on).
+    await screen.findByRole("heading", { level: 1, name: /Contract fixture walkthrough/ });
     fireEvent.click(screen.getByTestId("new-thread"));
 
     await waitFor(() => {
@@ -63,7 +70,7 @@ describe("Transport Integration & UI Workflow", () => {
     const transport = new InMemoryTransport();
     render(<App transport={transport} />);
 
-    fireEvent.click(screen.getByTestId(`thread-${approvalThread.id}`));
+    fireEvent.click(await screen.findByTestId(`thread-${approvalThread.id}`));
 
     const denyBtn = await screen.findByTestId("deny");
     fireEvent.click(denyBtn);
@@ -82,10 +89,11 @@ describe("Transport Integration & UI Workflow", () => {
       if (cmd.kind === "start_turn") {
         return new Promise(() => {}); // hang to simulate active streaming
       }
-      return { ok: true };
+      return undefined; // defer to the built-in protocol responses
     });
 
     render(<App transport={transport} />);
+    await screen.findByRole("heading", { level: 1, name: /Contract fixture walkthrough/ });
 
     const composer = screen.getByTestId("composer");
     fireEvent.change(composer, { target: { value: "Perform heavy analysis" } });

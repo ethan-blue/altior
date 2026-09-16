@@ -13,10 +13,12 @@ use serde::{Deserialize, Serialize};
 use altior_domain::{
     AcpHarnessBinding, AgentProfile, AgentProfileId, BoundedPath, DeliveryState, DisplayName,
     EventId, HarnessArg, HarnessBindingId, HarnessEnvKey, HarnessSecretRef, MAX_HARNESS_ARGS_COUNT,
-    MAX_HARNESS_ENV_KEYS_COUNT, MAX_HARNESS_SECRET_REFS_COUNT, OperationId, Permission, ProjectId,
-    Thread, ThreadCursor, ThreadId, ThreadState, Turn, TurnCursor, TurnId, TurnState, UnixMillis,
+    MAX_HARNESS_ENV_KEYS_COUNT, MAX_HARNESS_SECRET_REFS_COUNT, MemoryCursor, MemoryRecord,
+    OperationId, Permission, ProjectId, Thread, ThreadCursor, ThreadId, ThreadState, Turn,
+    TurnCursor, TurnId, TurnState, UnixMillis,
 };
 
+use crate::capability::CapabilitySet;
 use crate::error::ProtocolError;
 
 fn thread_state_to_str(s: ThreadState) -> &'static str {
@@ -428,6 +430,26 @@ impl From<HarnessBindingDto> for HarnessBindingConfigDto {
     }
 }
 
+/// Result payload returned upon testing a harness binding.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(
+    feature = "dto-export",
+    derive(ts_rs::TS),
+    ts(export, export_to = "../../../apps/desktop/src/ipc/dto/")
+)]
+pub struct TestHarnessResponseDto {
+    /// Whether the binding is alive and functional.
+    pub ok: bool,
+    /// Capabilities declared/negotiated with the agent harness.
+    pub capabilities: CapabilitySet,
+    /// Optional diagnostics summary if probe failed or produced notices.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub diagnostics: Option<String>,
+    /// Probed harness binding identifier.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub probed_binding_id: Option<String>,
+}
+
 /// Cursor for paginating threads (newest-first).
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(
@@ -547,6 +569,12 @@ pub struct ThreadListResponseDto {
 }
 
 /// Paginated response for thread turn history.
+///
+/// A05 (ADR 0020): `entries` carries the journal-projected timeline
+/// records (prompts, assistant deltas, permissions, turn states, bounded
+/// unknowns) so the client renders real content after restarts. `turns`
+/// remains for turn-level summaries and older clients; both are
+/// projections of the same journal.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(
     feature = "dto-export",
@@ -563,6 +591,134 @@ pub struct ThreadHistoryResponseDto {
     pub next_cursor: Option<TurnCursorDto>,
     /// Whether additional turns exist.
     pub has_more: bool,
+    /// Ordered timeline records (journal projection), oldest first.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub entries: Vec<HistoryEntryDto>,
+    /// Journal-seq cursor for fetching the next (older) entries page.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "dto-export", ts(as = "Option<HistoryCursorDto>"))]
+    pub next_seq_cursor: Option<HistoryCursorDto>,
+    /// The thread's journal high-water seq at query time (live catch-up point).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "dto-export", ts(type = "number | null"))]
+    pub high_water_seq: Option<u64>,
+}
+
+/// Journal-seq cursor for paginating timeline entries toward the past.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(
+    feature = "dto-export",
+    derive(ts_rs::TS),
+    ts(export, export_to = "../../../apps/desktop/src/ipc/dto/")
+)]
+pub struct HistoryCursorDto {
+    /// Journal seq of the oldest entry already fetched.
+    #[cfg_attr(feature = "dto-export", ts(type = "number"))]
+    pub seq: u64,
+}
+
+/// One bounded timeline record projected from the domain journal
+/// (ADR 0020). Live events and history pages reduce through the same
+/// client logic, so this vocabulary mirrors the live event kinds.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(
+    feature = "dto-export",
+    derive(ts_rs::TS),
+    ts(export, export_to = "../../../apps/desktop/src/ipc/dto/")
+)]
+#[serde(tag = "entry_kind", rename_all = "snake_case")]
+pub enum HistoryEntryDto {
+    /// The user prompt that started a turn (`TurnStarted.content`).
+    UserMessage {
+        /// Journal event identity.
+        #[cfg_attr(feature = "dto-export", ts(as = "String"))]
+        event_id: EventId,
+        /// Owning turn.
+        #[cfg_attr(feature = "dto-export", ts(as = "String"))]
+        turn_id: TurnId,
+        /// Journal position (total order within the thread).
+        #[cfg_attr(feature = "dto-export", ts(type = "number"))]
+        seq: u64,
+        /// Prompt text (bounded at write time).
+        text: String,
+        /// When the fact was journaled.
+        #[cfg_attr(feature = "dto-export", ts(type = "number"))]
+        occurred_at: UnixMillis,
+    },
+    /// One streamed assistant delta (`MessageDelta.text`).
+    AssistantDelta {
+        #[cfg_attr(feature = "dto-export", ts(as = "String"))]
+        event_id: EventId,
+        #[cfg_attr(feature = "dto-export", ts(as = "String"))]
+        turn_id: TurnId,
+        #[cfg_attr(feature = "dto-export", ts(type = "number"))]
+        seq: u64,
+        text: String,
+        #[cfg_attr(feature = "dto-export", ts(type = "number"))]
+        occurred_at: UnixMillis,
+    },
+    /// A permission request (`PermissionRequested`).
+    Permission {
+        #[cfg_attr(feature = "dto-export", ts(as = "String"))]
+        event_id: EventId,
+        #[cfg_attr(feature = "dto-export", ts(as = "String"))]
+        turn_id: TurnId,
+        #[cfg_attr(feature = "dto-export", ts(type = "number"))]
+        seq: u64,
+        /// Permission kind: `"execute"`, `"read"`, `"write"`, `"network"`.
+        permission_kind: String,
+        /// Bounded description of the requested action.
+        description: String,
+        /// Decision at journal time: `"pending"`, `"approved"`, `"denied"`.
+        decision: String,
+        #[cfg_attr(feature = "dto-export", ts(type = "number"))]
+        occurred_at: UnixMillis,
+    },
+    /// A permission decision (`PermissionDecided`); the client patches the
+    /// matching permission row even if that row sits on an earlier page.
+    PermissionDecision {
+        #[cfg_attr(feature = "dto-export", ts(as = "String"))]
+        event_id: EventId,
+        /// Identity of the originally requested permission event.
+        #[cfg_attr(feature = "dto-export", ts(as = "String"))]
+        permission_event_id: EventId,
+        #[cfg_attr(feature = "dto-export", ts(as = "String"))]
+        turn_id: TurnId,
+        #[cfg_attr(feature = "dto-export", ts(type = "number"))]
+        seq: u64,
+        decision: String,
+        #[cfg_attr(feature = "dto-export", ts(type = "number"))]
+        occurred_at: UnixMillis,
+    },
+    /// A terminal turn state (`TurnCompleted`/`Cancelled`/`Failed`).
+    TurnState {
+        #[cfg_attr(feature = "dto-export", ts(as = "String"))]
+        event_id: EventId,
+        #[cfg_attr(feature = "dto-export", ts(as = "String"))]
+        turn_id: TurnId,
+        #[cfg_attr(feature = "dto-export", ts(type = "number"))]
+        seq: u64,
+        /// `"completed"`, `"cancelled"`, or `"failed"`.
+        state: String,
+        /// Failure/cancel reason, when present.
+        reason: Option<String>,
+        /// Delivery classification for failed turns, when present.
+        delivery: Option<String>,
+        #[cfg_attr(feature = "dto-export", ts(type = "number"))]
+        occurred_at: UnixMillis,
+    },
+    /// A journal row that cannot be projected: preserved with a bounded
+    /// diagnostic instead of failing the page.
+    Unknown {
+        #[cfg_attr(feature = "dto-export", ts(as = "String"))]
+        event_id: EventId,
+        #[cfg_attr(feature = "dto-export", ts(type = "number"))]
+        seq: u64,
+        /// Preserved journal kind string (bounded).
+        kind: String,
+        /// Bounded diagnostic describing the unprojectable row.
+        diagnostic: String,
+    },
 }
 
 /// Diagnostics and status summary for the Core runtime.
@@ -833,6 +989,125 @@ impl From<&altior_domain::ContextSnapshot> for ContextSnapshotDto {
             rendered_prompt: s.rendered_prompt.clone(),
         }
     }
+}
+
+/// Cursor for memory pagination.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(
+    feature = "dto-export",
+    derive(ts_rs::TS),
+    ts(export, export_to = "../../../apps/desktop/src/ipc/dto/")
+)]
+pub struct MemoryCursorDto {
+    /// Timestamp of the last row.
+    #[cfg_attr(feature = "dto-export", ts(type = "number"))]
+    pub updated_at: UnixMillis,
+    /// Memory identifier tie-breaker of the last row.
+    pub memory_id: String,
+}
+
+impl From<&MemoryCursor> for MemoryCursorDto {
+    fn from(c: &MemoryCursor) -> Self {
+        Self {
+            updated_at: c.updated_at,
+            memory_id: c.memory_id.as_str().to_owned(),
+        }
+    }
+}
+
+/// DTO for a persistent memory record (ADR 0017 / ADR 0018).
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(
+    feature = "dto-export",
+    derive(ts_rs::TS),
+    ts(export, export_to = "../../../apps/desktop/src/ipc/dto/")
+)]
+pub struct MemoryRecordDto {
+    /// Unique identity of this memory record (`mem_...`).
+    pub memory_id: String,
+    /// Bounded memory content.
+    pub content: String,
+    /// Scope kind (`"global"`, `"person"`, `"project"`, `"thread"`).
+    pub scope_kind: String,
+    /// Scope target identifier if scoped to person, project, or thread.
+    pub scope_target: Option<String>,
+    /// Semantic kind (`"fact"`, `"preference"`, `"instruction"`, `"summary"`).
+    pub kind: String,
+    /// Current lifecycle state (`"candidate"`, `"confirmed"`, `"rejected"`, `"superseded"`, `"forgotten"`, `"expired"`).
+    pub state: String,
+    /// Confidence percentage (0..=100).
+    pub confidence: u8,
+    /// Sensitivity level (`"normal"`, `"sensitive"`).
+    pub sensitivity: String,
+    /// Provenance source (`"explicit"`, `"inferred"`).
+    pub source: String,
+    /// Whether this record was explicitly created by the user.
+    pub explicit: bool,
+    /// Thread provenance ID, if associated with a conversation.
+    pub provenance_thread_id: Option<String>,
+    /// Turn provenance ID, if associated with a conversation turn.
+    pub provenance_turn_id: Option<String>,
+    /// Optional excerpt from which this memory was derived.
+    pub excerpt: Option<String>,
+    /// Creation timestamp.
+    #[cfg_attr(feature = "dto-export", ts(type = "number"))]
+    pub created_at: UnixMillis,
+    /// Last update timestamp.
+    #[cfg_attr(feature = "dto-export", ts(type = "number"))]
+    pub updated_at: UnixMillis,
+    /// Optional expiration timestamp.
+    #[cfg_attr(feature = "dto-export", ts(as = "Option<u64>"))]
+    pub expires_at: Option<UnixMillis>,
+    /// Successor memory ID that superseded this record, if any.
+    pub superseded_by: Option<String>,
+}
+
+impl From<&MemoryRecord> for MemoryRecordDto {
+    fn from(m: &MemoryRecord) -> Self {
+        Self {
+            memory_id: m.memory_id.as_str().to_owned(),
+            content: m.content.as_str().to_owned(),
+            scope_kind: m.scope.kind_str().to_owned(),
+            scope_target: m.scope.target_str().map(ToOwned::to_owned),
+            kind: m.kind.as_str().to_owned(),
+            state: m.state.as_str().to_owned(),
+            confidence: m.confidence,
+            sensitivity: m.sensitivity.as_str().to_owned(),
+            source: m.source.as_str().to_owned(),
+            explicit: m.source.is_explicit(),
+            provenance_thread_id: m
+                .provenance
+                .thread_id
+                .as_ref()
+                .map(|id| id.as_str().to_owned()),
+            provenance_turn_id: m
+                .provenance
+                .turn_id
+                .as_ref()
+                .map(|id| id.as_str().to_owned()),
+            excerpt: m.provenance.excerpt.as_ref().map(|e| e.as_str().to_owned()),
+            created_at: m.created_at,
+            updated_at: m.updated_at,
+            expires_at: m.expires_at,
+            superseded_by: m.superseded_by.as_ref().map(|id| id.as_str().to_owned()),
+        }
+    }
+}
+
+/// Paginated memory list response.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(
+    feature = "dto-export",
+    derive(ts_rs::TS),
+    ts(export, export_to = "../../../apps/desktop/src/ipc/dto/")
+)]
+pub struct MemoryListResponseDto {
+    /// Memories returned in this page.
+    pub memories: Vec<MemoryRecordDto>,
+    /// Cursor for the next page, or None if no more records.
+    pub next_cursor: Option<MemoryCursorDto>,
+    /// Whether more memories exist beyond this page.
+    pub has_more: bool,
 }
 
 #[cfg(test)]

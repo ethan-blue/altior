@@ -5,6 +5,12 @@
  * normalized agent events and the preserved-unknown rule; P1 replaces it
  * with the frozen event taxonomy. Content is index-derived — no random,
  * no real conversations, no secrets.
+ *
+ * Identities that reach the wire (thread ids on commands, message-row ids
+ * replayed as turn ids, permission-row ids replayed as event ids) follow
+ * the `altior-domain` `<prefix>_<16..64 of [0-9a-z]>` rules (A01, ADR 0019)
+ * so the fixture transport validates them exactly like real Core. Row kinds
+ * that never leave the UI (tool, error, unknown) keep local display ids.
  */
 import type { TimelineRow, ToolStatus } from "../features/timeline/timelineStore";
 
@@ -70,18 +76,18 @@ function unknownEvent(id: string, providerKind: string): TimelineRow {
 
 /** A normal completed thread: prompt, tool, answered permission, reply. */
 export const standardThread: ThreadFixture = {
-  id: "fixture/standard",
+  id: "thr_fixture000000001",
   title: "Contract fixture walkthrough",
   agent: "alpha (ACP)",
   status: "completed",
   pinned: true,
   rows: [
-    user("std-1", "Summarize the P0.2 IPC contract in three bullets."),
+    user("trn_fixture000000101", "Summarize the P0.2 IPC contract in three bullets."),
     tool("std-2", "rg --files crates/altior-ipc", "completed"),
-    permission("std-3", "read crates/altior-ipc/src", "project:altior"),
-    user("std-4", "[approved]"),
+    permission("evt_fixture000000101", "read crates/altior-ipc/src", "project:altior"),
+    user("trn_fixture000000103", "[approved]"),
     assistant(
-      "std-5",
+      "trn_fixture000000105",
       "Frames are 4-byte length-prefixed and capped at 256 KiB; sessions share one per-launch event log; reload is a new connection over the same log.",
     ),
     unknownEvent("std-6", "acp.update.plan"),
@@ -90,29 +96,29 @@ export const standardThread: ThreadFixture = {
 
 /** A thread parked on an unanswered permission request. */
 export const approvalThread: ThreadFixture = {
-  id: "fixture/approval",
+  id: "thr_fixture000000002",
   title: "Dependency audit with approvals",
   agent: "alpha (ACP)",
   status: "waiting-for-permission",
   pinned: false,
   rows: [
-    user("apr-1", "Audit the workspace dependencies and flag anything risky."),
+    user("trn_fixture000000111", "Audit the workspace dependencies and flag anything risky."),
     tool("apr-2", "cargo tree --workspace", "completed"),
-    permission("apr-3", "cargo tree --workspace --edges all", "project:altior"),
-    assistant("apr-4", "Waiting for your decision before reading the full graph.", true),
+    permission("evt_fixture000000111", "cargo tree --workspace --edges all", "project:altior"),
+    assistant("trn_fixture000000113", "Waiting for your decision before reading the full graph.", true),
   ],
 };
 
 /** A failed turn: error diagnostics and an indeterminate delivery note. */
 export const failureThread: ThreadFixture = {
-  id: "fixture/failure",
+  id: "thr_fixture000000003",
   title: "Interrupted spike run",
   agent: "beta (ACP)",
   status: "failed",
   pinned: false,
   rows: [
-    user("fai-1", "Draft the relay spike outline."),
-    assistant("fai-2", "The relay needs an envelope format, ack semantics, and…", true),
+    user("trn_fixture000000121", "Draft the relay spike outline."),
+    assistant("trn_fixture000000123", "The relay needs an envelope format, ack semantics, and…", true),
     error("fai-3", "turn stopped: refusal — the agent declined this request"),
     error("fai-4", "delivery: indeterminate (process exited mid-turn); no resend"),
   ],
@@ -125,11 +131,11 @@ export const failureThread: ThreadFixture = {
 export function hundredThousandRowThread(): ThreadFixture {
   const rows: TimelineRow[] = new Array<TimelineRow>(100_000);
   for (let index = 0; index < 100_000; index += 1) {
-    const id = `big-${index}`;
+    const id = `trn_big${String(index).padStart(13, "0")}`;
     if (index % 97 === 96) {
-      rows[index] = unknownEvent(id, "acp.update.usage");
+      rows[index] = unknownEvent(`big-${index}`, "acp.update.usage");
     } else if (index % 11 === 10) {
-      rows[index] = tool(id, `scan batch ${index}`, "completed");
+      rows[index] = tool(`big-tool-${index}`, `scan batch ${index}`, "completed");
     } else if (index % 2 === 0) {
       rows[index] = user(id, `deterministic question ${index}`);
     } else {
@@ -137,7 +143,7 @@ export function hundredThousandRowThread(): ThreadFixture {
     }
   }
   return {
-    id: "fixture/hundred-thousand",
+    id: "thr_fixture000000100",
     title: "100,000-row history (acceptance size)",
     agent: "alpha (ACP)",
     status: "completed",
@@ -151,10 +157,11 @@ export function olderHistory(count: number): TimelineRow[] {
   const rows: TimelineRow[] = new Array<TimelineRow>(count);
   for (let index = 0; index < count; index += 1) {
     const seq = count - index;
+    const id = `trn_old${String(seq).padStart(13, "0")}`;
     rows[index] =
       index % 2 === 0
-        ? user(`old-${seq}`, `older question ${seq}`)
-        : assistant(`old-${seq}`, `older answer ${seq}.`);
+        ? user(id, `older question ${seq}`)
+        : assistant(id, `older answer ${seq}.`);
   }
   return rows;
 }

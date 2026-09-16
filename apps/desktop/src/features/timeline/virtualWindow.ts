@@ -48,6 +48,44 @@ export function buildHeightIndex(
   return { offsets, count, total: offsets[count] ?? 0 };
 }
 
+/**
+ * Appends a new row's height to an existing HeightIndex in O(1).
+ */
+export function appendRowHeight(index: HeightIndex, height: number): HeightIndex {
+  if (!(height > 0)) {
+    throw new Error(`row has a non-positive height: ${String(height)}`);
+  }
+  const offsets = index.offsets.slice();
+  offsets.push(index.total + height);
+  return {
+    offsets,
+    count: index.count + 1,
+    total: offsets[offsets.length - 1] ?? index.total + height,
+  };
+}
+
+/**
+ * Adjusts an existing row's height by a delta in O(count - rowIndex).
+ */
+export function adjustRowHeight(
+  index: HeightIndex,
+  rowIndex: number,
+  delta: number,
+): HeightIndex {
+  if (delta === 0 || rowIndex < 0 || rowIndex >= index.count) {
+    return index;
+  }
+  const offsets = index.offsets.slice();
+  for (let i = rowIndex + 1; i <= index.count; i += 1) {
+    offsets[i] = (offsets[i] ?? 0) + delta;
+  }
+  return {
+    offsets,
+    count: index.count,
+    total: offsets[index.count] ?? (index.total + delta),
+  };
+}
+
 /** The top offset of a row. */
 export function offsetOf(index: HeightIndex, row: number): number {
   if (row < 0 || row > index.count) {

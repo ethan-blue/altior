@@ -360,7 +360,7 @@ fn test_p14_acceptance_journey_complete_eight_steps() {
     // ── Step 1: Clean Store Validation & Core Daemon Launch ────────────
     {
         let store = Store::open(&db_path).expect("open sqlite store for clean schema check");
-        assert_eq!(store.schema_version().expect("schema version"), 7);
+        assert_eq!(store.schema_version().expect("schema version"), 8);
         assert!(
             store
                 .agent_profiles(None, AgentProfileListLimit::try_new(50).unwrap())
@@ -468,10 +468,25 @@ fn test_p14_acceptance_journey_complete_eight_steps() {
         client_1.send_json(&test_cmd_a).unwrap();
         let res_test_a: EventEnvelope =
             recv_json_timeout(&mut client_1, Duration::from_secs(5)).unwrap();
-        assert!(matches!(
-            res_test_a.body,
-            EventBody::Known(KnownEvent::CommandResult { success: true, .. })
-        ));
+        match &res_test_a.body {
+            EventBody::Known(KnownEvent::CommandResult {
+                success,
+                data: Some(payload),
+                ..
+            }) => {
+                assert!(success);
+                let val = payload.value();
+                assert_eq!(val["ok"], true);
+                let caps = val
+                    .get("capabilities")
+                    .expect("capabilities must be in test_harness_binding response");
+                assert!(caps.is_object(), "capabilities must be an object");
+            }
+            other => panic!(
+                "Expected CommandResult with data for test_harness_a, got {:?}",
+                other
+            ),
+        }
 
         let op_test_b = OperationId::from_str("op_p14tstagent000000000000b1").unwrap();
         let test_cmd_b = make_command(
@@ -490,10 +505,25 @@ fn test_p14_acceptance_journey_complete_eight_steps() {
         client_1.send_json(&test_cmd_b).unwrap();
         let res_test_b: EventEnvelope =
             recv_json_timeout(&mut client_1, Duration::from_secs(5)).unwrap();
-        assert!(matches!(
-            res_test_b.body,
-            EventBody::Known(KnownEvent::CommandResult { success: true, .. })
-        ));
+        match &res_test_b.body {
+            EventBody::Known(KnownEvent::CommandResult {
+                success,
+                data: Some(payload),
+                ..
+            }) => {
+                assert!(success);
+                let val = payload.value();
+                assert_eq!(val["ok"], true);
+                let caps = val
+                    .get("capabilities")
+                    .expect("capabilities must be in test_harness_binding response");
+                assert!(caps.is_object(), "capabilities must be an object");
+            }
+            other => panic!(
+                "Expected CommandResult with data for test_harness_b, got {:?}",
+                other
+            ),
+        }
 
         // Direct SQLite read assertions: exactly 2 profiles, 2 bindings, no secret canary
         {
@@ -1092,6 +1122,7 @@ fn test_p14_acceptance_journey_complete_eight_steps() {
                 thread_id: thread_a_id.clone(),
                 cursor: None,
                 limit: Some(50),
+                before_seq: None,
             }),
             now_base,
         );

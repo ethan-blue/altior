@@ -711,10 +711,10 @@ fn migration_v5_to_v6_creates_memory_tables_and_preserves_journal() {
         );
     }
 
-    // Now open with Store::open, which should auto-migrate from v5 to latest (v7)
+    // Now open with Store::open, which should auto-migrate from v5 to latest (v8)
     {
         let mut store = Store::open(&db_path).expect("open and migrate to v7");
-        assert_eq!(store.schema_version().expect("schema_version"), 7);
+        assert_eq!(store.schema_version().expect("schema_version"), 8);
 
         // Verify we can write and search memories on the migrated database
         let draft = fixture_draft("Memory created after v5 to v6 migration");
@@ -727,5 +727,317 @@ fn migration_v5_to_v6_creates_memory_tables_and_preserves_journal() {
             .expect("search");
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].record.memory_id, memory.memory_id);
+    }
+}
+
+/// Complete snapshot of Schema v7 (P2.2, ADR 0018) before v8 trigram upgrade.
+const V7_SCHEMA_SQL: &str = r"
+CREATE TABLE journal (
+    seq INTEGER PRIMARY KEY AUTOINCREMENT,
+    event_id TEXT NOT NULL UNIQUE,
+    thread_id TEXT,
+    turn_id TEXT,
+    stream_sequence INTEGER NOT NULL,
+    kind TEXT NOT NULL,
+    payload BLOB NOT NULL,
+    occurred_at INTEGER NOT NULL
+);
+CREATE INDEX journal_thread_seq ON journal(thread_id, seq);
+CREATE TRIGGER journal_no_update
+BEFORE UPDATE ON journal
+BEGIN
+    SELECT RAISE(ABORT, 'journal is append-only');
+END;
+CREATE TRIGGER journal_no_delete
+BEFORE DELETE ON journal
+BEGIN
+    SELECT RAISE(ABORT, 'journal is append-only');
+END;
+CREATE TABLE thread_projection (
+    thread_id TEXT PRIMARY KEY,
+    event_count INTEGER NOT NULL,
+    first_seq INTEGER NOT NULL,
+    last_seq INTEGER NOT NULL,
+    last_event_id TEXT NOT NULL,
+    last_kind TEXT NOT NULL,
+    updated_at INTEGER NOT NULL
+);
+CREATE TABLE projection_state (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    journal_max_seq INTEGER NOT NULL,
+    projection_version INTEGER NOT NULL,
+    rebuilt_at INTEGER NOT NULL
+);
+CREATE TABLE domain_journal (
+    seq INTEGER PRIMARY KEY AUTOINCREMENT,
+    event_id TEXT NOT NULL UNIQUE,
+    thread_id TEXT,
+    turn_id TEXT,
+    operation_id TEXT,
+    kind TEXT NOT NULL,
+    payload BLOB NOT NULL,
+    occurred_at INTEGER NOT NULL
+);
+CREATE INDEX domain_journal_thread_seq ON domain_journal(thread_id, seq);
+CREATE INDEX domain_journal_turn_seq ON domain_journal(turn_id, seq);
+CREATE TRIGGER domain_journal_no_update
+BEFORE UPDATE ON domain_journal
+BEGIN
+    SELECT RAISE(ABORT, 'domain journal is append-only');
+END;
+CREATE TRIGGER domain_journal_no_delete
+BEFORE DELETE ON domain_journal
+BEGIN
+    SELECT RAISE(ABORT, 'domain journal is append-only');
+END;
+CREATE TABLE thread (
+    thread_id TEXT PRIMARY KEY,
+    agent_profile_id TEXT NOT NULL,
+    title TEXT NOT NULL DEFAULT '',
+    state TEXT NOT NULL DEFAULT 'open',
+    project_id TEXT,
+    event_count INTEGER NOT NULL DEFAULT 0,
+    first_event_seq INTEGER,
+    last_event_seq INTEGER,
+    last_event_id TEXT,
+    last_event_kind TEXT,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+);
+CREATE INDEX thread_updated ON thread(updated_at);
+CREATE INDEX thread_state ON thread(state);
+CREATE TABLE turn (
+    turn_id TEXT PRIMARY KEY,
+    thread_id TEXT NOT NULL,
+    operation_id TEXT,
+    state TEXT NOT NULL DEFAULT 'active',
+    delivery TEXT NOT NULL DEFAULT 'absent',
+    event_count INTEGER NOT NULL DEFAULT 0,
+    started_at INTEGER NOT NULL,
+    ended_at INTEGER
+);
+CREATE INDEX turn_thread_started ON turn(thread_id, started_at, turn_id);
+CREATE TABLE permission (
+    event_id TEXT PRIMARY KEY,
+    turn_id TEXT NOT NULL,
+    thread_id TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    decision TEXT NOT NULL DEFAULT 'pending',
+    requested_at INTEGER NOT NULL,
+    decided_at INTEGER
+);
+CREATE INDEX permission_thread_req ON permission(thread_id, requested_at, event_id);
+CREATE INDEX permission_turn_req ON permission(turn_id, requested_at, event_id);
+CREATE TABLE agent_profile (
+    agent_profile_id TEXT PRIMARY KEY,
+    display_name TEXT NOT NULL,
+    preferred_harness TEXT NOT NULL DEFAULT 'acp',
+    memory_mode TEXT NOT NULL DEFAULT 'long_term',
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+);
+CREATE TABLE harness_binding (
+    harness_binding_id TEXT PRIMARY KEY,
+    agent_profile_id TEXT NOT NULL,
+    label TEXT NOT NULL,
+    command TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    args_json TEXT NOT NULL DEFAULT '[]',
+    env_keys_json TEXT NOT NULL DEFAULT '[]',
+    secret_refs_json TEXT NOT NULL DEFAULT '[]'
+);
+CREATE INDEX harness_binding_agent ON harness_binding(agent_profile_id);
+CREATE TABLE project_ref (
+    project_id TEXT PRIMARY KEY,
+    label TEXT NOT NULL,
+    path TEXT NOT NULL,
+    created_at INTEGER NOT NULL
+);
+CREATE TABLE domain_projection_state (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    journal_max_seq INTEGER NOT NULL,
+    projection_version INTEGER NOT NULL,
+    rebuilt_at INTEGER NOT NULL,
+    projection_digest TEXT NOT NULL DEFAULT ''
+);
+CREATE VIRTUAL TABLE thread_search USING fts5(
+    thread_id UNINDEXED,
+    title,
+    content='thread',
+    content_rowid='rowid'
+);
+CREATE TRIGGER thread_search_insert AFTER INSERT ON thread BEGIN
+    INSERT INTO thread_search(rowid, thread_id, title) VALUES (new.rowid, new.thread_id, new.title);
+END;
+CREATE TRIGGER thread_search_delete AFTER DELETE ON thread BEGIN
+    INSERT INTO thread_search(thread_search, rowid, thread_id, title) VALUES ('delete', old.rowid, old.thread_id, old.title);
+END;
+CREATE TRIGGER thread_search_update AFTER UPDATE OF title ON thread BEGIN
+    INSERT INTO thread_search(thread_search, rowid, thread_id, title) VALUES ('delete', old.rowid, old.thread_id, old.title);
+    INSERT INTO thread_search(rowid, thread_id, title) VALUES (new.rowid, new.thread_id, new.title);
+END;
+CREATE TABLE runtime_checkpoint (
+    id TEXT PRIMARY KEY,
+    thread_id TEXT NOT NULL,
+    turn_id TEXT,
+    operation_id TEXT NOT NULL,
+    boundary_kind TEXT NOT NULL,
+    state TEXT NOT NULL,
+    remote_request_id TEXT,
+    diagnostic_summary TEXT,
+    created_at INTEGER NOT NULL,
+    settled_at INTEGER
+);
+CREATE INDEX runtime_checkpoint_thread_created ON runtime_checkpoint(thread_id, created_at, id);
+CREATE INDEX runtime_checkpoint_state ON runtime_checkpoint(state, created_at, id);
+CREATE INDEX runtime_checkpoint_op ON runtime_checkpoint(operation_id);
+CREATE TABLE thread_session_binding (
+    thread_id TEXT PRIMARY KEY,
+    harness_binding_id TEXT NOT NULL,
+    opaque_session_id TEXT NOT NULL,
+    updated_at INTEGER NOT NULL
+);
+CREATE TABLE memory (
+    memory_id TEXT PRIMARY KEY,
+    content TEXT NOT NULL,
+    scope_kind TEXT NOT NULL,
+    scope_target TEXT,
+    kind TEXT NOT NULL,
+    state TEXT NOT NULL,
+    confidence INTEGER NOT NULL,
+    sensitivity TEXT NOT NULL,
+    source TEXT NOT NULL,
+    explicit INTEGER NOT NULL,
+    provenance_thread_id TEXT,
+    provenance_turn_id TEXT,
+    excerpt TEXT,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    expires_at INTEGER,
+    superseded_by TEXT
+) STRICT;
+CREATE INDEX memory_updated ON memory(updated_at);
+CREATE INDEX memory_state_updated ON memory(state, updated_at);
+CREATE VIRTUAL TABLE memory_fts USING fts5(
+    memory_id UNINDEXED,
+    content,
+    tokenize='porter unicode61'
+);
+CREATE TRIGGER memory_fts_insert AFTER INSERT ON memory
+WHEN new.state = 'confirmed' AND new.superseded_by IS NULL
+BEGIN
+    INSERT INTO memory_fts (memory_id, content) VALUES (new.memory_id, new.content);
+END;
+CREATE TRIGGER memory_fts_update AFTER UPDATE ON memory
+BEGIN
+    DELETE FROM memory_fts WHERE memory_id = old.memory_id;
+    INSERT INTO memory_fts (memory_id, content)
+    SELECT new.memory_id, new.content
+    WHERE new.state = 'confirmed' AND new.superseded_by IS NULL;
+END;
+CREATE TRIGGER memory_fts_delete AFTER DELETE ON memory
+BEGIN
+    DELETE FROM memory_fts WHERE memory_id = old.memory_id;
+END;
+
+CREATE TABLE identity_document (
+    identity_document_id TEXT PRIMARY KEY,
+    kind TEXT NOT NULL,
+    content TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+) STRICT;
+CREATE INDEX identity_document_kind_id ON identity_document(kind, identity_document_id);
+CREATE TABLE context_snapshot (
+    turn_id TEXT PRIMARY KEY,
+    thread_id TEXT NOT NULL,
+    memory_mode TEXT NOT NULL,
+    passthrough INTEGER NOT NULL,
+    created_at INTEGER NOT NULL,
+    payload_json TEXT NOT NULL
+) STRICT;
+CREATE INDEX context_snapshot_thread_created
+    ON context_snapshot(thread_id, created_at, turn_id);
+PRAGMA user_version = 7;
+
+";
+
+#[test]
+fn migration_v7_to_v8_upgrades_memory_fts_to_trigram_and_preserves_data() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let db_path = dir.path().join("v7_to_v8.db");
+
+    // 1. Manually initialize raw SQLite with genuine schema v7
+    {
+        let conn = rusqlite::Connection::open(&db_path).expect("open raw");
+        conn.pragma_update(None, "journal_mode", "WAL")
+            .expect("wal");
+        conn.execute_batch(V7_SCHEMA_SQL).expect("apply v7 schema");
+
+        // Seed domain agent_profile
+        conn.execute(
+            "INSERT INTO agent_profile (agent_profile_id, display_name, preferred_harness, memory_mode, created_at, updated_at)
+             VALUES ('agp_v7test0000000001', 'Agent v7', 'acp', 'long_term', 1000, 1000)",
+            [],
+        ).expect("seed agent profile");
+
+        // Seed confirmed memory in v7
+        conn.execute(
+            "INSERT INTO memory (
+                memory_id, content, scope_kind, scope_target, kind, state,
+                confidence, sensitivity, source, explicit,
+                provenance_thread_id, provenance_turn_id, excerpt,
+                created_at, updated_at, expires_at, superseded_by
+            ) VALUES (
+                'mem_v7seed0000000001', '用户偏好喝乌龙茶，尤其是冻顶乌龙茶，不加糖。', 'global', NULL,
+                'preference', 'confirmed', 95, 'normal', 'explicit', 1,
+                NULL, NULL, NULL, 1000, 1000, NULL, NULL
+            )",
+            [],
+        ).expect("seed memory");
+
+        // Also seed domain journal event for projection consistency
+        conn.execute(
+            "INSERT INTO domain_journal (event_id, kind, payload, occurred_at)
+             VALUES (
+               'evt_v7seed000000000000000001',
+               'memory.confirmed',
+               CAST(?1 AS BLOB),
+               1000
+             )",
+            [r#"{"memory_id":"mem_v7seed0000000001","content":"用户偏好喝乌龙茶，尤其是冻顶乌龙茶，不加糖。","scope_kind":"global","scope_target":null,"kind":"preference","state":"confirmed","confidence":95,"sensitivity":"normal","source":"explicit","explicit":true,"provenance_thread_id":null,"provenance_turn_id":null,"excerpt":null,"expires_at":null}"#],
+        ).expect("seed domain journal");
+
+        let v: i64 = conn
+            .query_row("PRAGMA user_version", [], |r| r.get(0))
+            .expect("read version");
+        assert_eq!(v, 7);
+    }
+
+    // 2. Open with Store::open: must migrate from v7 to v8
+    {
+        let store = Store::open(&db_path).expect("open and migrate to v8");
+        assert_eq!(store.schema_version().expect("schema_version"), 8);
+
+        // Verify that Chinese substring search (which previously failed on v6/v7) now succeeds!
+        let q = SearchQuery::try_from("乌龙茶").expect("query");
+        let hits = store
+            .search_memories(&q, None, MemorySearchLimit::default_limit(), t(2000))
+            .expect("search");
+        assert_eq!(
+            hits.len(),
+            1,
+            "Migrated memory must be searchable with Chinese query in v8 trigram"
+        );
+        assert_eq!(hits[0].record.memory_id.as_str(), "mem_v7seed0000000001");
+
+        // Verify 2-char short Chinese query also works via hybrid search!
+        let q2 = SearchQuery::try_from("乌龙").expect("query 2");
+        let hits2 = store
+            .search_memories(&q2, None, MemorySearchLimit::default_limit(), t(2000))
+            .expect("search short");
+        assert_eq!(hits2.len(), 1);
+        assert_eq!(hits2[0].record.memory_id.as_str(), "mem_v7seed0000000001");
     }
 }

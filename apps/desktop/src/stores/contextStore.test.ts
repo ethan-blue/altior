@@ -39,15 +39,15 @@ describe("P2.2 context snapshot & identity document store actions", () => {
     await store.init();
 
     await store.putIdentityDocument({
-      document_id: "idd_p22_test",
+      document_id: "idd_p22test00000000001",
       kind: "about",
       content: "I prefer concise answers.",
     });
     const docs = await store.listIdentityDocuments();
 
-    expect(docs.some((d) => d.document_id === "idd_p22_test")).toBe(true);
+    expect(docs.some((d) => d.document_id === "idd_p22test00000000001")).toBe(true);
     expect(
-      store.getState().identityDocuments.some((d) => d.document_id === "idd_p22_test"),
+      store.getState().identityDocuments.some((d) => d.document_id === "idd_p22test00000000001"),
     ).toBe(true);
   });
 
@@ -56,16 +56,16 @@ describe("P2.2 context snapshot & identity document store actions", () => {
     await store.init();
 
     await store.putIdentityDocument({
-      document_id: "idd_p22_gone",
+      document_id: "idd_p22gone00000000001",
       kind: "name",
       content: "Altior",
     });
-    await store.deleteIdentityDocument("idd_p22_gone");
+    await store.deleteIdentityDocument("idd_p22gone00000000001");
     const docs = await store.listIdentityDocuments();
 
-    expect(docs.some((d) => d.document_id === "idd_p22_gone")).toBe(false);
+    expect(docs.some((d) => d.document_id === "idd_p22gone00000000001")).toBe(false);
     expect(
-      store.getState().identityDocuments.some((d) => d.document_id === "idd_p22_gone"),
+      store.getState().identityDocuments.some((d) => d.document_id === "idd_p22gone00000000001"),
     ).toBe(false);
   });
 });

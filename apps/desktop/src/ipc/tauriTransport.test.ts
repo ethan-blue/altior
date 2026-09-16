@@ -7,7 +7,8 @@ import {
   TransportUnavailableError,
 } from "./errors";
 import { negotiatedFixture } from "./fixtures";
-import { TauriCoreTransport } from "./tauriTransport";
+import { InMemoryTransport } from "./inMemoryTransport";
+import { createDefaultTransport, TauriCoreTransport } from "./tauriTransport";
 
 describe("TauriCoreTransport", () => {
   it("throws TransportUnavailableError when Tauri bridge is absent in production", async () => {
@@ -77,7 +78,7 @@ describe("TauriCoreTransport", () => {
     // Send command
     const commandEnvelope: CommandEnvelope = {
       protocol_version: 1,
-      operation_id: "op_test_1",
+      operation_id: "op_fixture000000201",
       kind: "ping",
       payload: { hello: "world" },
       issued_at: Date.now(),
@@ -143,11 +144,106 @@ describe("TauriCoreTransport", () => {
 
     const envelope: CommandEnvelope = {
       protocol_version: 1,
-      operation_id: "op_err",
+      operation_id: "op_err_1",
       kind: "ping",
       payload: {},
       issued_at: Date.now(),
     };
     await expect(transport.command(envelope)).rejects.toThrow(CommandError);
+  });
+
+  it("undoes an in-flight listen registration when subscribers leave first (A02)", async () => {
+    const mockUnlisten = vi.fn();
+    let resolveListen: ((unlisten: () => void) => void) | null = null;
+    const mockListen = vi.fn().mockImplementation(
+      () =>
+        new Promise<() => void>((resolve) => {
+          resolveListen = resolve;
+        }),
+    );
+
+    const transport = new TauriCoreTransport({
+      invoke: vi.fn(),
+      listen: mockListen,
+      fallbackToMemoryInDev: false,
+    });
+
+    const unsubscribe = transport.subscribe(() => {});
+    unsubscribe();
+
+    // The bridge confirms the listen only after the last subscriber left.
+    resolveListen!(mockUnlisten);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(mockUnlisten).toHaveBeenCalled();
+  });
+
+  it("reports a failed listen registration as unavailable and calls onError (A02)", async () => {
+    const onError = vi.fn();
+    const mockListen = vi.fn().mockRejectedValue(new Error("listen denied"));
+
+    const transport = new TauriCoreTransport({
+      invoke: vi.fn(),
+      listen: mockListen,
+      fallbackToMemoryInDev: false,
+      onError,
+    });
+
+    const unsubscribe = transport.subscribe(() => {});
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(transport.status()).toBe("unavailable");
+    expect(onError).toHaveBeenCalledWith(expect.any(Error));
+    unsubscribe();
+  });
+
+  it("reuses one native listener across subscribe/unsubscribe cycles (A02)", async () => {
+    const mockUnlisten = vi.fn();
+    const mockListen = vi.fn().mockResolvedValue(mockUnlisten);
+
+    const transport = new TauriCoreTransport({
+      invoke: vi.fn(),
+      listen: mockListen,
+      fallbackToMemoryInDev: false,
+    });
+
+    for (let cycle = 0; cycle < 5; cycle += 1) {
+      const unsubscribe = transport.subscribe(() => {});
+      await Promise.resolve();
+      unsubscribe();
+    }
+
+    expect(mockListen).toHaveBeenCalledTimes(5);
+    expect(mockUnlisten).toHaveBeenCalledTimes(5);
+  });
+});
+
+describe("createDefaultTransport entry decision (A02)", () => {
+  it("uses the in-memory fixture transport only on an explicit dev entry", () => {
+    const transport = createDefaultTransport({ isDev: true });
+    expect(transport).toBeInstanceOf(InMemoryTransport);
+  });
+
+  it("never fakes a session in a plain production browser", () => {
+    const transport = createDefaultTransport({ isDev: false });
+    expect(transport).toBeInstanceOf(TauriCoreTransport);
+    expect(transport.id).toBe("tauri-core");
+    // Any use fails loudly with the typed unavailable error.
+    expect(() => transport.subscribe(() => {})).toThrow(TransportUnavailableError);
+  });
+
+  it("routes a real bridge to the Tauri transport without fallback", async () => {
+    const mockInvoke = vi.fn().mockResolvedValue(negotiatedFixture);
+    const mockListen = vi.fn().mockResolvedValue(() => {});
+    const transport = createDefaultTransport({
+      isDev: true,
+      invoke: mockInvoke,
+      listen: mockListen,
+    });
+
+    expect(transport).toBeInstanceOf(TauriCoreTransport);
+    await transport.connect();
+    expect(mockInvoke).toHaveBeenCalledWith("core_handshake", { client: "altior-desktop" });
   });
 });

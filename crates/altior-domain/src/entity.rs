@@ -1736,6 +1736,47 @@ impl MemoryScope {
             _ => false,
         }
     }
+
+    /// Checks whether this scope is permitted for injection given the current context (ADR 0022).
+    ///
+    /// - [`MemoryMode::Off`]: No scopes permitted.
+    /// - [`MemoryMode::Session`]: Strictly current thread only (`Thread(target_thread_id)`).
+    ///   Global, person, project, and other thread memories are excluded.
+    /// - [`MemoryMode::LongTerm`]: Global and person scopes permitted; current thread permitted;
+    ///   project scope permitted only if `target_project_id` matches the memory's project.
+    #[must_use]
+    pub fn is_allowed_in_context(
+        &self,
+        mode: MemoryMode,
+        target_thread_id: &ThreadId,
+        target_project_id: Option<&ProjectId>,
+    ) -> bool {
+        match mode {
+            MemoryMode::Off => false,
+            MemoryMode::Session => match self {
+                Self::Thread(label) => label.as_str() == target_thread_id.as_str(),
+                Self::Global | Self::Person(_) | Self::Project(_) => false,
+            },
+            MemoryMode::LongTerm => match self {
+                Self::Global | Self::Person(_) => true,
+                Self::Thread(label) => label.as_str() == target_thread_id.as_str(),
+                Self::Project(label) => {
+                    target_project_id.is_some_and(|p| label.as_str() == p.as_str())
+                }
+            },
+        }
+    }
+}
+
+impl fmt::Display for MemoryScope {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Global => write!(f, "global"),
+            Self::Person(l) => write!(f, "person:{l}"),
+            Self::Project(l) => write!(f, "project:{l}"),
+            Self::Thread(l) => write!(f, "thread:{l}"),
+        }
+    }
 }
 
 /// Semantic classification of a memory record.
@@ -3979,6 +4020,77 @@ mod tests {
         assert!(global.matches_scope(&project));
         assert!(person.matches_scope(&person));
         assert!(!person.matches_scope(&project));
+
+        // Display check
+        assert_eq!(global.to_string(), "global");
+        assert_eq!(person.to_string(), "person:alice");
+        assert_eq!(project.to_string(), "project:altior");
+        assert_eq!(thread.to_string(), "thread:thr_main");
+
+        // Context scope permissions check (ADR 0022)
+        let t_target = ThreadId::from_str("thr_target0000000001").unwrap();
+        let p_target = ProjectId::from_str("prj_target0000000001").unwrap();
+        let _other_project = ProjectId::from_str("prj_other00000000001").unwrap();
+
+        let s_thread_match =
+            MemoryScope::Thread(BoundedLabel::try_from("thr_target0000000001").unwrap());
+        let s_thread_other =
+            MemoryScope::Thread(BoundedLabel::try_from("thr_other00000000001").unwrap());
+        let s_proj_match =
+            MemoryScope::Project(BoundedLabel::try_from("prj_target0000000001").unwrap());
+        let s_proj_other =
+            MemoryScope::Project(BoundedLabel::try_from("prj_other00000000001").unwrap());
+
+        // Off mode: all false
+        assert!(!global.is_allowed_in_context(MemoryMode::Off, &t_target, Some(&p_target)));
+        assert!(!s_thread_match.is_allowed_in_context(MemoryMode::Off, &t_target, Some(&p_target)));
+
+        // Session mode: thread match only, global false
+        assert!(s_thread_match.is_allowed_in_context(
+            MemoryMode::Session,
+            &t_target,
+            Some(&p_target)
+        ));
+        assert!(!s_thread_other.is_allowed_in_context(
+            MemoryMode::Session,
+            &t_target,
+            Some(&p_target)
+        ));
+        assert!(!global.is_allowed_in_context(MemoryMode::Session, &t_target, Some(&p_target)));
+        assert!(!s_proj_match.is_allowed_in_context(
+            MemoryMode::Session,
+            &t_target,
+            Some(&p_target)
+        ));
+
+        // LongTerm mode with project: global true, current thread true, matching project true, other project false
+        assert!(global.is_allowed_in_context(MemoryMode::LongTerm, &t_target, Some(&p_target)));
+        assert!(person.is_allowed_in_context(MemoryMode::LongTerm, &t_target, Some(&p_target)));
+        assert!(s_thread_match.is_allowed_in_context(
+            MemoryMode::LongTerm,
+            &t_target,
+            Some(&p_target)
+        ));
+        assert!(!s_thread_other.is_allowed_in_context(
+            MemoryMode::LongTerm,
+            &t_target,
+            Some(&p_target)
+        ));
+        assert!(s_proj_match.is_allowed_in_context(
+            MemoryMode::LongTerm,
+            &t_target,
+            Some(&p_target)
+        ));
+        assert!(!s_proj_other.is_allowed_in_context(
+            MemoryMode::LongTerm,
+            &t_target,
+            Some(&p_target)
+        ));
+
+        // LongTerm mode without project (None): project memories never allowed
+        assert!(!s_proj_match.is_allowed_in_context(MemoryMode::LongTerm, &t_target, None));
+        assert!(global.is_allowed_in_context(MemoryMode::LongTerm, &t_target, None));
+        assert!(s_thread_match.is_allowed_in_context(MemoryMode::LongTerm, &t_target, None));
 
         // Invalid scope parts
         assert_eq!(

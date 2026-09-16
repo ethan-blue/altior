@@ -287,6 +287,8 @@ impl ContextSnapshotListLimit {
 pub enum ContextDropReason {
     /// The deterministic token budget was exhausted before this entry.
     BudgetExhausted,
+    /// The memory scope is not permitted in the current context.
+    ScopeDisallowed,
 }
 
 impl ContextDropReason {
@@ -295,6 +297,7 @@ impl ContextDropReason {
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::BudgetExhausted => "budget_exhausted",
+            Self::ScopeDisallowed => "scope_disallowed",
         }
     }
 
@@ -306,6 +309,7 @@ impl ContextDropReason {
     pub fn try_from_str(s: &str) -> Result<Self, crate::EntityError> {
         match s {
             "budget_exhausted" => Ok(Self::BudgetExhausted),
+            "scope_disallowed" => Ok(Self::ScopeDisallowed),
             _ => Err(EntityError::InvalidContextDropReason),
         }
     }
@@ -519,6 +523,10 @@ mod tests {
         assert_eq!(
             ContextDropReason::try_from_str(ContextDropReason::BudgetExhausted.as_str()).unwrap(),
             ContextDropReason::BudgetExhausted
+        );
+        assert_eq!(
+            ContextDropReason::try_from_str(ContextDropReason::ScopeDisallowed.as_str()).unwrap(),
+            ContextDropReason::ScopeDisallowed
         );
         assert!(ContextDropReason::try_from_str("nope").is_err());
     }

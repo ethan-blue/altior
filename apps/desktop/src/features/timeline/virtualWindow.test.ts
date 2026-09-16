@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
+  adjustRowHeight,
+  appendRowHeight,
   buildHeightIndex,
   isAtEnd,
   offsetOf,
@@ -109,5 +111,46 @@ describe("isAtEnd", () => {
     expect(isAtEnd(index, index.total - 600, 600)).toBe(true);
     expect(isAtEnd(index, index.total - 624, 600)).toBe(true);
     expect(isAtEnd(index, index.total - 700, 600)).toBe(false);
+  });
+});
+
+describe("appendRowHeight", () => {
+  it("appends row height in O(1) and updates total and count", () => {
+    const initial = buildHeightIndex(3, (i) => 10 + i * 5);
+    expect(initial.count).toBe(3);
+    expect(initial.total).toBe(45);
+    expect(initial.offsets).toEqual([0, 10, 25, 45]);
+
+    const updated = appendRowHeight(initial, 30);
+    expect(updated.count).toBe(4);
+    expect(updated.total).toBe(75);
+    expect(updated.offsets).toEqual([0, 10, 25, 45, 75]);
+  });
+
+  it("rejects non-positive heights", () => {
+    const initial = buildHeightIndex(1, () => 10);
+    expect(() => appendRowHeight(initial, 0)).toThrow(/non-positive/);
+    expect(() => appendRowHeight(initial, -5)).toThrow(/non-positive/);
+  });
+});
+
+describe("adjustRowHeight", () => {
+  it("adjusts an existing row height and updates downstream offsets", () => {
+    const initial = buildHeightIndex(4, () => 20);
+    expect(initial.offsets).toEqual([0, 20, 40, 60, 80]);
+    expect(initial.total).toBe(80);
+
+    // Row 1 (index 1) increases by 15 (e.g. from 20 to 35)
+    const adjusted = adjustRowHeight(initial, 1, 15);
+    expect(adjusted.count).toBe(4);
+    expect(adjusted.offsets).toEqual([0, 20, 55, 75, 95]);
+    expect(adjusted.total).toBe(95);
+  });
+
+  it("returns original index if delta is 0 or rowIndex is out of bounds", () => {
+    const initial = buildHeightIndex(3, () => 20);
+    expect(adjustRowHeight(initial, 1, 0)).toBe(initial);
+    expect(adjustRowHeight(initial, -1, 10)).toBe(initial);
+    expect(adjustRowHeight(initial, 5, 10)).toBe(initial);
   });
 });

@@ -6,6 +6,8 @@
  * test pins this with render counters.
  */
 import { memo, useCallback, useEffect, useSyncExternalStore } from "react";
+import { useI18n } from "../../i18n";
+import { SafeMarkdown, ToolBlock } from "../../components/SafeMarkdown";
 import type {
   PermissionDecision,
   TimelineRow as Row,
@@ -23,15 +25,6 @@ export interface RowViewProps {
   readonly onPermissionDecision: (id: string, decision: PermissionDecision) => void;
 }
 
-const kindLabel: Record<Row["kind"], string> = {
-  "user-message": "You",
-  "assistant-message": "Assistant",
-  tool: "Tool",
-  permission: "Approval",
-  error: "Failed",
-  unknown: "Unknown",
-};
-
 export const TimelineRowView = memo(function TimelineRowView({
   store,
   rowId,
@@ -40,6 +33,24 @@ export const TimelineRowView = memo(function TimelineRowView({
   onFocus,
   onPermissionDecision,
 }: RowViewProps) {
+  const { t } = useI18n();
+  const getKindLabel = (kind: Row["kind"]): string => {
+    switch (kind) {
+      case "user-message":
+        return t.timeline.you;
+      case "assistant-message":
+        return t.timeline.assistant;
+      case "tool":
+        return t.timeline.tool;
+      case "permission":
+        return t.timeline.approval;
+      case "error":
+        return t.timeline.failed;
+      default:
+        return t.timeline.unknown;
+    }
+  };
+
   const subscribe = useCallback(
     (listener: () => void) => store.subscribeRow(rowId, listener),
     [store, rowId],
@@ -71,7 +82,7 @@ export const TimelineRowView = memo(function TimelineRowView({
       }`}
       tabIndex={focused ? 0 : -1}
       role="article"
-      aria-label={`${kindLabel[row.kind]} entry`}
+      aria-label={t.timeline.entryAria(getKindLabel(row.kind))}
       onMouseDown={() => onFocus(rowId)}
       onKeyDown={(event) => {
         if (row.kind !== "permission" || row.permission?.decision != null) return;
@@ -84,7 +95,7 @@ export const TimelineRowView = memo(function TimelineRowView({
         }
       }}
     >
-      <span className={rowStyles.kindLabel}>{kindLabel[row.kind]}</span>
+      <span className={rowStyles.kindLabel}>{getKindLabel(row.kind)}</span>
       <div className={rowStyles.body}>
         {row.kind === "permission" && row.permission ? (
           <PermissionBody
@@ -92,18 +103,13 @@ export const TimelineRowView = memo(function TimelineRowView({
             onApprove={() => decide("approved")}
             onDeny={() => decide("denied")}
           />
+        ) : row.kind === "tool" ? (
+          <ToolBlock text={row.text} status={row.status} />
         ) : (
-          <>
-            <span className={rowStyles.text}>
-              {row.text}
-              {row.streaming ? <span className={rowStyles.caret} aria-hidden="true">▌</span> : null}
-            </span>
-            {row.kind === "tool" && row.status ? (
-              <span className={`${rowStyles.toolStatus} ${rowStyles[row.status]}`}>
-                {row.status}
-              </span>
-            ) : null}
-          </>
+          <span className={rowStyles.text}>
+            <SafeMarkdown text={row.text} />
+            {row.streaming ? <span className={rowStyles.caret} aria-hidden="true">▌</span> : null}
+          </span>
         )}
       </div>
     </div>
@@ -119,6 +125,7 @@ function PermissionBody({
   readonly onApprove: () => void;
   readonly onDeny: () => void;
 }) {
+  const { t } = useI18n();
   const permission = row.permission!;
   if (permission.decision != null) {
     return (
@@ -135,6 +142,7 @@ function PermissionBody({
       </div>
     );
   }
+  const submitting = permission.submission === "submitting";
   return (
     <div className={rowStyles.permissionAsk}>
       <div className={rowStyles.permissionAction}>
@@ -142,12 +150,27 @@ function PermissionBody({
         <span className={rowStyles.scope}>{permission.scope}</span>
       </div>
       <div className={rowStyles.permissionControls}>
-        <button type="button" onClick={onApprove} data-testid="approve">
-          Approve (Y)
+        <button
+          type="button"
+          className={rowStyles.approveButton}
+          onClick={onApprove}
+          disabled={submitting}
+          data-testid="approve"
+        >
+          {submitting ? t.permission.recording : t.permission.approve}
         </button>
-        <button type="button" onClick={onDeny} data-testid="deny">
-          Deny (D)
+        <button
+          type="button"
+          className={rowStyles.denyButton}
+          onClick={onDeny}
+          disabled={submitting}
+          data-testid="deny"
+        >
+          {submitting ? t.permission.recording : t.permission.deny}
         </button>
+        {permission.submission === "failed" ? (
+          <span role="alert">{t.permission.failed}</span>
+        ) : null}
       </div>
     </div>
   );
@@ -156,3 +179,6 @@ function PermissionBody({
 export function rowDomId(rowId: string): string {
   return `timeline-row-dom-${rowId}`;
 }
+
+
+

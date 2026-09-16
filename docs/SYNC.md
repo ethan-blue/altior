@@ -46,11 +46,25 @@ Snapshots are optimization only. A snapshot includes the covered event frontier,
 tombstone frontier, schema version, and signer. A long-offline device must first
 apply revocation and tombstone history before contributing new writes.
 
-## P0 engine bake-off
+## P0 engine bake-off (Complete)
 
-Implement the same `SyncDocumentEngine` test suite for Loro and Automerge. Test
-three-device offline edits, 100k memory objects, 30-day simulated absence,
-duplicate/out-of-order frames, corruption, compaction, revocation, and key rotation.
-Record the selection in an ADR; remove the losing production adapter after the
-decision while retaining portable fixtures.
+The `SyncDocumentEngine` bake-off evaluated Loro and Automerge across offline editing,
+serialization performance, and memory bounds (ADR 0010). Automerge was selected as the
+primary CRDT engine for Altior structured documents.
+
+## Production Safety Barrier & Release Prerequisite (ADR 0025)
+
+**Status: Synchronization is DISABLED in production desktop builds (`sync_enabled = false`).**
+
+Per ADR 0025 and review finding F31, the existing `altior-crypto` and `altior-relay` crates
+serve as hermetic reference spikes. Enabling network synchronization in commercial or production
+builds is blocked pending completion of the four required acceptance gates:
+
+1. **`test_three_device_offline_convergence`**: Three devices concurrently edit documents, propose memories, and emit tombstones, achieving 100% convergence via the relay.
+2. **`test_session_reconstruction_nonce_uniqueness`**: 1,000 session restarts with 100,000 generated ciphertexts prove zero duplicate nonces.
+3. **`test_relay_zero_knowledge_audit`**: Frame byte audits prove zero plaintext memory, prompt, or credential leakage to the relay.
+4. **`test_stale_device_tombstone_non_resurrection`**: 30-day simulated offline device re-sync proves forgotten facts are not resurrected.
+
+See `docs/decisions/0025-sync-production-gate-threat-model-and-safety-barriers.md` for the
+detailed threat tree, attack vector analysis, and production checklist.
 

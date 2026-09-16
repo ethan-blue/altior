@@ -16,4 +16,11 @@ cursor: TurnCursorDto | null,
 /**
  * Maximum turns to return (bounded to 500).
  */
-limit: number | null, };
+limit: number | null,
+/**
+ * Journal-seq upper bound for timeline entries (ADR 0020): the page
+ * contains entries with `seq < before_seq`; absent means the newest
+ * page. Clients page toward the past by passing the previous page's
+ * `next_seq_cursor.seq`.
+ */
+before_seq?: bigint | null, };

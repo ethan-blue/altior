@@ -26,18 +26,21 @@ pub use auth::LaunchToken;
 pub use bounded::{BoundedPayload, BoundedText, DiagnosticText, EnvelopeLimits, MessageText};
 pub use capability::{CapabilityId, CapabilitySet, CapabilitySupport};
 pub use command::{
-    CancelTurnCommand, CommandEnvelope, CommandKind, ConfigureAgentCommand, CreateThreadCommand,
-    DeleteIdentityDocumentCommand, DiagnosticsCommand, GetContextSnapshotCommand,
-    GetHistoryCommand, ListIdentityDocumentsCommand, ListThreadsCommand, OpenThreadCommand,
-    PutIdentityDocumentCommand, RespondPermissionCommand, RuntimeStatusCommand,
-    SearchThreadsCommand, StartTurnCommand, TestHarnessBindingCommand,
+    CancelTurnCommand, CommandEnvelope, CommandKind, ConfigureAgentCommand, ConfirmMemoryCommand,
+    CorrectMemoryCommand, CreateThreadCommand, DeleteIdentityDocumentCommand, DiagnosticsCommand,
+    ForgetMemoryCommand, GetContextSnapshotCommand, GetHistoryCommand,
+    ListIdentityDocumentsCommand, ListMemoriesCommand, ListThreadsCommand, OpenThreadCommand,
+    ProposeMemoryCommand, PutIdentityDocumentCommand, RejectMemoryCommand,
+    RespondPermissionCommand, RuntimeStatusCommand, SearchThreadsCommand, StartTurnCommand,
+    TestHarnessBindingCommand,
 };
 pub use dto::{
     AgentProfileDto, ContextDegradationDto, ContextDroppedEntryDto, ContextIdentityEntryDto,
     ContextMemoryEntryDto, ContextSnapshotDto, ContextTokenBudgetDto, HarnessBindingConfigDto,
-    HarnessBindingDto, IdentityDocumentDto, PermissionDto, RuntimeDiagnosticsDto, ThreadCursorDto,
-    ThreadDto, ThreadHistoryResponseDto, ThreadListResponseDto, ThreadSnapshotDto,
-    ThreadSummaryDto, TurnCursorDto, TurnDto,
+    HarnessBindingDto, HistoryCursorDto, HistoryEntryDto, IdentityDocumentDto, MemoryCursorDto,
+    MemoryListResponseDto, MemoryRecordDto, PermissionDto, RuntimeDiagnosticsDto,
+    TestHarnessResponseDto, ThreadCursorDto, ThreadDto, ThreadHistoryResponseDto,
+    ThreadListResponseDto, ThreadSnapshotDto, ThreadSummaryDto, TurnCursorDto, TurnDto,
 };
 pub use error::ProtocolError;
 pub use event::{EventBody, EventEnvelope, KnownEvent, Sequence};

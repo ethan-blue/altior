@@ -3,6 +3,10 @@
 Date: 2026-09-05 · Status: accepted · Scope: P2.2 agent memory injection,
 identity documents, and explainable context diagnostics (`docs/IMPLEMENTATION_PLAN.md`).
 
+> **Update Note (2026-09-06 / ADR 0022)**:
+> Default token budgets in §3 were originally drafted as 512 identity / 1024 memory tokens.
+> As formalized in [ADR 0022](0022-context-scope-trust-boundaries-and-budget-contracts.md) and implemented in `altior-core::context`, the authoritative production defaults are updated to `DEFAULT_IDENTITY_LIMIT_TOKENS = 1024` and `DEFAULT_MEMORY_LIMIT_TOKENS = 2048`. Historical text below is preserved unchanged.
+
 ## Context
 
 Altior separates durable state into two tiers (`docs/ARCHITECTURE.md`):

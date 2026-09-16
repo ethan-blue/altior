@@ -20,12 +20,13 @@ use serde_json::json;
 
 use altior_domain::{
     AgentProfileId, ContextSnapshotListLimit, EventId, HarnessBindingId, IdentityContent,
-    IdentityDocumentId, IdentityDocumentKind, IdentityDocumentListLimit, OperationId, ProjectId,
-    ThreadId, TurnId, UnixMillis,
+    IdentityDocumentId, IdentityDocumentKind, IdentityDocumentListLimit, MemoryContent,
+    MemoryExcerpt, MemoryId, MemoryKind, MemoryListLimit, MemoryScope, MemorySensitivity,
+    MemorySource, MemoryState, OperationId, ProjectId, ThreadId, TurnId, UnixMillis,
 };
 
 use crate::bounded::{BoundedPayload, EnvelopeLimits, MessageText};
-use crate::dto::{HarnessBindingConfigDto, ThreadCursorDto, TurnCursorDto};
+use crate::dto::{HarnessBindingConfigDto, MemoryCursorDto, ThreadCursorDto, TurnCursorDto};
 use crate::error::ProtocolError;
 use crate::version::{ProtocolVersion, SUPPORTED_PROTOCOL_VERSIONS};
 
@@ -83,6 +84,18 @@ pub enum CommandKind {
     ListIdentityDocuments,
     /// Retrieve context snapshot explainability record(s).
     GetContextSnapshot,
+    /// List memories with optional filtering and bounded pagination.
+    ListMemories,
+    /// Propose or create a new memory record.
+    ProposeMemory,
+    /// Confirm a candidate memory record.
+    ConfirmMemory,
+    /// Reject a candidate memory record.
+    RejectMemory,
+    /// Correct an existing confirmed memory record (superseding it).
+    CorrectMemory,
+    /// Tombstone / forget an existing confirmed memory record.
+    ForgetMemory,
 }
 
 impl CommandKind {
@@ -110,6 +123,12 @@ impl CommandKind {
             Self::DeleteIdentityDocument => "delete_identity_document",
             Self::ListIdentityDocuments => "list_identity_documents",
             Self::GetContextSnapshot => "get_context_snapshot",
+            Self::ListMemories => "list_memories",
+            Self::ProposeMemory => "propose_memory",
+            Self::ConfirmMemory => "confirm_memory",
+            Self::RejectMemory => "reject_memory",
+            Self::CorrectMemory => "correct_memory",
+            Self::ForgetMemory => "forget_memory",
         }
     }
 }
@@ -145,6 +164,12 @@ impl FromStr for CommandKind {
             "delete_identity_document" => Ok(Self::DeleteIdentityDocument),
             "list_identity_documents" => Ok(Self::ListIdentityDocuments),
             "get_context_snapshot" => Ok(Self::GetContextSnapshot),
+            "list_memories" => Ok(Self::ListMemories),
+            "propose_memory" => Ok(Self::ProposeMemory),
+            "confirm_memory" => Ok(Self::ConfirmMemory),
+            "reject_memory" => Ok(Self::RejectMemory),
+            "correct_memory" => Ok(Self::CorrectMemory),
+            "forget_memory" => Ok(Self::ForgetMemory),
             other => Err(ProtocolError::UnsupportedCommandKind {
                 kind: other.to_owned(),
             }),
@@ -230,6 +255,12 @@ pub struct GetHistoryCommand {
     pub cursor: Option<TurnCursorDto>,
     /// Maximum turns to return (bounded to 500).
     pub limit: Option<u32>,
+    /// Journal-seq upper bound for timeline entries (ADR 0020): the page
+    /// contains entries with `seq < before_seq`; absent means the newest
+    /// page. Clients page toward the past by passing the previous page's
+    /// `next_seq_cursor.seq`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub before_seq: Option<u64>,
 }
 
 /// Payload for creating or updating an agent profile (`configure_agent`).
@@ -586,6 +617,255 @@ impl GetContextSnapshotCommand {
         if let Some(lim) = self.limit {
             ContextSnapshotListLimit::try_new(lim)?;
         }
+        Ok(())
+    }
+}
+
+/// Payload for listing memories with optional filtering and bounded pagination (`list_memories`).
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(
+    feature = "dto-export",
+    derive(ts_rs::TS),
+    ts(export, export_to = "../../../apps/desktop/src/ipc/dto/")
+)]
+pub struct ListMemoriesCommand {
+    /// Scope kind filter: `"global"`, `"person"`, `"project"`, or `"thread"`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scope_kind: Option<String>,
+    /// Scope target identifier (e.g. `project_id` or `thread_id`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scope_target: Option<String>,
+    /// State filter: `"candidate"`, `"confirmed"`, `"rejected"`, `"superseded"`, `"forgotten"`, `"expired"`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub state: Option<String>,
+    /// Maximum items to return (1..=100).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub limit: Option<u32>,
+    /// Pagination cursor from a prior page response.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cursor: Option<MemoryCursorDto>,
+}
+
+impl ListMemoriesCommand {
+    /// Validates the command fields against domain invariants.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ProtocolError`] if scope, state, limit, or cursor are invalid.
+    pub fn validate(&self) -> Result<(), ProtocolError> {
+        if let Some(ref sk) = self.scope_kind {
+            MemoryScope::try_from_parts(sk.as_str(), self.scope_target.as_deref())
+                .map_err(ProtocolError::from)?;
+        }
+        if let Some(ref st) = self.state {
+            MemoryState::try_from_str(st.as_str()).map_err(ProtocolError::from)?;
+        }
+        if let Some(lim) = self.limit {
+            MemoryListLimit::try_new(lim).map_err(ProtocolError::from)?;
+        }
+        if let Some(ref cur) = self.cursor {
+            cur.memory_id.parse::<MemoryId>()?;
+        }
+        Ok(())
+    }
+}
+
+/// Payload for proposing or creating a memory record (`propose_memory`).
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(
+    feature = "dto-export",
+    derive(ts_rs::TS),
+    ts(export, export_to = "../../../apps/desktop/src/ipc/dto/")
+)]
+pub struct ProposeMemoryCommand {
+    /// Memory content text.
+    pub content: String,
+    /// Scope kind: `"global"`, `"person"`, `"project"`, or `"thread"`.
+    pub scope_kind: String,
+    /// Scope target identifier if scoped to person, project, or thread.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scope_target: Option<String>,
+    /// Semantic kind: `"fact"`, `"preference"`, `"instruction"`, or `"summary"`.
+    pub kind: String,
+    /// Sensitivity level: `"normal"` or `"sensitive"`. Defaults to normal.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sensitivity: Option<String>,
+    /// Confidence score (0..=100).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub confidence: Option<u8>,
+    /// Provenance source: `"explicit"` or `"inferred"`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<String>,
+    /// Optional thread provenance.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thread_id: Option<String>,
+    /// Optional turn provenance.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub turn_id: Option<String>,
+    /// Optional verbatim excerpt provenance.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub excerpt: Option<String>,
+}
+
+impl ProposeMemoryCommand {
+    /// Validates the command fields against domain invariants.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ProtocolError`] if content, scope, kind, sensitivity, confidence, or provenance IDs fail validation.
+    pub fn validate(&self) -> Result<(), ProtocolError> {
+        MemoryContent::try_from(self.content.as_str()).map_err(ProtocolError::from)?;
+        MemoryScope::try_from_parts(self.scope_kind.as_str(), self.scope_target.as_deref())
+            .map_err(ProtocolError::from)?;
+        MemoryKind::try_from_str(self.kind.as_str()).map_err(ProtocolError::from)?;
+        if let Some(ref sens) = self.sensitivity {
+            MemorySensitivity::try_from_str(sens.as_str()).map_err(ProtocolError::from)?;
+        }
+        if let Some(conf) = self.confidence
+            && conf > 100
+        {
+            return Err(ProtocolError::from(
+                altior_domain::EntityError::InvalidMemoryConfidence { value: conf },
+            ));
+        }
+        if let Some(ref src) = self.source {
+            MemorySource::try_from_str(src.as_str()).map_err(ProtocolError::from)?;
+        }
+        if let Some(ref tid) = self.thread_id {
+            tid.parse::<ThreadId>()?;
+        }
+        if let Some(ref turn) = self.turn_id {
+            turn.parse::<TurnId>()?;
+        }
+        if let Some(ref exc) = self.excerpt {
+            MemoryExcerpt::try_from(exc.as_str()).map_err(ProtocolError::from)?;
+        }
+        Ok(())
+    }
+}
+
+/// Payload for confirming a candidate memory record (`confirm_memory`).
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(
+    feature = "dto-export",
+    derive(ts_rs::TS),
+    ts(export, export_to = "../../../apps/desktop/src/ipc/dto/")
+)]
+pub struct ConfirmMemoryCommand {
+    /// ID of the candidate memory to confirm.
+    pub memory_id: String,
+}
+
+impl ConfirmMemoryCommand {
+    /// Validates the command fields against domain invariants.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ProtocolError`] if `memory_id` format is invalid.
+    pub fn validate(&self) -> Result<(), ProtocolError> {
+        self.memory_id.parse::<MemoryId>()?;
+        Ok(())
+    }
+}
+
+/// Payload for rejecting a candidate memory record (`reject_memory`).
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(
+    feature = "dto-export",
+    derive(ts_rs::TS),
+    ts(export, export_to = "../../../apps/desktop/src/ipc/dto/")
+)]
+pub struct RejectMemoryCommand {
+    /// ID of the candidate memory to reject.
+    pub memory_id: String,
+    /// Optional rejection reason.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+}
+
+impl RejectMemoryCommand {
+    /// Validates the command fields against domain invariants.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ProtocolError`] if `memory_id` format is invalid.
+    pub fn validate(&self) -> Result<(), ProtocolError> {
+        self.memory_id.parse::<MemoryId>()?;
+        Ok(())
+    }
+}
+
+/// Payload for correcting an existing confirmed memory (`correct_memory`).
+///
+/// This supersedes the original record and creates a new confirmed memory.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(
+    feature = "dto-export",
+    derive(ts_rs::TS),
+    ts(export, export_to = "../../../apps/desktop/src/ipc/dto/")
+)]
+pub struct CorrectMemoryCommand {
+    /// ID of the confirmed memory to correct / supersede.
+    pub memory_id: String,
+    /// New corrected content text.
+    pub content: String,
+    /// Optional new scope kind; if omitted, preserves existing scope.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scope_kind: Option<String>,
+    /// Optional new scope target identifier.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scope_target: Option<String>,
+    /// Optional new semantic kind; if omitted, preserves existing kind.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kind: Option<String>,
+    /// Optional new sensitivity level.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sensitivity: Option<String>,
+}
+
+impl CorrectMemoryCommand {
+    /// Validates the command fields against domain invariants.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ProtocolError`] if `memory_id`, content, scope, kind, or sensitivity are invalid.
+    pub fn validate(&self) -> Result<(), ProtocolError> {
+        self.memory_id.parse::<MemoryId>()?;
+        MemoryContent::try_from(self.content.as_str()).map_err(ProtocolError::from)?;
+        if let Some(ref sk) = self.scope_kind {
+            MemoryScope::try_from_parts(sk.as_str(), self.scope_target.as_deref())
+                .map_err(ProtocolError::from)?;
+        }
+        if let Some(ref k) = self.kind {
+            MemoryKind::try_from_str(k.as_str()).map_err(ProtocolError::from)?;
+        }
+        if let Some(ref sens) = self.sensitivity {
+            MemorySensitivity::try_from_str(sens.as_str()).map_err(ProtocolError::from)?;
+        }
+        Ok(())
+    }
+}
+
+/// Payload for tombstoning / forgetting a confirmed memory (`forget_memory`).
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(
+    feature = "dto-export",
+    derive(ts_rs::TS),
+    ts(export, export_to = "../../../apps/desktop/src/ipc/dto/")
+)]
+pub struct ForgetMemoryCommand {
+    /// ID of the memory to forget.
+    pub memory_id: String,
+}
+
+impl ForgetMemoryCommand {
+    /// Validates the command fields against domain invariants.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ProtocolError`] if `memory_id` format is invalid.
+    pub fn validate(&self) -> Result<(), ProtocolError> {
+        self.memory_id.parse::<MemoryId>()?;
         Ok(())
     }
 }
@@ -954,6 +1234,7 @@ impl CommandEnvelope {
             thread_id,
             cursor,
             limit,
+            before_seq: None,
         };
         Self::new_typed(
             CommandKind::GetHistory,
@@ -1366,6 +1647,202 @@ impl CommandEnvelope {
     ///
     /// Returns [`ProtocolError::MalformedEnvelope`] if decoding fails.
     pub fn get_context_snapshot_payload(&self) -> Result<GetContextSnapshotCommand, ProtocolError> {
+        self.parse_payload()
+    }
+
+    /// Builds a `list_memories` command.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ProtocolError`] if validation fails or limits are exceeded.
+    #[allow(clippy::too_many_arguments)]
+    pub fn list_memories(
+        scope_kind: Option<String>,
+        scope_target: Option<String>,
+        state: Option<String>,
+        limit: Option<u32>,
+        cursor: Option<MemoryCursorDto>,
+        operation_id: OperationId,
+        issued_at: UnixMillis,
+        limits: &EnvelopeLimits,
+    ) -> Result<Self, ProtocolError> {
+        let cmd = ListMemoriesCommand {
+            scope_kind,
+            scope_target,
+            state,
+            limit,
+            cursor,
+        };
+        cmd.validate()?;
+        Self::new_typed(
+            CommandKind::ListMemories,
+            &cmd,
+            operation_id,
+            issued_at,
+            limits,
+        )
+    }
+
+    /// Extracts the payload of a `list_memories` command.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ProtocolError::MalformedEnvelope`] if decoding fails.
+    pub fn list_memories_payload(&self) -> Result<ListMemoriesCommand, ProtocolError> {
+        self.parse_payload()
+    }
+
+    /// Builds a `propose_memory` command.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ProtocolError`] if validation fails or limits are exceeded.
+    pub fn propose_memory(
+        cmd: &ProposeMemoryCommand,
+        operation_id: OperationId,
+        issued_at: UnixMillis,
+        limits: &EnvelopeLimits,
+    ) -> Result<Self, ProtocolError> {
+        cmd.validate()?;
+        Self::new_typed(
+            CommandKind::ProposeMemory,
+            &cmd,
+            operation_id,
+            issued_at,
+            limits,
+        )
+    }
+
+    /// Extracts the payload of a `propose_memory` command.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ProtocolError::MalformedEnvelope`] if decoding fails.
+    pub fn propose_memory_payload(&self) -> Result<ProposeMemoryCommand, ProtocolError> {
+        self.parse_payload()
+    }
+
+    /// Builds a `confirm_memory` command.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ProtocolError`] if validation fails or limits are exceeded.
+    pub fn confirm_memory(
+        memory_id: String,
+        operation_id: OperationId,
+        issued_at: UnixMillis,
+        limits: &EnvelopeLimits,
+    ) -> Result<Self, ProtocolError> {
+        let cmd = ConfirmMemoryCommand { memory_id };
+        cmd.validate()?;
+        Self::new_typed(
+            CommandKind::ConfirmMemory,
+            &cmd,
+            operation_id,
+            issued_at,
+            limits,
+        )
+    }
+
+    /// Extracts the payload of a `confirm_memory` command.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ProtocolError::MalformedEnvelope`] if decoding fails.
+    pub fn confirm_memory_payload(&self) -> Result<ConfirmMemoryCommand, ProtocolError> {
+        self.parse_payload()
+    }
+
+    /// Builds a `reject_memory` command.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ProtocolError`] if validation fails or limits are exceeded.
+    pub fn reject_memory(
+        memory_id: String,
+        reason: Option<String>,
+        operation_id: OperationId,
+        issued_at: UnixMillis,
+        limits: &EnvelopeLimits,
+    ) -> Result<Self, ProtocolError> {
+        let cmd = RejectMemoryCommand { memory_id, reason };
+        cmd.validate()?;
+        Self::new_typed(
+            CommandKind::RejectMemory,
+            &cmd,
+            operation_id,
+            issued_at,
+            limits,
+        )
+    }
+
+    /// Extracts the payload of a `reject_memory` command.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ProtocolError::MalformedEnvelope`] if decoding fails.
+    pub fn reject_memory_payload(&self) -> Result<RejectMemoryCommand, ProtocolError> {
+        self.parse_payload()
+    }
+
+    /// Builds a `correct_memory` command.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ProtocolError`] if validation fails or limits are exceeded.
+    pub fn correct_memory(
+        cmd: &CorrectMemoryCommand,
+        operation_id: OperationId,
+        issued_at: UnixMillis,
+        limits: &EnvelopeLimits,
+    ) -> Result<Self, ProtocolError> {
+        cmd.validate()?;
+        Self::new_typed(
+            CommandKind::CorrectMemory,
+            &cmd,
+            operation_id,
+            issued_at,
+            limits,
+        )
+    }
+
+    /// Extracts the payload of a `correct_memory` command.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ProtocolError::MalformedEnvelope`] if decoding fails.
+    pub fn correct_memory_payload(&self) -> Result<CorrectMemoryCommand, ProtocolError> {
+        self.parse_payload()
+    }
+
+    /// Builds a `forget_memory` command.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ProtocolError`] if validation fails or limits are exceeded.
+    pub fn forget_memory(
+        memory_id: String,
+        operation_id: OperationId,
+        issued_at: UnixMillis,
+        limits: &EnvelopeLimits,
+    ) -> Result<Self, ProtocolError> {
+        let cmd = ForgetMemoryCommand { memory_id };
+        cmd.validate()?;
+        Self::new_typed(
+            CommandKind::ForgetMemory,
+            &cmd,
+            operation_id,
+            issued_at,
+            limits,
+        )
+    }
+
+    /// Extracts the payload of a `forget_memory` command.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ProtocolError::MalformedEnvelope`] if decoding fails.
+    pub fn forget_memory_payload(&self) -> Result<ForgetMemoryCommand, ProtocolError> {
         self.parse_payload()
     }
 

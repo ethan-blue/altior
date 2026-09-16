@@ -47,6 +47,10 @@ pub(crate) const MIGRATIONS: &[Migration] = &[
         version: 7,
         sql: SCHEMA_V7,
     },
+    Migration {
+        version: 8,
+        sql: SCHEMA_V8,
+    },
 ];
 
 /// The highest schema version this build understands.
@@ -448,4 +452,45 @@ CREATE TABLE context_snapshot (
 
 CREATE INDEX context_snapshot_thread_created
     ON context_snapshot(thread_id, created_at, turn_id);
+";
+
+/// Schema v8: upgrade `memory_fts` to SQLite FTS5 `trigram` tokenizer (P1, ADR 0023, F23).
+///
+/// Replaces the legacy `porter unicode61` virtual table with `trigram` for substring
+/// matching on CJK (Chinese) and code tokens, recreates synchronization triggers,
+/// and repopulates retrievable confirmed memories from `memory`.
+const SCHEMA_V8: &str = r"
+DROP TRIGGER IF EXISTS memory_fts_insert;
+DROP TRIGGER IF EXISTS memory_fts_update;
+DROP TRIGGER IF EXISTS memory_fts_delete;
+DROP TABLE IF EXISTS memory_fts;
+
+CREATE VIRTUAL TABLE memory_fts USING fts5(
+    memory_id UNINDEXED,
+    content,
+    tokenize='trigram'
+);
+
+CREATE TRIGGER memory_fts_insert AFTER INSERT ON memory
+WHEN new.state = 'confirmed' AND new.superseded_by IS NULL
+BEGIN
+    INSERT INTO memory_fts (memory_id, content) VALUES (new.memory_id, new.content);
+END;
+
+CREATE TRIGGER memory_fts_update AFTER UPDATE ON memory
+BEGIN
+    DELETE FROM memory_fts WHERE memory_id = old.memory_id;
+    INSERT INTO memory_fts (memory_id, content)
+    SELECT new.memory_id, new.content
+    WHERE new.state = 'confirmed' AND new.superseded_by IS NULL;
+END;
+
+CREATE TRIGGER memory_fts_delete AFTER DELETE ON memory
+BEGIN
+    DELETE FROM memory_fts WHERE memory_id = old.memory_id;
+END;
+
+INSERT INTO memory_fts (memory_id, content)
+SELECT memory_id, content FROM memory
+WHERE state = 'confirmed' AND superseded_by IS NULL;
 ";

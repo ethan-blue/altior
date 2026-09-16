@@ -11,6 +11,7 @@
 pub mod connection;
 pub mod daemon;
 pub mod dispatch;
+pub mod entity_ids;
 pub mod error;
 pub mod event_pump;
 pub mod mod_types;
@@ -24,8 +25,9 @@ use altior_domain::{
     BoundedLabel, CHECKPOINT_LIST_LIMIT_MAX, CheckpointListLimit, CheckpointState,
     ContextDegradation, ContextSnapshot, ContextSnapshotListLimit, CoreInstanceId, DeliveryState,
     DomainEvent, DomainEventKind, EventId, HarnessBindingCursor, HarnessBindingId,
-    HarnessBindingListLimit, HistoryLimit, IdentityDocumentListLimit, MemoryMode, MemoryScope,
-    MemorySearchLimit, OperationId, Permission, PermissionCursor, PermissionDecision,
+    HarnessBindingListLimit, HistoryLimit, IdentityDocumentListLimit, MemoryCursor, MemoryDraft,
+    MemoryId, MemoryListLimit, MemoryMode, MemoryRecord, MemoryScope, MemorySearchLimit,
+    MemoryState, OperationId, Permission, PermissionCursor, PermissionDecision,
     PermissionListLimit, ProjectId, SearchQuery, THREAD_LIST_LIMIT_MAX, TURN_LIST_LIMIT_MAX,
     ThreadCursor, ThreadId, ThreadListLimit, ThreadState, ThreadTitle, TurnCursor, TurnId,
     TurnListLimit, UnixMillis,
@@ -88,6 +90,7 @@ pub struct CoreApplication<H = AcpHarnessAdapter, C = StoreCheckpointAdapter> {
     supervisor: AgentRuntimeSupervisor<H, C>,
     event_pump: EventPump,
     operations: OperationRegistry,
+    entity_ids: entity_ids::EntityIdAllocator,
 }
 
 impl<H, C> CoreApplication<H, C>
@@ -122,6 +125,7 @@ where
             supervisor: AgentRuntimeSupervisor::new(harness, checkpoint),
             event_pump,
             operations,
+            entity_ids: entity_ids::EntityIdAllocator::new(),
         }
     }
 
@@ -164,6 +168,12 @@ where
     #[must_use]
     pub fn operation_registry(&self) -> &OperationRegistry {
         &self.operations
+    }
+
+    /// Accesses the Core-owned entity identifier allocator (ADR 0019).
+    #[must_use]
+    pub fn entity_ids(&self) -> &entity_ids::EntityIdAllocator {
+        &self.entity_ids
     }
 
     /// Mutably accesses the operation dedup registry.
@@ -703,6 +713,130 @@ where
             .map_err(CoreAppError::from)
     }
 
+    /// Lists memories matching the given scope and state filters with bounded pagination.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CoreAppError`] on storage failure.
+    pub fn list_memories(
+        &self,
+        scope_filter: Option<&MemoryScope>,
+        state_filter: Option<MemoryState>,
+        limit: MemoryListLimit,
+        cursor: Option<&MemoryCursor>,
+    ) -> Result<Vec<MemoryRecord>, CoreAppError> {
+        self.supervisor
+            .checkpoint()
+            .store()
+            .list_memories(scope_filter, state_filter, limit, cursor)
+            .map_err(CoreAppError::from)
+    }
+
+    /// Fetches a memory record by its identifier.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CoreAppError`] on storage failure.
+    pub fn get_memory(&self, memory_id: &MemoryId) -> Result<Option<MemoryRecord>, CoreAppError> {
+        self.supervisor
+            .checkpoint()
+            .store()
+            .get_memory(memory_id)
+            .map_err(CoreAppError::from)
+    }
+
+    /// Proposes a new candidate memory record (inferred from conversation or model).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CoreAppError`] if secret-shaped or on storage failure.
+    pub fn propose_memory(
+        &mut self,
+        draft: MemoryDraft,
+        occurred_at: UnixMillis,
+    ) -> Result<MemoryRecord, CoreAppError> {
+        self.store_mut()
+            .propose_memory(draft, occurred_at)
+            .map_err(CoreAppError::from)
+    }
+
+    /// Directly creates and confirms an explicit memory record.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CoreAppError`] if secret-shaped or on storage failure.
+    pub fn create_memory(
+        &mut self,
+        draft: &MemoryDraft,
+        occurred_at: UnixMillis,
+    ) -> Result<MemoryRecord, CoreAppError> {
+        self.store_mut()
+            .create_memory(draft, occurred_at)
+            .map_err(CoreAppError::from)
+    }
+
+    /// Confirms a candidate memory record.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CoreAppError`] on storage failure or invalid transition.
+    pub fn confirm_memory(
+        &mut self,
+        memory_id: &MemoryId,
+        occurred_at: UnixMillis,
+    ) -> Result<MemoryRecord, CoreAppError> {
+        self.store_mut()
+            .confirm_memory(memory_id, occurred_at)
+            .map_err(CoreAppError::from)
+    }
+
+    /// Rejects a candidate memory record.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CoreAppError`] on storage failure or invalid transition.
+    pub fn reject_memory(
+        &mut self,
+        memory_id: &MemoryId,
+        reason: Option<&str>,
+        occurred_at: UnixMillis,
+    ) -> Result<MemoryRecord, CoreAppError> {
+        self.store_mut()
+            .reject_memory(memory_id, reason, occurred_at)
+            .map_err(CoreAppError::from)
+    }
+
+    /// Corrects an existing confirmed memory record, superseding it.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CoreAppError`] if secret-shaped, not found, or on storage failure.
+    pub fn correct_memory(
+        &mut self,
+        memory_id: &MemoryId,
+        draft: &MemoryDraft,
+        occurred_at: UnixMillis,
+    ) -> Result<MemoryRecord, CoreAppError> {
+        self.store_mut()
+            .correct_memory(memory_id, draft, occurred_at)
+            .map_err(CoreAppError::from)
+    }
+
+    /// Tombstones / forgets an existing memory record.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CoreAppError`] on storage failure or if record does not exist.
+    pub fn forget_memory(
+        &mut self,
+        memory_id: &MemoryId,
+        occurred_at: UnixMillis,
+    ) -> Result<MemoryRecord, CoreAppError> {
+        self.store_mut()
+            .forget_memory(memory_id, occurred_at)
+            .map_err(CoreAppError::from)
+    }
+
     /// Returns an immutable reference to the underlying store.
     #[must_use]
     pub fn store(&self) -> &altior_storage::Store {
@@ -1076,9 +1210,15 @@ where
             .store()
             .list_identity_documents(IdentityDocumentListLimit::default())?;
 
+        let project_id = thread
+            .project_id
+            .as_deref()
+            .and_then(|p| ProjectId::from_str(p).ok());
+
         let assembled = assemble_context(AssembleParams {
             turn_id: &turn_id,
             thread_id: &thread_id,
+            project_id: project_id.as_ref(),
             memory_mode: memory_mode.as_str(),
             user_prompt: content,
             identity_docs: &identity_docs,

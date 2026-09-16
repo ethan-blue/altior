@@ -1,17 +1,22 @@
-/* Shell grid: title bar / rail + nav + workbench + inspector / status. */
+/* Shell grid: title bar / rail + nav + workbench + inspector / status (ADR 0008, F13). */
 
 .shell {
   display: grid;
-  grid-template-rows: auto 1fr auto auto;
-  grid-template-columns: auto 1fr auto;
+  grid-template-rows: auto 1fr auto;
+  grid-template-columns: auto auto 1fr auto;
+  grid-template-areas:
+    "header header header header"
+    "rail   nav    main   inspector"
+    "footer footer footer footer";
   height: 100vh;
   background: var(--color-canvas);
   color: var(--color-text);
   font-family: var(--font-ui);
+  overflow: hidden;
 }
 
 .titleBar {
-  grid-column: 1 / -1;
+  grid-area: header;
   display: flex;
   align-items: center;
   gap: var(--spacing-12);
@@ -21,36 +26,70 @@
   font-size: var(--font-size-ui);
 }
 
+.railArea {
+  grid-area: rail;
+  height: 100%;
+}
+
+.navArea {
+  grid-area: nav;
+  display: flex;
+  min-width: 0;
+  height: 100%;
+}
+
 .workbench {
+  grid-area: main;
   display: flex;
   flex-direction: column;
   min-width: 0;
   min-height: 0;
+  height: 100%;
 }
 
-.protocolDiagnostics {
-  grid-column: 1 / -1;
-  padding: 0 var(--spacing-12);
-  font-size: var(--font-size-ui);
-  color: var(--color-muted);
+.inspectorArea {
+  grid-area: inspector;
+  display: flex;
+  min-width: 0;
+  height: 100%;
 }
 
-.protocolDiagnostics summary {
-  cursor: pointer;
-  padding: var(--spacing-2) 0;
+.statusBarArea {
+  grid-area: footer;
 }
 
-.protocolDiagnostics code {
-  font-family: var(--font-code);
-  font-size: var(--font-size-code);
+/* Narrow widths (F14): inspector transitions to an overlay drawer */
+.shell[data-narrow="true"] {
+  grid-template-columns: auto auto 1fr;
+  grid-template-areas:
+    "header header header"
+    "rail   nav    main"
+    "footer footer footer";
 }
 
-/* Narrow widths: the inspector becomes an overlay drawer. */
-.shell[data-narrow="true"] aside {
+.shell[data-narrow="true"] .inspectorArea aside {
   position: fixed;
   top: 0;
   right: 0;
   bottom: 0;
-  z-index: var(--z-overlay);
+  z-index: var(--z-overlay, 100);
   box-shadow: var(--elevation-menu);
+}
+
+.drawerOverlay {
+  position: fixed;
+  inset: 0;
+  background: var(--color-overlay);
+  z-index: calc(var(--z-overlay) - 1);
+}
+
+/* Empty workbench surface: loading / error / empty / select-a-thread states
+   (review A03). Centered, muted text on the workbench background. */
+.emptyState {
+  margin: auto;
+  padding: 16px;
+  color: var(--color-muted);
+  font-size: var(--font-size-body, 14px);
+  text-align: center;
+  max-width: 46ch;
 }
