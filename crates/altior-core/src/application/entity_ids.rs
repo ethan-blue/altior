@@ -10,7 +10,9 @@
 
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use altior_domain::{AgentProfileId, HarnessBindingId, IdParseError, ThreadId, TurnId, UnixMillis};
+use altior_domain::{
+    AgentProfileId, EventId, HarnessBindingId, IdParseError, ThreadId, TurnId, UnixMillis,
+};
 
 /// Per-process noise mixed into every allocation so a restarted process
 /// minting in the same millisecond still produces distinct identifiers.
@@ -100,6 +102,36 @@ impl EntityIdAllocator {
     ) -> Result<HarnessBindingId, IdParseError> {
         self.allocate("hsb_", now)
     }
+
+    /// Mints an event identifier.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`IdParseError`] if the formatted body fails domain
+    /// validation.
+    pub fn new_event_id(&self, now: UnixMillis) -> Result<EventId, IdParseError> {
+        self.allocate("evt_", now)
+    }
+
+    /// Mints a domain-valid [`EventId`] deterministically from opaque
+    /// correlation bytes (for example an ACP RPC id). The correlation
+    /// material is association metadata only: it is hashed into a valid
+    /// body and never pasted into the identifier string, so UUID /
+    /// uppercase / hyphen forms cannot collapse onto a shared fallback
+    /// (ADR 0019).
+    #[must_use]
+    pub fn event_id_from_correlation(namespace: &str, correlation: &str) -> EventId {
+        use std::hash::{Hash, Hasher};
+
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        namespace.hash(&mut hasher);
+        correlation.hash(&mut hasher);
+        let h1 = hasher.finish();
+        hasher.write_u64(0x9e37_79b9_7f4a_7c15);
+        let h2 = hasher.finish();
+        EventId::try_from(format!("evt_{h1:016x}{h2:016x}"))
+            .expect("correlation event id must be domain-valid")
+    }
 }
 
 #[cfg(test)]
@@ -116,16 +148,19 @@ mod tests {
         let turn = allocator.new_turn_id(NOW).unwrap();
         let profile = allocator.new_agent_profile_id(NOW).unwrap();
         let binding = allocator.new_harness_binding_id(NOW).unwrap();
+        let event = allocator.new_event_id(NOW).unwrap();
 
         assert!(thread.as_str().starts_with("thr_"));
         assert!(turn.as_str().starts_with("trn_"));
         assert!(profile.as_str().starts_with("agp_"));
         assert!(binding.as_str().starts_with("hsb_"));
+        assert!(event.as_str().starts_with("evt_"));
         for id in [
             thread.as_str(),
             turn.as_str(),
             profile.as_str(),
             binding.as_str(),
+            event.as_str(),
         ] {
             let body = id.split_once('_').unwrap().1;
             assert_eq!(body.len(), 16, "body {id} must be 16 chars");
@@ -159,5 +194,28 @@ mod tests {
             .unwrap();
         let later = allocator.new_agent_profile_id(NOW).unwrap();
         assert_ne!(earlier.as_str(), later.as_str());
+    }
+
+    #[test]
+    fn event_id_from_correlation_keeps_rpc_shapes_distinct() {
+        let a = EntityIdAllocator::event_id_from_correlation(
+            "acp.permission",
+            "550E8400-E29B-41D4-A716-446655440000",
+        );
+        let b = EntityIdAllocator::event_id_from_correlation(
+            "acp.permission",
+            "550E8400-E29B-41D4-A716-446655440001",
+        );
+        let c = EntityIdAllocator::event_id_from_correlation("acp.permission", "PERM-REQ-ALPHA");
+        assert_ne!(a, b);
+        assert_ne!(a, c);
+        assert_ne!(a.as_str(), "evt_perm000000000000");
+        assert_eq!(
+            a,
+            EntityIdAllocator::event_id_from_correlation(
+                "acp.permission",
+                "550E8400-E29B-41D4-A716-446655440000",
+            )
+        );
     }
 }

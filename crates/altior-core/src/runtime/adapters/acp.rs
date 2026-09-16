@@ -8,7 +8,6 @@
 
 use std::collections::BTreeMap;
 use std::fmt;
-use std::str::FromStr;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
@@ -32,10 +31,6 @@ use crate::runtime::state::{
 
 /// Bounded queue capacity for session command and event channels.
 const CHANNEL_BOUND: usize = 1024;
-
-static FALLBACK_EVENT_ID: std::sync::LazyLock<EventId> = std::sync::LazyLock::new(|| {
-    EventId::from_str("evt_perm000000000000").expect("static fallback event id is valid")
-});
 
 static FALLBACK_PERMISSION_DESC: std::sync::LazyLock<PermissionDescription> =
     std::sync::LazyLock::new(|| {
@@ -516,12 +511,10 @@ fn run_session_worker(
                     move |rpc_id: &RpcId,
                           tool_call_id: &Option<String>|
                           -> Result<Option<serde_json::Value>, AcpError> {
-                        let rpc_str = match rpc_id {
-                            RpcId::Number(n) => format!("req{n}"),
-                            RpcId::Text(s) => s.clone(),
-                        };
-                        let perm_event_id = EventId::from_str(&format!("evt_{rpc_str:0<16}"))
-                            .unwrap_or_else(|_| FALLBACK_EVENT_ID.clone());
+                        // RPC id is association metadata only (ADR 0019): Core mints a
+                        // distinct valid EventId per request and never collapses failed
+                        // casts onto a shared permission channel.
+                        let perm_event_id = permission_event_id_for_rpc(rpc_id);
 
                         let (perm_tx, perm_rx) = std::sync::mpsc::sync_channel(1);
                         {
@@ -583,6 +576,23 @@ fn run_session_worker(
             }
         }
     }
+}
+
+/// Mints a Core-owned permission [`EventId`] correlated with an ACP RPC id.
+///
+/// The RPC id is association metadata only (ADR 0019): it is never pasted into
+/// the identifier string. UUID / uppercase / hyphen forms are hashed into a
+/// domain-valid `evt_*` body via the same helper used by
+/// [`crate::application::entity_ids::EntityIdAllocator::event_id_from_correlation`].
+fn permission_event_id_for_rpc(rpc_id: &RpcId) -> EventId {
+    let correlation = match rpc_id {
+        RpcId::Number(n) => format!("n:{n}"),
+        RpcId::Text(s) => format!("t:{s}"),
+    };
+    crate::application::entity_ids::EntityIdAllocator::event_id_from_correlation(
+        "acp.permission",
+        &correlation,
+    )
 }
 
 fn parse_launch_config(
@@ -648,6 +658,8 @@ fn map_negotiated_capabilities(neg: NegotiatedCapabilities) -> CapabilitySet {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::str::FromStr;
+
     use altior_acp::SecretRef;
     use altior_domain::{
         BoundedPath, DisplayName, HarnessBindingId, HarnessEnvKey, HarnessSecretRef,
@@ -655,8 +667,42 @@ mod tests {
 
     #[test]
     fn static_fallbacks_are_valid() {
-        assert_eq!(FALLBACK_EVENT_ID.as_str(), "evt_perm000000000000");
         assert_eq!(FALLBACK_PERMISSION_DESC.as_str(), "permission required");
+    }
+
+    #[test]
+    fn permission_event_ids_for_uuid_uppercase_hyphen_rpc_are_distinct_and_valid() {
+        let uuid_upper =
+            RpcId::Text("550E8400-E29B-41D4-A716-446655440000".to_owned());
+        let uuid_upper_other =
+            RpcId::Text("550E8400-E29B-41D4-A716-446655440001".to_owned());
+        let uppercase = RpcId::Text("PERM-REQ-ALPHA".to_owned());
+        let numeric = RpcId::Number(42);
+
+        // Old cast path fails domain validation for these shapes.
+        assert!(EventId::from_str("evt_550E8400-E29B-41D4-A716-446655440000").is_err());
+        assert!(EventId::from_str(&format!("evt_{}", "PERM-REQ-ALPHA")).is_err());
+
+        let a = permission_event_id_for_rpc(&uuid_upper);
+        let b = permission_event_id_for_rpc(&uuid_upper_other);
+        let c = permission_event_id_for_rpc(&uppercase);
+        let d = permission_event_id_for_rpc(&numeric);
+
+        for id in [&a, &b, &c, &d] {
+            assert!(id.as_str().starts_with("evt_"));
+            assert_ne!(id.as_str(), "evt_perm000000000000");
+            assert!(EventId::from_str(id.as_str()).is_ok());
+        }
+
+        assert_ne!(a, b);
+        assert_ne!(a, c);
+        assert_ne!(a, d);
+        assert_ne!(b, c);
+        assert_ne!(c, d);
+
+        // Deterministic correlation: same RPC id → same EventId.
+        assert_eq!(a, permission_event_id_for_rpc(&uuid_upper));
+        assert_eq!(d, permission_event_id_for_rpc(&RpcId::Number(42)));
     }
 
     #[test]
