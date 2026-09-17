@@ -46,7 +46,7 @@ describe("App workbench shell", () => {
     );
     expect(screen.getByRole("textbox", { name: "Composer" })).toBeEnabled();
     await waitFor(() =>
-      expect(screen.getByTestId("status-bar")).toHaveTextContent("Core · connected"),
+      expect(screen.getByTestId("status-bar")).toHaveTextContent(/connected|已连接/),
     );
     expect(await screen.findByTestId("ipc-version")).toHaveTextContent("IPC v");
   });

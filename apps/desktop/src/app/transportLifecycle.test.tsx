@@ -25,7 +25,7 @@ describe("App connection lifecycle (A02)", () => {
     );
 
     await waitFor(() => {
-      expect(screen.getByTestId("status-bar")).toHaveTextContent("Core · connected");
+      expect(screen.getByTestId("status-bar")).toHaveTextContent(/connected|已连接/);
     });
 
     const kinds = transport.sentCommands.map((c) => c.kind);
@@ -44,7 +44,7 @@ describe("App connection lifecycle (A02)", () => {
     );
 
     await waitFor(() => {
-      expect(screen.getByTestId("status-bar")).toHaveTextContent("Core · connected");
+      expect(screen.getByTestId("status-bar")).toHaveTextContent(/connected|已连接/);
     });
 
     // Every stream event is processed exactly once despite the listener
@@ -85,7 +85,7 @@ describe("App connection lifecycle (A02)", () => {
     render(<App transport={transportForStore} />);
 
     await waitFor(() => {
-      expect(screen.getByTestId("status-bar")).toHaveTextContent("Core · connected");
+      expect(screen.getByTestId("status-bar")).toHaveTextContent(/connected|已连接/);
     });
     const afterFirstInit = transport.sentCommands.length;
     expect(afterFirstInit).toBeGreaterThan(0);

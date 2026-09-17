@@ -250,3 +250,39 @@
   color: var(--color-muted);
   font-size: var(--font-size-normal, 0.95rem);
 }
+
+.formFieldLabel {
+  display: block;
+  font-size: 0.75rem;
+  margin-bottom: 2px;
+}
+
+.explicitCheckRow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding-top: 18px;
+}
+
+.explicitCheckLabel {
+  font-size: 0.85rem;
+}
+
+.formActions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.editColumn {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.editActions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}

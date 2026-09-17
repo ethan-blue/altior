@@ -4,6 +4,73 @@ import type { MemoryRecordDto } from "../ipc/dto/MemoryRecordDto";
 import type { AgentProfile } from "../stores/applicationStore";
 import styles from "./memoryPane.module.css";
 
+
+function localizeMemorySource(
+  source: string,
+  t: ReturnType<typeof useI18n>["t"],
+): string {
+  if (source === "explicit") return t.memoryPane.sourceExplicit;
+  if (source === "inferred") return t.memoryPane.sourceInferred;
+  return source;
+}
+
+
+function localizeMemoryScope(
+  scope: string,
+  t: ReturnType<typeof useI18n>["t"],
+): string {
+  switch (scope) {
+    case "global":
+      return t.memoryPane.scopeGlobal;
+    case "project":
+      return t.memoryPane.scopeProject;
+    case "person":
+      return t.memoryPane.scopePerson;
+    case "thread":
+      return t.memoryPane.scopeThread;
+    default:
+      return scope;
+  }
+}
+
+function localizeMemoryKind(
+  kind: string,
+  t: ReturnType<typeof useI18n>["t"],
+): string {
+  switch (kind) {
+    case "fact":
+      return t.memoryPane.kindFact;
+    case "preference":
+      return t.memoryPane.kindPreference;
+    case "instruction":
+      return t.memoryPane.kindInstruction;
+    case "summary":
+      return t.memoryPane.kindSummary;
+    default:
+      return kind;
+  }
+}
+
+function localizeMemoryState(
+  state: string,
+  t: ReturnType<typeof useI18n>["t"],
+): string {
+  switch (state) {
+    case "confirmed":
+      return t.memoryPane.stateConfirmed;
+    case "candidate":
+      return t.memoryPane.stateCandidate;
+    case "superseded":
+      return t.memoryPane.stateSuperseded;
+    case "forgotten":
+      return t.memoryPane.stateForgotten;
+    case "rejected":
+      return t.memoryPane.stateRejected;
+    default:
+      return state;
+  }
+}
+
 export interface MemoryPaneProps {
   readonly memories: readonly MemoryRecordDto[];
   readonly isLoading?: boolean;
@@ -112,7 +179,7 @@ export function MemoryPane({
             className={styles.select}
             value={stateFilter}
             onChange={(e) => setStateFilter(e.target.value)}
-            aria-label="Filter by state"
+            aria-label={t.memoryPane.filterStateAria}
             data-testid="memory-state-filter"
           >
             <option value="all">{t.memoryPane.allStates}</option>
@@ -128,7 +195,7 @@ export function MemoryPane({
             className={styles.select}
             value={scopeFilter}
             onChange={(e) => setScopeFilter(e.target.value)}
-            aria-label="Filter by scope"
+            aria-label={t.memoryPane.filterScopeAria}
             data-testid="memory-scope-filter"
           >
             <option value="all">{t.memoryPane.allScopes}</option>
@@ -163,7 +230,7 @@ export function MemoryPane({
                 e.target.value as "off" | "session" | "long_term",
               )
             }
-            aria-label="Agent memory mode"
+            aria-label={t.memoryPane.agentModeAria}
             data-testid="agent-memory-mode-select"
           >
             <option value="off">{t.memoryPane.modeOff}</option>
@@ -187,8 +254,8 @@ export function MemoryPane({
 
           <div className={styles.formGrid}>
             <div>
-              <label htmlFor="memory-scope-kind" style={{ display: "block", fontSize: "0.75rem", marginBottom: 2 }}>
-                Scope:
+              <label htmlFor="memory-scope-kind" className={styles.formFieldLabel}>
+                {t.memoryPane.scopeLabel}
               </label>
               <select
                 id="memory-scope-kind"
@@ -197,23 +264,23 @@ export function MemoryPane({
                 onChange={(e) => setNewScopeKind(e.target.value)}
                 data-testid="memory-scope-kind-select"
               >
-                <option value="global">Global</option>
-                <option value="project">Project</option>
-                <option value="person">Person</option>
-                <option value="thread">Thread</option>
+                <option value="global">{t.memoryPane.scopeGlobal}</option>
+                <option value="project">{t.memoryPane.scopeProject}</option>
+                <option value="person">{t.memoryPane.scopePerson}</option>
+                <option value="thread">{t.memoryPane.scopeThread}</option>
               </select>
             </div>
 
             {newScopeKind !== "global" ? (
               <div>
-                <label htmlFor="memory-scope-target" style={{ display: "block", fontSize: "0.75rem", marginBottom: 2 }}>
-                  Target ID:
+                <label htmlFor="memory-scope-target" className={styles.formFieldLabel}>
+                  {t.memoryPane.targetLabel}
                 </label>
                 <input
                   id="memory-scope-target"
                   type="text"
                   className={styles.input}
-                  placeholder="e.g. prj_..."
+                  placeholder={t.memoryPane.targetPlaceholder}
                   value={newScopeTarget}
                   onChange={(e) => setNewScopeTarget(e.target.value)}
                   data-testid="memory-scope-target-input"
@@ -222,8 +289,8 @@ export function MemoryPane({
             ) : null}
 
             <div>
-              <label htmlFor="memory-kind" style={{ display: "block", fontSize: "0.75rem", marginBottom: 2 }}>
-                Kind:
+              <label htmlFor="memory-kind" className={styles.formFieldLabel}>
+                {t.memoryPane.kindLabel}
               </label>
               <select
                 id="memory-kind"
@@ -232,14 +299,14 @@ export function MemoryPane({
                 onChange={(e) => setNewKind(e.target.value)}
                 data-testid="memory-kind-select"
               >
-                <option value="fact">Fact</option>
-                <option value="preference">Preference</option>
-                <option value="instruction">Instruction</option>
-                <option value="summary">Summary</option>
+                <option value="fact">{t.memoryPane.kindFact}</option>
+                <option value="preference">{t.memoryPane.kindPreference}</option>
+                <option value="instruction">{t.memoryPane.kindInstruction}</option>
+                <option value="summary">{t.memoryPane.kindSummary}</option>
               </select>
             </div>
 
-            <div style={{ display: "flex", alignItems: "center", gap: 6, paddingTop: 18 }}>
+            <div className={styles.explicitCheckRow}>
               <input
                 id="memory-explicit"
                 type="checkbox"
@@ -247,19 +314,19 @@ export function MemoryPane({
                 onChange={(e) => setNewIsExplicit(e.target.checked)}
                 data-testid="memory-explicit-check"
               />
-              <label htmlFor="memory-explicit" style={{ fontSize: "0.85rem" }}>
-                Directly confirm
+              <label htmlFor="memory-explicit" className={styles.explicitCheckLabel}>
+                {t.memoryPane.confirmDirectly}
               </label>
             </div>
           </div>
 
-          <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 8 }}>
+          <div className={styles.formActions}>
             <button
               type="button"
               className={styles.btnAction}
               onClick={() => setShowAddForm(false)}
             >
-              Cancel
+              {t.memoryPane.cancel}
             </button>
             <button
               type="submit"
@@ -267,7 +334,7 @@ export function MemoryPane({
               disabled={isSubmitting || !newContent.trim()}
               data-testid="memory-submit-btn"
             >
-              {isSubmitting ? "Saving…" : "Save Memory"}
+              {isSubmitting ? t.memoryPane.submitting : t.memoryPane.saveMemory}
             </button>
           </div>
         </form>
@@ -307,9 +374,9 @@ export function MemoryPane({
                       }`}
                       data-testid="memory-state-badge"
                     >
-                      {mem.state}
+                      {localizeMemoryState(mem.state, t)}
                     </span>
-                    <span className={styles.badge}>{mem.kind}</span>
+                    <span className={styles.badge}>{localizeMemoryKind(mem.kind, t)}</span>
                     <span className={styles.stats}>{mem.confidence}% {t.contextPanel.confidence}</span>
                   </div>
                   <span className={styles.stats}>
@@ -318,14 +385,14 @@ export function MemoryPane({
                 </div>
 
                 {isEditing ? (
-                  <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                  <div className={styles.editColumn}>
                     <textarea
                       className={styles.textarea}
                       value={editContent}
                       onChange={(e) => setEditContent(e.target.value)}
                       data-testid="memory-edit-input"
                     />
-                    <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+                    <div className={styles.editActions}>
                       <button
                         type="button"
                         className={styles.btnAction}
@@ -350,13 +417,13 @@ export function MemoryPane({
                 )}
 
                 <div className={styles.metaRow}>
-                  <span>Scope: <strong>{mem.scope_kind}</strong>{mem.scope_target ? ` (${mem.scope_target})` : ""}</span>
-                  <span>Source: <strong>{mem.source}</strong></span>
+                  <span>{t.memoryPane.scopeLabel}: <strong>{localizeMemoryScope(mem.scope_kind, t)}</strong>{mem.scope_target ? ` (${mem.scope_target})` : ""}</span>
+                  <span data-testid="memory-source-label">{t.memoryPane.sourceLabel}: <strong>{localizeMemorySource(mem.source, t)}</strong></span>
                   {mem.provenance_thread_id ? (
-                    <span>Origin: <span className={styles.mono}>{mem.provenance_thread_id}</span></span>
+                    <span>{t.memoryPane.originLabel}: <span className={styles.mono}>{mem.provenance_thread_id}</span></span>
                   ) : null}
                   {mem.superseded_by ? (
-                    <span>Superseded by: <span className={styles.mono}>{mem.superseded_by}</span></span>
+                    <span>{t.memoryPane.supersededByLabel}: <span className={styles.mono}>{mem.superseded_by}</span></span>
                   ) : null}
                 </div>
 
