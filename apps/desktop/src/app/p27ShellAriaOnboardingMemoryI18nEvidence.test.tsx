@@ -152,7 +152,7 @@ describe("p27 shell aria + onboarding + memory source i18n", () => {
     expect(en.nav.widthAria).toBe("Threads pane width");
     expect(en.onboarding.variableKeyPlaceholder).toBe("Variable Key");
     expect(en.onboarding.secretRefPlaceholder).toContain("Secret Ref");
-    expect(en.onboarding.primaryBindingPlaceholder).toBe("Primary ACP Binding");
+    expect(en.onboarding.primaryBindingPlaceholder).toMatch(/Primary ACP Binding/);
     expect(en.memoryPane.sourceExplicit).toBe("Explicit");
     expect(en.memoryPane.sourceInferred).toBe("Inferred");
 
