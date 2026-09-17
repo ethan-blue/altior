@@ -54,7 +54,9 @@ primary CRDT engine for Altior structured documents.
 
 ## Production Safety Barrier & Release Prerequisite (ADR 0025)
 
-**Status: Synchronization is DISABLED in production desktop builds (`sync_enabled = false`).**
+**Status: Synchronization is DISABLED in production desktop builds (`altior_core::SYNC_ENABLED = false`).**
+
+The runtime hard latch lives in `crates/altior-core/src/sync_gate.rs`: call `altior_core::ensure_sync_allowed()` before any network sync, pairing-over-network, or relay connect path. Flipping the constant requires ADR 0025 acceptance evidence - never a Desktop toggle or env var.
 
 Per ADR 0025 and review finding F31, the existing `altior-crypto` and `altior-relay` crates
 serve as hermetic reference spikes. Enabling network synchronization in commercial or production

@@ -44,7 +44,7 @@
 ## Production Sync Barrier and Threat Model (ADR 0025 / F31)
 
 Multi-device synchronization is **explicitly disabled** in current desktop releases
-(`sync_enabled = false`). The P0.5 crypto and relay crates are pre-production reference
+(`altior_core::SYNC_ENABLED = false` in `crates/altior-core/src/sync_gate.rs`). The P0.5 crypto and relay crates are pre-production reference
 spikes. Before synchronization is opened to users, the 11 critical threat models specified in
 `docs/decisions/0025-sync-production-gate-threat-model-and-safety-barriers.md` must be
 completely satisfied:

@@ -77,6 +77,8 @@ pub enum CoreAppError {
     Id(IdParseError),
     /// Invalid request parameters or malformed input.
     InvalidInput(String),
+    /// Personal Vault sync is hard-disabled (ADR 0025 / F31).
+    SyncDisabled(crate::sync_gate::SyncDisabled),
     /// General application error.
     Other(String),
 }
@@ -130,6 +132,7 @@ impl fmt::Display for CoreAppError {
             Self::ContextAssembler(err) => write!(f, "context assembler error: {err}"),
             Self::Id(err) => write!(f, "identifier error: {err}"),
             Self::InvalidInput(msg) => write!(f, "invalid input: {msg}"),
+            Self::SyncDisabled(err) => write!(f, "{err}"),
             Self::Other(msg) => write!(f, "application error: {msg}"),
         }
     }
@@ -239,5 +242,11 @@ impl From<AdmissionError> for CoreAppError {
 impl From<IdParseError> for CoreAppError {
     fn from(err: IdParseError) -> Self {
         Self::Id(err)
+    }
+}
+
+impl From<crate::sync_gate::SyncDisabled> for CoreAppError {
+    fn from(err: crate::sync_gate::SyncDisabled) -> Self {
+        Self::SyncDisabled(err)
     }
 }

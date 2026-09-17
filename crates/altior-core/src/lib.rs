@@ -23,6 +23,7 @@ pub mod ownership;
 pub mod runtime;
 pub mod secrets;
 pub mod supervision;
+pub mod sync_gate;
 
 pub use application::{
     CommandDispatcher, CoreAppError, CoreApplication, CoreCommand, CoreCommandEnvelope,
@@ -36,3 +37,4 @@ pub use context::{
     DEFAULT_IDENTITY_LIMIT_TOKENS, DEFAULT_MEMORY_LIMIT_TOKENS, assemble_context, estimate_tokens,
 };
 pub use secrets::{OsSecretStore, SecretStoreError, canonical_target_name};
+pub use sync_gate::{SYNC_ENABLED, SyncDisabled, ensure_sync_allowed};
