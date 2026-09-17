@@ -18,6 +18,7 @@ export interface TranslationDictionary {
     readonly close: string;
   };
   readonly rail: {
+    readonly activityAria: string;
     readonly threads: string;
     readonly agents: string;
     readonly projects: string;
@@ -27,6 +28,8 @@ export interface TranslationDictionary {
     readonly arrivesWith: (phase: string) => string;
   };
   readonly nav: {
+    readonly paneAria: string;
+    readonly widthAria: string;
     readonly filterPlaceholder: string;
     readonly newThread: string;
     readonly pinned: string;
@@ -47,6 +50,7 @@ export interface TranslationDictionary {
     readonly languageLabel: string;
   };
   readonly composer: {
+    readonly ariaLabel: string;
     readonly placeholder: string;
     readonly send: string;
     readonly stop: string;
@@ -62,6 +66,9 @@ export interface TranslationDictionary {
     readonly failed: string;
   };
   readonly inspector: {
+    readonly ariaLabel: string;
+    readonly widthAria: string;
+    readonly viewsAria: string;
     readonly turnDetails: string;
     readonly context: string;
     readonly diagnostics: string;
@@ -137,6 +144,22 @@ export interface TranslationDictionary {
   readonly memoryPane: {
     readonly title: string;
     readonly recordsCount: (filtered: number, total: number) => string;
+    readonly filterStateAria: string;
+    readonly filterScopeAria: string;
+    readonly agentModeAria: string;
+    readonly sourceLabel: string;
+    readonly sourceExplicit: string;
+    readonly sourceInferred: string;
+    readonly scopeLabel: string;
+    readonly targetLabel: string;
+    readonly targetPlaceholder: string;
+    readonly kindLabel: string;
+    readonly kindFact: string;
+    readonly kindPreference: string;
+    readonly kindInstruction: string;
+    readonly kindSummary: string;
+    readonly confirmDirectly: string;
+    readonly saveMemory: string;
     readonly allStates: string;
     readonly stateConfirmed: string;
     readonly stateCandidate: string;
@@ -164,6 +187,8 @@ export interface TranslationDictionary {
     readonly submitting: string;
     readonly empty: string;
     readonly emptyFiltered: string;
+    readonly originLabel: string;
+    readonly supersededByLabel: string;
   };
   readonly agents: {
     readonly deferredNotice: string;
@@ -184,12 +209,30 @@ export interface TranslationDictionary {
     readonly title: string;
     readonly nameLabel: string;
     readonly namePlaceholder: string;
+    readonly providerLabel: string;
+    readonly providerPlaceholder: string;
+    readonly modelLabel: string;
+    readonly modelPlaceholder: string;
     readonly programPathLabel: string;
     readonly programPathPlaceholder: string;
+    readonly argsLabel: string;
+    readonly argsPlaceholder: string;
+    readonly envSecretsLabel: string;
+    readonly envKeysPlaceholder: string;
+    readonly addMapping: string;
+    readonly removeMappingAria: string;
+    readonly labelLabel: string;
+    readonly closeAria: string;
+    readonly variableKeyPlaceholder: string;
+    readonly secretRefPlaceholder: string;
+    readonly secretPointerPlaceholder: string;
+    readonly primaryBindingPlaceholder: string;
+    readonly secretNotice: string;
     readonly testConnection: string;
     readonly testing: string;
     readonly saveAgent: string;
     readonly verified: string;
+    readonly verifiedWithLatency: (ms: number) => string;
     readonly testFailed: (msg: string) => string;
   };
   readonly markdown: {

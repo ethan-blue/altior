@@ -113,7 +113,7 @@ export function ActivityRail({ active, onNavigate }: ActivityRailProps) {
     { id: "settings", label: t.rail.settings, arrives: null },
   ];
   return (
-    <nav className={shell.rail} aria-label="Activity">
+    <nav className={shell.rail} aria-label={t.rail.activityAria}>
       {destinations.map(({ id, label, arrives }) => {
         const enabled = arrives == null;
         return (
@@ -224,7 +224,7 @@ export function ThreadsPane({
   const recent = threads.filter((thread) => !thread.pinned);
 
   return (
-    <section className={shell.threadsPane} aria-label="Threads">
+    <section className={shell.threadsPane} aria-label={t.nav.paneAria}>
       <div className={shell.threadsHeader}>
         <input
           type="search"
@@ -458,7 +458,7 @@ export function Composer({
             if (disabledReason == null) onSend();
           }
         }}
-        aria-label="Composer"
+        aria-label={t.composer.ariaLabel}
         data-testid="composer"
       />
       {isStreaming && onCancel ? (
@@ -624,12 +624,12 @@ export function Inspector({
   );
 
   return (
-    <aside className={shell.inspector} style={{ width }} aria-label="Inspector">
+    <aside className={shell.inspector} style={{ width }} aria-label={t.inspector.ariaLabel}>
       <div
         className={shell.resizeHandle}
         role="slider"
         tabIndex={0}
-        aria-label="Inspector width"
+        aria-label={t.inspector.widthAria}
         aria-valuemin={INSPECTOR_MIN}
         aria-valuemax={INSPECTOR_MAX}
         aria-valuenow={width}
@@ -650,7 +650,7 @@ export function Inspector({
       />
       <div className={shell.inspectorBody}>
         <div className={shell.inspectorHeader}>
-          <div className={shell.inspectorTabs} role="tablist" aria-label="Inspector Views">
+          <div className={shell.inspectorTabs} role="tablist" aria-label={t.inspector.viewsAria}>
             <button
               type="button"
               role="tab"
@@ -834,13 +834,14 @@ export function NavResizeHandle({
   readonly width: number;
   readonly onWidthChange: (width: number) => void;
 }) {
+  const { t } = useI18n();
   const dragState = useRef<{ startX: number; startWidth: number } | null>(null);
   return (
     <div
       className={shell.navResize}
       role="slider"
       tabIndex={0}
-      aria-label="Threads pane width"
+      aria-label={t.nav.widthAria}
       aria-valuemin={NAV_MIN}
       aria-valuemax={NAV_MAX}
       aria-valuenow={width}
@@ -1099,8 +1100,8 @@ export function AgentOnboardingModal({
           <button
             type="button"
             onClick={onClose}
-            aria-label="Close onboarding modal"
-            title="Close"
+            aria-label={t.onboarding.closeAria}
+            title={t.common.close}
             data-testid="onboarding-close"
           >
             ×
@@ -1109,25 +1110,25 @@ export function AgentOnboardingModal({
 
         <form onSubmit={handleSubmit}>
           <div className={shell.formGrid}>
-            <label htmlFor="agent-name">Name</label>
+            <label htmlFor="agent-name">{t.onboarding.nameLabel}</label>
             <input
               id="agent-name"
               className={shell.formInput}
               value={name}
               onChange={(e) => setName(e.target.value)}
-              placeholder="e.g. Gamma Agent"
+              placeholder={t.onboarding.namePlaceholder}
               required
               data-testid="agent-name-input"
             />
 
-            <label htmlFor="agent-provider">Provider</label>
+            <label htmlFor="agent-provider">{t.onboarding.providerLabel}</label>
             <div>
               <input
                 id="agent-provider"
                 className={shell.formInput}
                 value={provider}
                 onChange={(e) => setProvider(e.target.value)}
-                placeholder="acp"
+                placeholder={t.onboarding.providerPlaceholder}
                 required
                 data-testid="agent-provider-input"
               />
@@ -1136,14 +1137,14 @@ export function AgentOnboardingModal({
               </span>
             </div>
 
-            <label htmlFor="agent-model">Model</label>
+            <label htmlFor="agent-model">{t.onboarding.modelLabel}</label>
             <div>
               <input
                 id="agent-model"
                 className={shell.formInput}
                 value={model}
                 onChange={(e) => setModel(e.target.value)}
-                placeholder="optional (agent-managed)"
+                placeholder={t.onboarding.modelPlaceholder}
                 data-testid="agent-model-input"
               />
               <span style={{ fontSize: "0.75rem", color: "var(--color-fg-muted)", display: "block", marginTop: "2px" }}>
@@ -1151,27 +1152,27 @@ export function AgentOnboardingModal({
               </span>
             </div>
 
-            <label htmlFor="agent-program">Program</label>
+            <label htmlFor="agent-program">{t.onboarding.programPathLabel}</label>
             <input
               id="agent-program"
               className={shell.formInput}
               value={program}
               onChange={(e) => setProgram(e.target.value)}
-              placeholder="/usr/local/bin/acp-agent or acp-agent.exe"
+              placeholder={t.onboarding.programPathPlaceholder}
               data-testid="agent-program-input"
             />
 
-            <label htmlFor="agent-args">Args</label>
+            <label htmlFor="agent-args">{t.onboarding.argsLabel}</label>
             <input
               id="agent-args"
               className={shell.formInput}
               value={args}
               onChange={(e) => setArgs(e.target.value)}
-              placeholder='--mode server --config "C:\path with spaces\config.json"'
+              placeholder={t.onboarding.argsPlaceholder}
               data-testid="agent-args-input"
             />
 
-            <label htmlFor="agent-env-keys">Env Keys & Secret Refs</label>
+            <label htmlFor="agent-env-keys">{t.onboarding.envSecretsLabel}</label>
             <div>
               <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
                 <input
@@ -1179,7 +1180,7 @@ export function AgentOnboardingModal({
                   className={shell.formInput}
                   value={envKeys}
                   onChange={(e) => setEnvKeys(e.target.value)}
-                  placeholder="e.g. ANTHROPIC_API_KEY (leave blank if no auth)"
+                  placeholder={t.onboarding.envKeysPlaceholder}
                   data-testid="agent-env-keys-input"
                   style={{ flex: 1 }}
                 />
@@ -1188,7 +1189,7 @@ export function AgentOnboardingModal({
                   className={shell.formInput}
                   value={secretRef}
                   onChange={(e) => setSecretRef(e.target.value)}
-                  placeholder="sec_... or vault://..."
+                  placeholder={t.onboarding.secretPointerPlaceholder}
                   data-testid="agent-secret-ref"
                   style={{ flex: 1 }}
                 />
@@ -1198,7 +1199,7 @@ export function AgentOnboardingModal({
                   data-testid="add-env-mapping-btn"
                   style={{ padding: "0 var(--spacing-8)", height: "var(--control-height)", cursor: "pointer" }}
                 >
-                  + Add
+                  {t.onboarding.addMapping}
                 </button>
               </div>
 
@@ -1211,7 +1212,7 @@ export function AgentOnboardingModal({
                       const v = e.target.value;
                       setExtraMappings((prev) => prev.map((r) => r.id === row.id ? { ...r, envKey: v } : r));
                     }}
-                    placeholder="Variable Key"
+                    placeholder={t.onboarding.variableKeyPlaceholder}
                     data-testid={`env-key-input-${idx}`}
                     style={{ flex: 1 }}
                   />
@@ -1222,7 +1223,7 @@ export function AgentOnboardingModal({
                       const v = e.target.value;
                       setExtraMappings((prev) => prev.map((r) => r.id === row.id ? { ...r, secretRef: v } : r));
                     }}
-                    placeholder="Secret Ref (sec_..., vault://...)"
+                    placeholder={t.onboarding.secretRefPlaceholder}
                     data-testid={`secret-ref-input-${idx}`}
                     style={{ flex: 1 }}
                   />
@@ -1231,7 +1232,8 @@ export function AgentOnboardingModal({
                     onClick={() => setExtraMappings((prev) => prev.filter((r) => r.id !== row.id))}
                     data-testid={`remove-mapping-btn-${idx}`}
                     style={{ background: "transparent", border: "none", color: "var(--color-danger, #b3362b)", cursor: "pointer", fontSize: "1.2rem", padding: "0 4px" }}
-                    title="Remove mapping"
+                    title={t.onboarding.removeMappingAria}
+                    aria-label={t.onboarding.removeMappingAria}
                   >
                     ×
                   </button>
@@ -1239,18 +1241,18 @@ export function AgentOnboardingModal({
               ))}
             </div>
 
-            <label htmlFor="agent-label">Label</label>
+            <label htmlFor="agent-label">{t.onboarding.labelLabel}</label>
             <input
               id="agent-label"
               className={shell.formInput}
               value={label}
               onChange={(e) => setLabel(e.target.value)}
-              placeholder="Primary ACP Binding"
+              placeholder={t.onboarding.primaryBindingPlaceholder}
               data-testid="agent-label-input"
             />
 
             <p className={shell.secretNotice}>
-              🔒 Credentials must reside in the OS secret store; enter only the opaque reference pointer (sec_..., vault://..., env:...). Plaintext API keys are rejected.
+              🔒 {t.onboarding.secretNotice}
             </p>
             <p style={{ fontSize: "0.75rem", color: "var(--color-muted)", marginTop: "4px" }} data-testid="agent-deferred-notice">
               ℹ️ {t.agents.deferredNotice}
@@ -1262,7 +1264,7 @@ export function AgentOnboardingModal({
               testResult.success ? (
                 <div>
                   <span className={shell.testResultOk}>
-                    ✓ Connection verified ({testResult.latencyMs}ms)
+                    ✓ {t.onboarding.verifiedWithLatency(testResult.latencyMs ?? 0)}
                   </span>
                   {testResult.capabilities && Object.keys(testResult.capabilities).length > 0 ? (
                     <div style={{ fontSize: "0.75rem", color: "var(--color-fg-muted)", marginTop: "4px" }} data-testid="tested-capabilities">
@@ -1272,7 +1274,7 @@ export function AgentOnboardingModal({
                 </div>
               ) : (
                 <span className={shell.testResultErr}>
-                  × Test failed: {testResult.error}
+                  × {t.onboarding.testFailed(testResult.error ?? "")}
                 </span>
               )
             ) : null}
