@@ -187,16 +187,22 @@ export function ContextPanel({ snapshot, status, error }: ContextPanelProps) {
 
       {/* Identity Documents */}
       {snapshot.identity && snapshot.identity.length > 0 ? (
-        <section className={shell.contextSection} aria-label="Identity Documents" data-testid="context-identity">
+        <section
+          className={shell.contextSection}
+          aria-label={t.contextPanel.identityDocuments(snapshot.identity.length)}
+          data-testid="context-identity"
+        >
           <h3 className={shell.sectionSubtitle}>
-            Identity Documents ({snapshot.identity.length})
+            {t.contextPanel.identityDocuments(snapshot.identity.length)}
           </h3>
           <ul className={shell.droppedList}>
             {snapshot.identity.map((idoc) => (
               <li key={idoc.document_id} className={shell.droppedItem}>
                 <span className={shell.mono}>{idoc.document_id}</span>
                 <span className={shell.memoryKindBadge}>{idoc.kind}</span>
-                <span className={shell.mono}>{idoc.tokens} tokens</span>
+                <span className={shell.mono}>
+                  {idoc.tokens} {t.contextPanel.tokensUnit}
+                </span>
               </li>
             ))}
           </ul>

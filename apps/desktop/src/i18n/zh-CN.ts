@@ -139,6 +139,8 @@ export const zhCN: TranslationDictionary = {
     whySelected: "入选理由",
     provenance: "溯源来源",
     dropReason: "舍弃原因",
+    identityDocuments: (count) => `身份文档 (${count})`,
+    tokensUnit: "词元",
   },
   memoryPane: {
     title: "记忆库",
@@ -203,6 +205,14 @@ export const zhCN: TranslationDictionary = {
     threadRunning: "会话 · 进行中",
     threadFailed: "会话 · 失败",
     threadWaitingPermission: "会话 · 等待授权",
+    reconnect: "重新连接",
+    coreLine: (detail) => `核心 · ${detail}`,
+    coreDisconnected: "已断开",
+    coreConnecting: "连接中",
+    coreReconnecting: "重连中",
+    coreUnavailable: "不可用",
+    streamReplaying: "传输 · 回放中",
+    streamReady: "传输 · 就绪",
   },
   onboarding: {
     title: "连接 ACP 代理",

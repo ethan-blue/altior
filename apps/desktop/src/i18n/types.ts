@@ -140,6 +140,8 @@ export interface TranslationDictionary {
     readonly whySelected: string;
     readonly provenance: string;
     readonly dropReason: string;
+    readonly identityDocuments: (count: number) => string;
+    readonly tokensUnit: string;
   };
   readonly memoryPane: {
     readonly title: string;
@@ -204,6 +206,14 @@ export interface TranslationDictionary {
     readonly threadRunning: string;
     readonly threadFailed: string;
     readonly threadWaitingPermission: string;
+    readonly reconnect: string;
+    readonly coreLine: (detail: string) => string;
+    readonly coreDisconnected: string;
+    readonly coreConnecting: string;
+    readonly coreReconnecting: string;
+    readonly coreUnavailable: string;
+    readonly streamReplaying: string;
+    readonly streamReady: string;
   };
   readonly onboarding: {
     readonly title: string;

@@ -393,11 +393,8 @@ export function App({
 
       <div className={styles.statusBarArea}>
         <StatusBar
-          coreState={
-            appState.negotiated
-              ? `connected (IPC v${appState.negotiated.selected_version})`
-              : appState.connectionStatus
-          }
+          coreState={appState.negotiated ? "connected" : appState.connectionStatus}
+          ipcVersion={appState.negotiated?.selected_version}
           threadStatus={currentThread?.status ?? "completed"}
           streamState={appState.streamState !== "idle" ? appState.streamState : undefined}
           onReconnect={() => void appStore.reconnect()}

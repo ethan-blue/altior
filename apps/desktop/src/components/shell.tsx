@@ -877,19 +877,73 @@ export function StatusBar({
   threadStatus,
   streamState,
   onReconnect,
+  ipcVersion,
 }: {
   readonly coreState: string;
   readonly threadStatus: string;
   readonly streamState?: string;
   readonly onReconnect?: () => void;
+  readonly ipcVersion?: number | string;
 }) {
   const { t } = useI18n();
-  const isDisconnected = coreState.includes("disconnected") || coreState.includes("unavailable");
+  const isDisconnected = coreState === "disconnected" || coreState === "unavailable";
+
+  const coreDetail = (() => {
+    if (ipcVersion !== undefined && ipcVersion !== null && coreState === "connected") {
+      return t.statusBar.coreConnected(ipcVersion);
+    }
+    switch (coreState) {
+      case "connected":
+        return t.statusBar.coreConnected("?");
+      case "disconnected":
+        return t.statusBar.coreDisconnected;
+      case "connecting":
+        return t.statusBar.coreConnecting;
+      case "reconnecting":
+        return t.statusBar.coreReconnecting;
+      case "unavailable":
+        return t.statusBar.coreUnavailable;
+      default:
+        return coreState;
+    }
+  })();
+
+  const threadDetail = (() => {
+    switch (threadStatus) {
+      case "completed":
+        return t.statusBar.threadCompleted;
+      case "running":
+        return t.statusBar.threadRunning;
+      case "failed":
+        return t.statusBar.threadFailed;
+      case "waiting-for-permission":
+        return t.statusBar.threadWaitingPermission;
+      default:
+        return "Thread · " + threadStatus;
+    }
+  })();
+
+  const streamDetail = (() => {
+    if (!streamState) return null;
+    switch (streamState) {
+      case "live":
+        return t.statusBar.streamLive;
+      case "interrupted":
+        return t.statusBar.streamInterrupted;
+      case "replaying":
+        return t.statusBar.streamReplaying;
+      case "ready":
+        return t.statusBar.streamReady;
+      default:
+        return "Stream · " + streamState;
+    }
+  })();
+
   return (
     <footer className={shell.statusBar} data-testid="status-bar">
-      <span>Core · {coreState}</span>
-      <span>Thread · {threadStatus}</span>
-      {streamState ? <span>Stream · {streamState}</span> : null}
+      <span>{t.statusBar.coreLine(coreDetail)}</span>
+      <span>{threadDetail}</span>
+      {streamDetail ? <span>{streamDetail}</span> : null}
       <span>{t.statusBar.localNoSync}</span>
       {isDisconnected && onReconnect ? (
         <button
@@ -898,7 +952,7 @@ export function StatusBar({
           className={shell.reconnectBtn}
           data-testid="reconnect-button"
         >
-          Reconnect
+          {t.statusBar.reconnect}
         </button>
       ) : null}
     </footer>

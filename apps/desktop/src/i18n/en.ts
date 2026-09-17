@@ -140,6 +140,8 @@ export const en: TranslationDictionary = {
     whySelected: "Why Selected",
     provenance: "Provenance",
     dropReason: "Drop Reason",
+    identityDocuments: (count) => `Identity Documents (${count})`,
+    tokensUnit: "tokens",
   },
   memoryPane: {
     title: "Memory Vault",
@@ -204,6 +206,14 @@ export const en: TranslationDictionary = {
     threadRunning: "Thread · running",
     threadFailed: "Thread · failed",
     threadWaitingPermission: "Thread · waiting for permission",
+    reconnect: "Reconnect",
+    coreLine: (detail) => `Core · ${detail}`,
+    coreDisconnected: "disconnected",
+    coreConnecting: "connecting",
+    coreReconnecting: "reconnecting",
+    coreUnavailable: "unavailable",
+    streamReplaying: "Stream · replaying",
+    streamReady: "Stream · ready",
   },
   onboarding: {
     title: "Agent Onboarding",
