@@ -210,6 +210,8 @@ export const en: TranslationDictionary = {
     whyFragExplicitPlus: "explicit +",
     whyFragTotal: "total:",
     whyFragBm25: "bm25:",
+    identityKindName: "Name",
+    identityKindAbout: "About",
   },
   memoryPane: {
     title: "Memory Vault",

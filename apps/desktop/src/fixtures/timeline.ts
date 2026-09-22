@@ -67,7 +67,7 @@ function unknownEvent(id: string, providerKind: string): TimelineRow {
   return {
     id,
     kind: "unknown",
-    text: `${providerKind}: unrecognized by protocol v1; preserved verbatim`,
+    text: `${providerKind}: 协议 v1 未识别；原文保留`,
     status: null,
     permission: null,
     streaming: false,
@@ -85,10 +85,10 @@ export const standardThread: ThreadFixture = {
     user("trn_fixture000000101", "用三条要点概括 P0.2 IPC 契约。"),
     tool("std-2", "rg --files crates/altior-ipc", "completed"),
     permission("evt_fixture000000101", "read crates/altior-ipc/src", "project:altior"),
-    user("trn_fixture000000103", "[approved]"),
+    user("trn_fixture000000103", "[已批准]"),
     assistant(
       "trn_fixture000000105",
-      "Frames are 4-byte length-prefixed and capped at 256 KiB; sessions share one per-launch event log; reload is a new connection over the same log.",
+      "帧为 4 字节长度前缀，上限 256 KiB；会话共享单次启动的事件日志；重载是在同一日志上的新连接。",
     ),
     unknownEvent("std-6", "acp.update.plan"),
   ],
@@ -105,7 +105,7 @@ export const approvalThread: ThreadFixture = {
     user("trn_fixture000000111", "审计工作区依赖并标出风险项。"),
     tool("apr-2", "cargo tree --workspace", "completed"),
     permission("evt_fixture000000111", "cargo tree --workspace --edges all", "project:altior"),
-    assistant("trn_fixture000000113", "Waiting for your decision before reading the full graph.", true),
+    assistant("trn_fixture000000113", "在读取完整依赖图之前，等待你的决定。", true),
   ],
 };
 
@@ -118,9 +118,9 @@ export const failureThread: ThreadFixture = {
   pinned: false,
   rows: [
     user("trn_fixture000000121", "起草中继尖峰试跑大纲。"),
-    assistant("trn_fixture000000123", "The relay needs an envelope format, ack semantics, and…", true),
-    error("fai-3", "turn stopped: refusal — the agent declined this request"),
-    error("fai-4", "delivery: indeterminate (process exited mid-turn); no resend"),
+    assistant("trn_fixture000000123", "中继需要信封格式、确认语义，以及…", true),
+    error("fai-3", "轮次已停止：拒绝 — 代理婉拒了此请求"),
+    error("fai-4", "投递：不确定（进程在轮次中途退出）；不重发"),
   ],
 };
 

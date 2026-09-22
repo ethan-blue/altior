@@ -2,6 +2,7 @@ import { useI18n } from "../i18n";
 import {
   localizeDegradedCode,
   localizeDropReason,
+  localizeIdentityKind,
   localizeMemoryKind,
   localizeWhySelected,
 } from "../i18n/localizeEnums";
@@ -229,7 +230,7 @@ export function ContextPanel({ snapshot, status, error }: ContextPanelProps) {
             {snapshot.identity.map((idoc) => (
               <li key={idoc.document_id} className={shell.droppedItem}>
                 <span className={shell.mono}>{idoc.document_id}</span>
-                <span className={shell.memoryKindBadge}>{localizeMemoryKind(idoc.kind, t)}</span>
+                <span className={shell.memoryKindBadge} data-testid="identity-kind-badge">{localizeIdentityKind(idoc.kind, t)}</span>
                 <span className={shell.mono}>
                   {t.contextPanel.tokensCount(idoc.tokens)}
                 </span>

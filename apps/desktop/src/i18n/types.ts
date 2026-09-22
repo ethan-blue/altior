@@ -210,6 +210,8 @@ export interface TranslationDictionary {
     readonly whyFragExplicitPlus: string;
     readonly whyFragTotal: string;
     readonly whyFragBm25: string;
+    readonly identityKindName: string;
+    readonly identityKindAbout: string;
   };
   readonly memoryPane: {
     readonly title: string;
