@@ -36,6 +36,7 @@ export const zhCN: TranslationDictionary = {
     recent: "近期会话",
     empty: "暂无会话。",
     noMatches: "没有匹配的会话。试试其他关键词。",
+    clearFilter: "清除筛选",
     loadMore: "加载更多会话…",
     loadingHistory: "正在加载历史会话…",
     moreHistoryFailed: "无法加载更多历史。已显示的内容仍可阅读。",

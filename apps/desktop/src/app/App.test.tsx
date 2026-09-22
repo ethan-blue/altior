@@ -130,7 +130,8 @@ describe("App workbench shell", () => {
     const filter = screen.getByTestId("thread-filter");
     fireEvent.change(filter, { target: { value: "zzz-no-such-thread" } });
     await waitFor(() => {
-      expect(screen.getByText("No conversations match.")).toBeInTheDocument();
+      expect(screen.getByTestId("threads-search-empty")).toHaveTextContent(/No conversations match/);
+      expect(screen.getByTestId("clear-thread-filter")).toBeInTheDocument();
     });
 
     // The nav list is empty but the read conversation stays mounted with
