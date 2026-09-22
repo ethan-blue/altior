@@ -31,13 +31,6 @@ import shell from "./shell.module.css";
 export { ContextPanel, type ContextPanelProps };
 export { MemoryPane, type MemoryPaneProps } from "./MemoryPane";
 
-const statusLabel: Record<ThreadStatus, string> = {
-  running: "running",
-  "waiting-for-permission": "waiting",
-  failed: "failed",
-  completed: "completed",
-};
-
 const statusGlyph: Record<ThreadStatus, string> = {
   running: "◐",
   "waiting-for-permission": "?",
@@ -316,6 +309,21 @@ export function ThreadsPane({
   );
 }
 
+function threadStatusLabel(status: ThreadStatus, t: { threadStatus: { running: string; waiting: string; failed: string; completed: string } }): string {
+  switch (status) {
+    case "running":
+      return t.threadStatus.running;
+    case "waiting-for-permission":
+      return t.threadStatus.waiting;
+    case "failed":
+      return t.threadStatus.failed;
+    case "completed":
+      return t.threadStatus.completed;
+    default:
+      return status;
+  }
+}
+
 function ThreadSection({
   title,
   threads,
@@ -327,6 +335,7 @@ function ThreadSection({
   readonly selectedThreadId: string;
   readonly onSelect: (id: string) => void;
 }) {
+  const { t } = useI18n();
   return (
     <section className={shell.threadSection} aria-label={title}>
       <h2 className={shell.sectionTitle}>{title}</h2>
@@ -346,7 +355,7 @@ function ThreadSection({
               {statusGlyph[thread.status]}
             </span>
             <span className={shell.threadTitle}>{thread.title}</span>
-            <span className={shell.threadStatus}>{statusLabel[thread.status]}</span>
+            <span className={shell.threadStatus}>{threadStatusLabel(thread.status, t)}</span>
           </button>
         ))}
       </div>
