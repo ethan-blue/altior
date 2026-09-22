@@ -180,6 +180,14 @@ export const en: TranslationDictionary = {
     tokensUnit: "tokens",
     tokensScore: "Tokens / Score",
     tokensScoreValue: (tokens, score) => `${tokens} tokens · total_score: ${score}`,
+    tokensFraction: (used, limit) => `${used} / ${limit} tokens`,
+    tokensCount: (n) => `${n} tokens`,
+    provenanceThread: "thread_id",
+    provenanceTurn: "turn_id",
+    provenanceExcerpt: "excerpt",
+    unknownValue: "unknown",
+    noneValue: "(none)",
+    droppedMeta: (rank, tokens) => `rank #${rank} · ${tokens} tokens`,
   },
   memoryPane: {
     title: "Memory Vault",
@@ -252,6 +260,8 @@ export const en: TranslationDictionary = {
     coreUnavailable: "unavailable",
     streamReplaying: "Stream · replaying",
     streamReady: "Stream · ready",
+    threadLine: (status) => `Thread · ${status}`,
+    streamLine: (status) => `Stream · ${status}`,
   },
   onboarding: {
     title: "Agent Onboarding",
@@ -284,6 +294,7 @@ export const en: TranslationDictionary = {
     verifiedWithLatency: (ms) => `Connection verified (${ms}ms)`,
     testFailed: (msg) => `Test failed: ${msg}`,
     capabilitiesLabel: "Capabilities",
+    capabilitiesSummary: (list) => `Capabilities: ${list}`,
     agentRequiredNotice: "Please configure an agent before creating a new thread.",
   },
   markdown: {
@@ -298,6 +309,9 @@ export const en: TranslationDictionary = {
     expandOutput: (extraLines) =>
       `Expand full output (+${extraLines} lines)`,
     openImage: "(Open image)",
+    toolStatusCompleted: "completed",
+    toolStatusFailed: "failed",
+    toolStatusRunning: "running",
   },
   workbenchEmpty: {
     connecting: "Connecting to Core…",

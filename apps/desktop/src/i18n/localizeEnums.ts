@@ -73,3 +73,19 @@ export function localizeRuntimeStatus(
       return status;
   }
 }
+
+export function localizeToolStatus(
+  status: string,
+  t: TranslationDictionary,
+): string {
+  switch (status) {
+    case "completed":
+      return t.markdown.toolStatusCompleted;
+    case "failed":
+      return t.markdown.toolStatusFailed;
+    case "running":
+      return t.markdown.toolStatusRunning;
+    default:
+      return status;
+  }
+}

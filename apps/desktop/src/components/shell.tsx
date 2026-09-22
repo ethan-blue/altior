@@ -25,7 +25,7 @@ import {
 } from "../app/uiStore";
 import { ContextPanel, type ContextPanelProps } from "./ContextPanel";
 import { useI18n } from "../i18n";
-import { localizeRuntimeStatus } from "../i18n/localizeEnums";
+import { localizeRuntimeStatus, localizeToolStatus } from "../i18n/localizeEnums";
 import type { ThemeSource, LocaleSource } from "../app/uiStore";
 import shell from "./shell.module.css";
 
@@ -917,7 +917,7 @@ function InspectorDetails({
       {row.status ? (
         <>
           <dt>{t.inspector.toolStatus}</dt>
-          <dd>{row.status}</dd>
+          <dd>{localizeToolStatus(row.status, t)}</dd>
         </>
       ) : null}
       {row.permission ? (
@@ -1031,7 +1031,7 @@ export function StatusBar({
       case "waiting-for-permission":
         return t.statusBar.threadWaitingPermission;
       default:
-        return "Thread · " + threadStatus;
+        return t.statusBar.threadLine(threadStatus);
     }
   })();
 
@@ -1047,7 +1047,7 @@ export function StatusBar({
       case "ready":
         return t.statusBar.streamReady;
       default:
-        return "Stream · " + streamState;
+        return t.statusBar.streamLine(streamState);
     }
   })();
 
@@ -1446,7 +1446,11 @@ export function AgentOnboardingModal({
                   </span>
                   {testResult.capabilities && Object.keys(testResult.capabilities).length > 0 ? (
                     <div style={{ fontSize: "0.75rem", color: "var(--color-muted)", marginTop: "4px" }} data-testid="tested-capabilities">
-                      {t.onboarding.capabilitiesLabel}: {Object.entries(testResult.capabilities).map(([k, v]) => `${k}: ${v}`).join(", ")}
+                      {t.onboarding.capabilitiesSummary(
+                        Object.entries(testResult.capabilities)
+                          .map(([k, v]) => `${k}: ${v}`)
+                          .join(", "),
+                      )}
                     </div>
                   ) : null}
                 </div>
