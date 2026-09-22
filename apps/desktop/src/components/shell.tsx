@@ -928,39 +928,54 @@ function InspectorDetails({
   const { t } = useI18n();
   if (!row) {
     return (
-      <div>
-        <p className={shell.inspectorEmpty}>{t.inspector.selectRowToInspect}</p>
+      <div className={shell.inspectorEmptyStack} data-testid="inspector-details-empty">
+        <div
+          className={shell.inspectorEmptyCard}
+          role="status"
+          data-testid="inspector-select-row-empty"
+          data-empty-kind="select-row"
+        >
+          <p className={shell.inspectorEmptyTitle}>{t.inspector.selectRowToInspect}</p>
+          <p className={shell.inspectorEmptyHint}>{t.inspector.selectRowHint}</p>
+        </div>
         {activeAgent ? (
-          <dl className={shell.inspectorFields} style={{ marginTop: "1rem" }}>
-            <dt>{t.inspector.agent}</dt>
-            <dd>{activeAgent.name}</dd>
-            <dt>{t.inspector.model}</dt>
-            <dd className={shell.mono}>{activeAgent.model}</dd>
-            <dt>{t.inspector.provider}</dt>
-            <dd>{activeAgent.provider}</dd>
-            {activeAgent.program ? (
-              <>
-                <dt>{t.inspector.program}</dt>
-                <dd className={shell.mono}>{activeAgent.program}</dd>
-              </>
-            ) : null}
-            {activeAgent.label ? (
-              <>
-                <dt>{t.inspector.bindingLabel}</dt>
-                <dd>{activeAgent.label}</dd>
-              </>
-            ) : null}
-            {activeAgent.bindingId ? (
-              <>
-                <dt>{t.inspector.bindingId}</dt>
-                <dd className={shell.mono}>{activeAgent.bindingId}</dd>
-              </>
-            ) : null}
-            <dt>{t.inspector.secretRef}</dt>
-            <dd className={shell.mono}>
-              {activeAgent.secretRef ? activeAgent.secretRef : t.inspector.none}
-            </dd>
-          </dl>
+          <section
+            className={shell.contextSection}
+            aria-label={t.inspector.activeAgentSection}
+            data-testid="inspector-active-agent"
+          >
+            <h3 className={shell.sectionSubtitle}>{t.inspector.activeAgentSection}</h3>
+            <dl className={shell.inspectorFields}>
+              <dt>{t.inspector.agent}</dt>
+              <dd>{activeAgent.name}</dd>
+              <dt>{t.inspector.model}</dt>
+              <dd className={shell.mono}>{activeAgent.model}</dd>
+              <dt>{t.inspector.provider}</dt>
+              <dd>{activeAgent.provider}</dd>
+              {activeAgent.program ? (
+                <>
+                  <dt>{t.inspector.program}</dt>
+                  <dd className={shell.mono}>{activeAgent.program}</dd>
+                </>
+              ) : null}
+              {activeAgent.label ? (
+                <>
+                  <dt>{t.inspector.bindingLabel}</dt>
+                  <dd>{activeAgent.label}</dd>
+                </>
+              ) : null}
+              {activeAgent.bindingId ? (
+                <>
+                  <dt>{t.inspector.bindingId}</dt>
+                  <dd className={shell.mono}>{activeAgent.bindingId}</dd>
+                </>
+              ) : null}
+              <dt>{t.inspector.secretRef}</dt>
+              <dd className={shell.mono}>
+                {activeAgent.secretRef ? activeAgent.secretRef : t.inspector.none}
+              </dd>
+            </dl>
+          </section>
         ) : null}
       </div>
     );
