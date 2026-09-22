@@ -65,6 +65,7 @@ export const zhCN: TranslationDictionary = {
     shortcutHintSend: "↵ 发送",
     shortcutHintNewline: "⇧↵ 换行",
     smartTools: "代理已就绪",
+    cancelFailed: (reason) => `未能确认停止，代理可能仍在运行。（${reason}）`,
   },
   permission: {
     approve: "批准",
@@ -244,9 +245,9 @@ export const zhCN: TranslationDictionary = {
     threadWaitingPermission: "会话 · 等待授权",
     reconnect: "重新连接",
     coreLine: (detail) => `核心 · ${detail}`,
-    coreDisconnected: "已断开",
+    coreDisconnected: "本地服务已断开",
     coreConnecting: "连接中",
-    coreReconnecting: "重连中",
+    coreReconnecting: "正在连接本地服务…",
     coreUnavailable: "不可用",
     streamReplaying: "传输 · 回放中",
     streamReady: "传输 · 就绪",
@@ -300,8 +301,8 @@ export const zhCN: TranslationDictionary = {
   workbenchEmpty: {
     connecting: "正在连接 Core…",
     coreDisconnected: "Core 已断开",
-    noConversations: "暂无会话。请新建会话或配置代理后开始。",
-    selectConversation: "请从列表中选择一个会话。",
+    noConversations: "还没有会话。新建一个，或先配置代理再开始。",
+    selectConversation: "从左侧选择一个会话继续。",
   },
   settings: {
     title: "本地偏好设置",

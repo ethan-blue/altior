@@ -65,6 +65,7 @@ export const en: TranslationDictionary = {
     shortcutHintSend: "↵ Send",
     shortcutHintNewline: "⇧↵ Newline",
     smartTools: "Agent Active",
+    cancelFailed: (reason) => `Could not confirm stop ? the agent may still be running. (${reason})`,
   },
   permission: {
     approve: "Approve",

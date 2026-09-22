@@ -1115,7 +1115,7 @@ describe("ApplicationStore", () => {
       // The turn is NOT locally finished: Core may still be running it.
       expect(store.getState().activeTurns).toHaveLength(1);
       expect(store.getState().activeTurns[0]?.cancelState).toBe("failed");
-      expect(store.getState().activeTurns[0]?.notice).toContain("may still be running");
+      expect(store.getState().activeTurns[0]?.notice).toBe("cancel_failed:cancel channel lost");
 
       // The authoritative settlement clears the turn.
       const turnId = store.getState().activeTurns[0]?.turnId ?? null;
