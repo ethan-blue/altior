@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Workbench shell regions (ADR 0008 §2): activity rail, navigation pane,
  * thread header, composer, inspector, status bar. Five stable regions
  * per docs/UI_ARCHITECTURE.md; panes resize by drag or keyboard within
@@ -873,19 +873,19 @@ function InspectorDetails({
             <dd>{activeAgent.provider}</dd>
             {activeAgent.program ? (
               <>
-                <dt>Program</dt>
+                <dt>{t.inspector.program}</dt>
                 <dd className={shell.mono}>{activeAgent.program}</dd>
               </>
             ) : null}
             {activeAgent.label ? (
               <>
-                <dt>Binding Label</dt>
+                <dt>{t.inspector.bindingLabel}</dt>
                 <dd>{activeAgent.label}</dd>
               </>
             ) : null}
             {activeAgent.bindingId ? (
               <>
-                <dt>Binding ID</dt>
+                <dt>{t.inspector.bindingId}</dt>
                 <dd className={shell.mono}>{activeAgent.bindingId}</dd>
               </>
             ) : null}
@@ -917,7 +917,7 @@ function InspectorDetails({
           <dt>{t.inspector.scope}</dt>
           <dd className={shell.mono}>{row.permission.scope}</dd>
           <dt>{t.inspector.decision}</dt>
-          <dd>{row.permission.decision ?? "pending"}</dd>
+          <dd>{row.permission.decision ?? t.inspector.decisionPending}</dd>
           <dt>{t.inspector.decisionAuthority}</dt>
           <dd>{t.inspector.decisionAuthorityDesc}</dd>
         </>
