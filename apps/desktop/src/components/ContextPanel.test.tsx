@@ -103,7 +103,7 @@ describe("ContextPanel (P2.2 inspector)", () => {
 
     const dropped = screen.getByTestId("context-dropped-list");
     expect(dropped.textContent).toContain("mem_p22panel00000000000000002");
-    expect(dropped.textContent).toContain("budget_exhausted");
+    expect(dropped.textContent).toMatch(/budget_exhausted|budget exhausted|预算耗尽/);
   });
 
   it("renders a degradation badge when assembly degraded", () => {

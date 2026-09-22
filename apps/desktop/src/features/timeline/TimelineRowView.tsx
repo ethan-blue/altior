@@ -9,6 +9,7 @@
  */
 import { memo, useCallback, useEffect, useSyncExternalStore } from "react";
 import { useI18n } from "../../i18n";
+import { localizePermissionDecision, localizeTimelineRowKind } from "../../i18n/localizeEnums";
 import { SafeMarkdown, ToolBlock } from "../../components/SafeMarkdown";
 import type {
   PermissionDecision,
@@ -37,22 +38,7 @@ export const TimelineRowView = memo(function TimelineRowView({
 }: RowViewProps) {
   const { t } = useI18n();
 
-  const getKindLabel = (kind: Row["kind"]): string => {
-    switch (kind) {
-      case "user-message":
-        return t.timeline.you;
-      case "assistant-message":
-        return t.timeline.assistant;
-      case "tool":
-        return t.timeline.tool;
-      case "permission":
-        return t.timeline.approval;
-      case "error":
-        return t.timeline.failed;
-      default:
-        return t.timeline.unknown;
-    }
-  };
+  const getKindLabel = (kind: Row["kind"]): string => localizeTimelineRowKind(kind, t);
 
   const subscribe = useCallback(
     (listener: () => void) => store.subscribeRow(rowId, listener),
@@ -286,7 +272,9 @@ function PermissionBody({
                   />
                 </svg>
               )}
-              <span>{permission.decision}</span>
+              <span data-testid="permission-decision-chip">
+                {localizePermissionDecision(permission.decision, t)}
+              </span>
             </span>
             <span className={rowStyles.decisionAuditNote}>
               {permission.decision === "approved"

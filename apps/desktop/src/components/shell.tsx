@@ -25,7 +25,12 @@ import {
 } from "../app/uiStore";
 import { ContextPanel, type ContextPanelProps } from "./ContextPanel";
 import { useI18n } from "../i18n";
-import { localizeRuntimeStatus, localizeToolStatus } from "../i18n/localizeEnums";
+import {
+  localizePermissionDecision,
+  localizeRuntimeStatus,
+  localizeTimelineRowKind,
+  localizeToolStatus,
+} from "../i18n/localizeEnums";
 import type { ThemeSource, LocaleSource } from "../app/uiStore";
 import shell from "./shell.module.css";
 
@@ -911,7 +916,7 @@ function InspectorDetails({
   return (
     <dl className={shell.inspectorFields}>
       <dt>{t.inspector.kind}</dt>
-      <dd>{row.kind}</dd>
+      <dd data-testid="inspector-row-kind">{localizeTimelineRowKind(row.kind, t)}</dd>
       <dt>{t.inspector.rowId}</dt>
       <dd className={shell.mono}>{row.id}</dd>
       {row.status ? (
@@ -927,7 +932,11 @@ function InspectorDetails({
           <dt>{t.inspector.scope}</dt>
           <dd className={shell.mono}>{row.permission.scope}</dd>
           <dt>{t.inspector.decision}</dt>
-          <dd>{row.permission.decision ?? t.inspector.decisionPending}</dd>
+          <dd data-testid="inspector-permission-decision">
+            {row.permission.decision
+              ? localizePermissionDecision(row.permission.decision, t)
+              : t.inspector.decisionPending}
+          </dd>
           <dt>{t.inspector.decisionAuthority}</dt>
           <dd>{t.inspector.decisionAuthorityDesc}</dd>
         </>
