@@ -676,6 +676,33 @@ impl ThreadRuntimeSupervisor {
                     })),
                 }
             }
+            HarnessEvent::ToolCall {
+                tool_call_id,
+                status,
+            } => {
+                let current_turn = match &self.state {
+                    SupervisorState::Prompting { turn_id, .. }
+                    | SupervisorState::AwaitingPermission { turn_id, .. }
+                    | SupervisorState::Cancelling {
+                        turn_id: Some(turn_id),
+                        ..
+                    } => turn_id.clone(),
+                    _ => {
+                        let summary = BoundedDiagnosticsSummary::from_raw(&tool_call_id);
+                        return Ok(Some(RuntimeEvent::Unknown {
+                            thread_id: self.thread_id.clone(),
+                            name: "untracked.tool_call".to_string(),
+                            summary,
+                        }));
+                    }
+                };
+                Ok(Some(RuntimeEvent::ToolCall {
+                    thread_id: self.thread_id.clone(),
+                    turn_id: current_turn,
+                    tool_call_id,
+                    status,
+                }))
+            }
             HarnessEvent::RawUnknown { name, data } => {
                 let summary = BoundedDiagnosticsSummary::from_raw(&data);
                 Ok(Some(RuntimeEvent::Unknown {

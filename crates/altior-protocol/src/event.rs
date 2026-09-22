@@ -65,6 +65,21 @@ pub enum KnownEvent {
         decision: String,
     },
 
+    /// An ACP tool call started or changed status (`tool.call`).
+    ///
+    /// Status is the harness wire name when present (`pending`, `in_progress`,
+    /// `completed`, `failed`, …). One known kind covers started/updated/finished
+    /// so Desktop and Core share a stable tool surface (ADR 0015).
+    #[serde(rename = "tool.call")]
+    #[cfg_attr(feature = "dto-export", ts(rename = "tool.call"))]
+    ToolCall {
+        /// Harness tool call id.
+        tool_call_id: String,
+        /// Optional status wire name from the agent update.
+        #[cfg_attr(feature = "dto-export", ts(type = "string | null", optional))]
+        status: Option<String>,
+    },
+
     /// A turn completed successfully (`turn.completed`).
     #[serde(rename = "turn.completed")]
     #[cfg_attr(feature = "dto-export", ts(rename = "turn.completed"))]
@@ -166,7 +181,7 @@ pub enum KnownEvent {
     ts(
         export,
         export_to = "../../../apps/desktop/src/ipc/dto/",
-        type = r#"{ kind: "turn.started" } | { kind: "message.delta"; text: string } | { kind: "permission.requested"; permission_kind: string; description: string } | { kind: "permission.decided"; decision: string } | { kind: "turn.completed" } | { kind: "turn.failed"; reason: string; delivery_state: string } | { kind: "turn.cancelled"; reason?: string | null } | { kind: "runtime.status"; status: string; active_threads: number; diagnostics?: string | null } | { kind: "command.result"; operation_id: string; success: boolean; data?: unknown } | { kind: "command.error"; operation_id: string; code: string; message: string } | { kind: "stream.gap"; from: number } | { kind: "stream.replayed"; from: number; through: number } | { kind: string; diagnostic: string }"#
+        type = r#"{ kind: "turn.started" } | { kind: "message.delta"; text: string } | { kind: "permission.requested"; permission_kind: string; description: string } | { kind: "permission.decided"; decision: string } | { kind: "tool.call"; tool_call_id: string; status?: string | null } | { kind: "turn.completed" } | { kind: "turn.failed"; reason: string; delivery_state: string } | { kind: "turn.cancelled"; reason?: string | null } | { kind: "runtime.status"; status: string; active_threads: number; diagnostics?: string | null } | { kind: "command.result"; operation_id: string; success: boolean; data?: unknown } | { kind: "command.error"; operation_id: string; code: string; message: string } | { kind: "stream.gap"; from: number } | { kind: "stream.replayed"; from: number; through: number } | { kind: string; diagnostic: string }"#
     )
 )]
 pub enum EventBody {
@@ -190,6 +205,7 @@ impl EventBody {
             Self::Known(KnownEvent::MessageDelta { .. }) => "message.delta",
             Self::Known(KnownEvent::PermissionRequested { .. }) => "permission.requested",
             Self::Known(KnownEvent::PermissionDecided { .. }) => "permission.decided",
+            Self::Known(KnownEvent::ToolCall { .. }) => "tool.call",
             Self::Known(KnownEvent::TurnCompleted) => "turn.completed",
             Self::Known(KnownEvent::TurnFailed { .. }) => "turn.failed",
             Self::Known(KnownEvent::TurnCancelled { .. }) => "turn.cancelled",
@@ -250,6 +266,7 @@ impl<'de> Deserialize<'de> for EventBody {
             "message.delta"
             | "permission.requested"
             | "permission.decided"
+            | "tool.call"
             | "turn.failed"
             | "turn.cancelled"
             | "runtime.status"
@@ -517,6 +534,34 @@ impl EventEnvelope {
             sequence,
             occurred_at,
             body: EventBody::Known(KnownEvent::PermissionDecided { decision }),
+        }
+    }
+
+    /// Builds a `tool.call` event envelope.
+    #[must_use]
+    #[allow(clippy::too_many_arguments)]
+    pub fn tool_call(
+        tool_call_id: String,
+        status: Option<String>,
+        event_id: EventId,
+        operation_id: Option<OperationId>,
+        thread_id: Option<ThreadId>,
+        turn_id: Option<TurnId>,
+        sequence: Sequence,
+        occurred_at: UnixMillis,
+    ) -> Self {
+        Self {
+            protocol_version: ProtocolVersion::V1,
+            event_id,
+            operation_id,
+            thread_id,
+            turn_id,
+            sequence,
+            occurred_at,
+            body: EventBody::Known(KnownEvent::ToolCall {
+                tool_call_id,
+                status,
+            }),
         }
     }
 
@@ -821,6 +866,34 @@ mod tests {
         let json = dec.to_json().unwrap();
         let decoded = EventEnvelope::from_json(&json).unwrap();
         assert_eq!(decoded, dec);
+    }
+
+    #[test]
+    fn tool_call_events_roundtrip_through_json() {
+        let tool = EventEnvelope::tool_call(
+            "tc_fixture_1".to_string(),
+            Some("in_progress".to_string()),
+            "evt_fixture000000030".parse().unwrap(),
+            Some("op_fixture000000005".parse().unwrap()),
+            Some("thr_fixture000000001".parse().unwrap()),
+            Some("trn_fixture000000002".parse().unwrap()),
+            Sequence::FIRST,
+            UnixMillis::from_millis(1_700_000_000_000),
+        );
+        assert_eq!(tool.body.kind_name(), "tool.call");
+        let json = tool.to_json().unwrap();
+        let decoded = EventEnvelope::from_json(&json).unwrap();
+        assert_eq!(decoded, tool);
+        match decoded.body {
+            EventBody::Known(KnownEvent::ToolCall {
+                tool_call_id,
+                status,
+            }) => {
+                assert_eq!(tool_call_id, "tc_fixture_1");
+                assert_eq!(status.as_deref(), Some("in_progress"));
+            }
+            other => panic!("expected tool.call, got {other:?}"),
+        }
     }
 
     #[test]

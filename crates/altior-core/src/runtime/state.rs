@@ -116,6 +116,11 @@ pub enum HarnessEvent {
     Cancelled,
     /// The harness process exited.
     ProcessExited { exit_code: Option<i32> },
+    /// An ACP tool call started or changed status.
+    ToolCall {
+        tool_call_id: String,
+        status: Option<String>,
+    },
     /// An unmapped or unknown raw event from the harness (does not panic).
     RawUnknown { name: String, data: String },
 }
@@ -284,6 +289,13 @@ pub enum RuntimeEvent {
     ProcessExited {
         thread_id: ThreadId,
         exit_code: Option<i32>,
+    },
+    /// Tool call observed from the harness.
+    ToolCall {
+        thread_id: ThreadId,
+        turn_id: TurnId,
+        tool_call_id: String,
+        status: Option<String>,
     },
     /// Unknown event (bounded and redacted; does not panic).
     Unknown {

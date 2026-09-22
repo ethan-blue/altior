@@ -85,7 +85,7 @@ silently dropped. The full table:
 | `session/prompt` → `stopReason: end_turn` | `Turn Completed` | `KnownEvent::TurnCompleted` |
 | `session/prompt` → `stopReason: cancelled` | `Turn Cancelled` | `KnownEvent::TurnCompleted` (cause recorded in the adapter, matching the P0.2 ownership model) |
 | `session/prompt` → `refusal`/`max_tokens`/`max_turn_requests` | `Turn Failed { diagnostic }` | preserved form `acp.turn.failed` |
-| `session/update` `tool_call`/`tool_call_update` | `Tool { tool_call_id, status }` | preserved form `acp.tool` |
+| `session/update` `tool_call`/`tool_call_update` | `Tool { tool_call_id, status }` | `KnownEvent::ToolCall` (`tool.call`) |
 | `session/request_permission` (agent→client request) | `Permission Requested { request_id, tool_call_id }` | preserved form `acp.permission.requested` |
 | client answers permission | `Permission Answered` | — (client-side state) |
 | `session/cancel` notification | `Cancel Sent` | — (client-side command) |

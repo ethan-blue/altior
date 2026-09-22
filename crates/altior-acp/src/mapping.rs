@@ -3,9 +3,10 @@
 //! traces normalize deterministically.
 //!
 //! Turn lifecycle maps onto the existing known events (`turn.started`,
-//! `message.delta`, `turn.completed`); everything else — failures, tool
-//! calls, permission requests, unmapped updates — survives as the bounded
-//! preserved form with an `acp.` provider kind. Nothing is dropped.
+//! `message.delta`, `turn.completed`); tool calls map to known `tool.call`.
+//! Failures, permission requests still on the adapter path, and unmapped
+//! updates survive as the bounded preserved form with an `acp.` provider
+//! kind. Nothing is dropped.
 
 use serde_json::Value;
 
@@ -92,13 +93,10 @@ impl AgentEvent {
             Self::ToolObserved {
                 tool_call_id,
                 status,
-            } => EventBody::Unknown {
-                provider_kind: "acp.tool".to_owned(),
-                diagnostic: bounded_diagnostic(&serde_json::json!({
-                    "toolCallId": tool_call_id,
-                    "status": status,
-                })),
-            },
+            } => EventBody::Known(KnownEvent::ToolCall {
+                tool_call_id: tool_call_id.clone(),
+                status: status.clone(),
+            }),
             Self::PermissionRequested {
                 request_id,
                 tool_call_id,
@@ -484,22 +482,27 @@ mod tests {
     }
 
     #[test]
-    fn tools_and_permissions_preserve_with_acp_kinds() {
+    fn tools_map_to_known_tool_call_and_permissions_preserve() {
         let tool = AgentEvent::ToolObserved {
             tool_call_id: "tc_1".to_owned(),
             status: Some("completed".to_owned()),
         };
-        let EventBody::Unknown { provider_kind, .. } = tool.to_event_body() else {
-            panic!("tool events preserve until P1");
+        let EventBody::Known(KnownEvent::ToolCall {
+            tool_call_id,
+            status,
+        }) = tool.to_event_body()
+        else {
+            panic!("tool events must be KnownEvent::ToolCall");
         };
-        assert_eq!(provider_kind, "acp.tool");
+        assert_eq!(tool_call_id, "tc_1");
+        assert_eq!(status.as_deref(), Some("completed"));
 
         let permission = AgentEvent::PermissionRequested {
             request_id: "7".to_owned(),
             tool_call_id: Some("tc_2".to_owned()),
         };
         let EventBody::Unknown { provider_kind, .. } = permission.to_event_body() else {
-            panic!("permission events preserve until P1");
+            panic!("permission AgentEvent still preserves; Core uses PermissionRequest path");
         };
         assert_eq!(provider_kind, "acp.permission.requested");
     }

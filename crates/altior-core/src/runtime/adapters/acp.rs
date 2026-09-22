@@ -68,6 +68,7 @@ const fn requires_ack(event: &HarnessEvent) -> bool {
         event,
         HarnessEvent::Started { .. }
             | HarnessEvent::MessageDelta { .. }
+            | HarnessEvent::ToolCall { .. }
             | HarnessEvent::RawUnknown { .. }
     )
 }
@@ -483,13 +484,9 @@ fn run_session_worker(
                             AgentEvent::ToolObserved {
                                 tool_call_id,
                                 status,
-                            } => HarnessEvent::RawUnknown {
-                                name: "acp.tool".to_string(),
-                                data: serde_json::json!({
-                                    "toolCallId": tool_call_id,
-                                    "status": status,
-                                })
-                                .to_string(),
+                            } => HarnessEvent::ToolCall {
+                                tool_call_id,
+                                status,
                             },
                             AgentEvent::Preserved { provider_kind, raw } => {
                                 HarnessEvent::RawUnknown {

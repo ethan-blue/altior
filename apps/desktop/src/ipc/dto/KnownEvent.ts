@@ -19,7 +19,15 @@ description: string, } | { "kind": "permission.decided",
 /**
  * Decision: `"approved"` or `"denied"`.
  */
-decision: string, } | { "kind": "turn.completed" } | { "kind": "turn.failed",
+decision: string, } | { "kind": "tool.call",
+/**
+ * Harness tool call id.
+ */
+tool_call_id: string,
+/**
+ * Optional status wire name from the agent update.
+ */
+status?: string | null, } | { "kind": "turn.completed" } | { "kind": "turn.failed",
 /**
  * Bounded failure diagnostic/reason.
  */

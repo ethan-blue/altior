@@ -726,6 +726,46 @@ fn test_diagnostics_redaction_and_unknown_events() {
 }
 
 #[test]
+fn test_tool_call_maps_to_runtime_tool_call_not_raw_unknown() {
+    let harness = FakeHarness::new();
+    let checkpoint = FakeCheckpoint::default();
+    let mut runtime = AgentRuntimeSupervisor::new(harness, checkpoint);
+
+    let binding = sample_binding(1);
+    let thread = sample_thread(1);
+    let session_id = runtime.create_session(&binding, &thread, None).unwrap();
+
+    let turn_id = sample_turn(1);
+    let op_id = sample_operation(1);
+    runtime
+        .prompt(&thread, op_id, turn_id.clone(), "use a tool")
+        .unwrap();
+
+    runtime.harness_mut().queue_event(
+        &session_id,
+        HarnessEvent::ToolCall {
+            tool_call_id: "tc_live_1".to_string(),
+            status: Some("in_progress".to_string()),
+        },
+    );
+
+    let ev = runtime.poll_stream(&thread).unwrap().unwrap();
+    match ev {
+        RuntimeEvent::ToolCall {
+            tool_call_id,
+            status,
+            turn_id: observed_turn,
+            ..
+        } => {
+            assert_eq!(tool_call_id, "tc_live_1");
+            assert_eq!(status.as_deref(), Some("in_progress"));
+            assert_eq!(observed_turn, turn_id);
+        }
+        other => panic!("expected RuntimeEvent::ToolCall, got {other:?}"),
+    }
+}
+
+#[test]
 fn test_indeterminate_failed_event_marks_crashed_and_forbids_resend() {
     let harness = FakeHarness::new();
     let checkpoint = FakeCheckpoint::default();

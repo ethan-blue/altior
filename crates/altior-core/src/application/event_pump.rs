@@ -178,6 +178,7 @@ fn extract_thread_id(event: &RuntimeEvent) -> ThreadId {
         | RuntimeEvent::TurnCompleted { thread_id, .. }
         | RuntimeEvent::TurnFailed { thread_id, .. }
         | RuntimeEvent::TurnCancelled { thread_id, .. }
+        | RuntimeEvent::ToolCall { thread_id, .. }
         | RuntimeEvent::ProcessExited { thread_id, .. }
         | RuntimeEvent::Unknown { thread_id, .. } => thread_id.clone(),
     }
@@ -190,7 +191,8 @@ fn extract_turn_id(event: &RuntimeEvent) -> Option<TurnId> {
         | RuntimeEvent::PermissionRequested { turn_id, .. }
         | RuntimeEvent::TurnCompleted { turn_id, .. }
         | RuntimeEvent::TurnFailed { turn_id, .. }
-        | RuntimeEvent::TurnCancelled { turn_id, .. } => Some(turn_id.clone()),
+        | RuntimeEvent::TurnCancelled { turn_id, .. }
+        | RuntimeEvent::ToolCall { turn_id, .. } => Some(turn_id.clone()),
         RuntimeEvent::ProcessExited { .. } | RuntimeEvent::Unknown { .. } => None,
     }
 }
@@ -253,6 +255,25 @@ fn map_permission_requested(
         .map_err(|e| CoreAppError::Other(e.to_string()))?
         .try_into()?;
     Ok(ctx.into_domain_event(DomainEventKind::PermissionRequested, payload_bytes))
+}
+
+fn map_tool_call(
+    ctx: EventContext<'_>,
+    tid: &ThreadId,
+    trnid: &TurnId,
+    tool_call_id: &str,
+    status: Option<&String>,
+) -> Result<DomainEvent, CoreAppError> {
+    let payload = serde_json::json!({
+        "thread_id": tid.as_str(),
+        "turn_id": trnid.as_str(),
+        "tool_call_id": tool_call_id,
+        "status": status,
+    });
+    let payload_bytes = serde_json::to_vec(&payload)
+        .map_err(|e| CoreAppError::Other(e.to_string()))?
+        .try_into()?;
+    Ok(ctx.into_domain_event(DomainEventKind::Other("tool.call".to_string()), payload_bytes))
 }
 
 fn map_turn_completed(
@@ -390,6 +411,18 @@ fn map_runtime_to_domain_event(
             *kind,
             description,
         )?),
+        RuntimeEvent::ToolCall {
+            thread_id: tid,
+            turn_id: trnid,
+            tool_call_id,
+            status,
+        } => Some(map_tool_call(
+            ctx,
+            tid,
+            trnid,
+            tool_call_id,
+            status.as_ref(),
+        )?),
         RuntimeEvent::TurnCompleted {
             thread_id: tid,
             turn_id: trnid,
@@ -428,6 +461,14 @@ fn map_runtime_to_event_body(event: &RuntimeEvent) -> Result<EventBody, CoreAppE
             }))
         }
         RuntimeEvent::TurnCompleted { .. } => Ok(EventBody::Known(KnownEvent::TurnCompleted)),
+        RuntimeEvent::ToolCall {
+            tool_call_id,
+            status,
+            ..
+        } => Ok(EventBody::Known(KnownEvent::ToolCall {
+            tool_call_id: tool_call_id.clone(),
+            status: status.clone(),
+        })),
         RuntimeEvent::PermissionRequested {
             kind, description, ..
         } => {

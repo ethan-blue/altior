@@ -22,8 +22,9 @@
   },
   {
     "body": {
-      "diagnostic": "{\"status\":\"pending\",\"toolCallId\":\"tc_alpha_1\"}",
-      "kind": "acp.tool"
+      "kind": "tool.call",
+      "tool_call_id": "tc_alpha_1",
+      "status": "pending"
     },
     "wire_kind": "session/update:tool_call"
   },
@@ -36,8 +37,9 @@
   },
   {
     "body": {
-      "diagnostic": "{\"status\":\"completed\",\"toolCallId\":\"tc_alpha_1\"}",
-      "kind": "acp.tool"
+      "kind": "tool.call",
+      "tool_call_id": "tc_alpha_1",
+      "status": "completed"
     },
     "wire_kind": "session/update:tool_call_update"
   },
