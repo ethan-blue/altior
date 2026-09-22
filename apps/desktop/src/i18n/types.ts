@@ -129,6 +129,10 @@ export interface TranslationDictionary {
     readonly runtimeDegraded: string;
     readonly runtimeShuttingDown: string;
     readonly decisionPending: string;
+    readonly decisionApproved: string;
+    readonly decisionDenied: string;
+    readonly decisionAllow: string;
+    readonly decisionDeny: string;
   };
   readonly threadStatus: {
     readonly running: string;
@@ -188,6 +192,20 @@ export interface TranslationDictionary {
     readonly unknownValue: string;
     readonly noneValue: string;
     readonly droppedMeta: (rank: number, tokens: number) => string;
+    readonly dropReasonBudgetExhausted: string;
+    readonly dropReasonScopeDisallowed: string;
+    readonly whyFragMatchedTerms: string;
+    readonly whyFragMatchedQuery: string;
+    readonly whyFragAlgorithm: string;
+    readonly whyFragFtsRank: string;
+    readonly whyFragScopeWeight: string;
+    readonly whyFragConfidence: string;
+    readonly whyFragRecency: string;
+    readonly whyFragExplicitBonus: string;
+    readonly whyFragExplicitBoost: string;
+    readonly whyFragExplicitPlus: string;
+    readonly whyFragTotal: string;
+    readonly whyFragBm25: string;
   };
   readonly memoryPane: {
     readonly title: string;

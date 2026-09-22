@@ -1,5 +1,9 @@
 import { useI18n } from "../i18n";
-import { localizeMemoryKind } from "../i18n/localizeEnums";
+import {
+  localizeDropReason,
+  localizeMemoryKind,
+  localizeWhySelected,
+} from "../i18n/localizeEnums";
 import type { ContextSnapshotDto } from "../ipc/dto/ContextSnapshotDto";
 import shell from "./shell.module.css";
 
@@ -150,7 +154,7 @@ export function ContextPanel({ snapshot, status, error }: ContextPanelProps) {
                     <dt>{t.contextPanel.whySelected}</dt>
                     <dd>
                       <div className={shell.mono} data-testid="memory-why-selected">
-                        {mem.why_selected}
+                        {localizeWhySelected(mem.why_selected, t)}
                       </div>
                     </dd>
 
@@ -198,7 +202,9 @@ export function ContextPanel({ snapshot, status, error }: ContextPanelProps) {
                 data-testid={`dropped-item-${item.memory_id}`}
               >
                 <span className={shell.mono}>{item.memory_id}</span>
-                <span className={shell.droppedReason}>({item.reason})</span>
+                <span className={shell.droppedReason} data-testid="dropped-reason">
+                  ({localizeDropReason(item.reason, t)})
+                </span>
                 <span className={shell.droppedMeta}>
                   {t.contextPanel.droppedMeta(item.rank, item.tokens)}
                 </span>

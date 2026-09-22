@@ -89,3 +89,97 @@ export function localizeToolStatus(
       return status;
   }
 }
+
+export function localizeTimelineRowKind(
+  kind: string,
+  t: TranslationDictionary,
+): string {
+  switch (kind) {
+    case "user-message":
+    case "user":
+      return t.timeline.you;
+    case "assistant-message":
+    case "assistant":
+      return t.timeline.assistant;
+    case "tool":
+      return t.timeline.tool;
+    case "permission":
+    case "approval":
+      return t.timeline.approval;
+    case "error":
+    case "failed":
+      return t.timeline.failed;
+    case "unknown":
+      return t.timeline.unknown;
+    default:
+      return kind;
+  }
+}
+
+export function localizePermissionDecision(
+  decision: string,
+  t: TranslationDictionary,
+): string {
+  switch (decision) {
+    case "approved":
+      return t.inspector.decisionApproved;
+    case "denied":
+      return t.inspector.decisionDenied;
+    case "allow":
+      return t.inspector.decisionAllow;
+    case "deny":
+      return t.inspector.decisionDeny;
+    case "pending":
+      return t.inspector.decisionPending;
+    default:
+      return decision;
+  }
+}
+
+export function localizeDropReason(
+  reason: string,
+  t: TranslationDictionary,
+): string {
+  switch (reason) {
+    case "budget_exhausted":
+      return t.contextPanel.dropReasonBudgetExhausted;
+    case "scope_disallowed":
+      return t.contextPanel.dropReasonScopeDisallowed;
+    default:
+      return reason;
+  }
+}
+
+/** Cheap Desktop mapper for protocol why_selected explain strings. */
+export function localizeWhySelected(
+  raw: string,
+  t: TranslationDictionary,
+): string {
+  return raw
+    .split("matched terms:")
+    .join(t.contextPanel.whyFragMatchedTerms)
+    .split("matched query with score")
+    .join(t.contextPanel.whyFragMatchedQuery)
+    .split("algorithm:")
+    .join(t.contextPanel.whyFragAlgorithm)
+    .split("fts_rank:")
+    .join(t.contextPanel.whyFragFtsRank)
+    .split("scope_weight:")
+    .join(t.contextPanel.whyFragScopeWeight)
+    .split("confidence:")
+    .join(t.contextPanel.whyFragConfidence)
+    .split("recency:")
+    .join(t.contextPanel.whyFragRecency)
+    .split("explicit_bonus:")
+    .join(t.contextPanel.whyFragExplicitBonus)
+    .split("explicit boost:")
+    .join(t.contextPanel.whyFragExplicitBoost)
+    .split("explicit +")
+    .join(t.contextPanel.whyFragExplicitPlus)
+    .split("total:")
+    .join(t.contextPanel.whyFragTotal)
+    .split("bm25:")
+    .join(t.contextPanel.whyFragBm25)
+    .split("bm25 ")
+    .join(t.contextPanel.whyFragBm25 + " ");
+}

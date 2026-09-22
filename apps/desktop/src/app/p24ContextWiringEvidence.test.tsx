@@ -230,7 +230,9 @@ describe("P2.4 Context & Memory Product Wiring Evidence (TASKS.md §A14)", () =>
       expect(screen.getByTestId("context-budget")).toBeTruthy();
       expect(screen.getByTestId("memory-why-selected").textContent).toContain("matched terms: [rust, memory]");
       expect(screen.getByTestId("memory-provenance").textContent).toContain("thr_history000000001");
-      expect(screen.getByTestId("context-dropped-list").textContent).toContain("budget_exhausted");
+      expect(screen.getByTestId("context-dropped-list").textContent).toMatch(
+        /budget_exhausted|budget exhausted|预算耗尽/,
+      );
     });
 
     // Focus Turn 2 (memory_mode === "off")

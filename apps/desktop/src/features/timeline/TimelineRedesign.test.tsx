@@ -336,7 +336,7 @@ describe("Commercial UI Phase 1: Timeline Card Redesign & Approval Security Card
       expect(screen.queryByTestId("deny")).toBeNull();
 
       const decisionChip = container.querySelector("[class*='decisionChip']");
-      expect(decisionChip?.textContent).toContain("approved");
+      expect(decisionChip?.textContent).toMatch(/approved|已批准/);
       expect(container.querySelector("[class*='mono']")?.textContent).toBe("git checkout -b feature");
       expect(container.querySelector("[class*='scope']")?.textContent).toBe("git:branch");
     });
