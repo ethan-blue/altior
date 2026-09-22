@@ -26,6 +26,7 @@ import {
 import { ContextPanel, type ContextPanelProps } from "./ContextPanel";
 import { useI18n } from "../i18n";
 import {
+  localizeCapabilitySupport,
   localizePermissionDecision,
   localizeRuntimeStatus,
   localizeTimelineRowKind,
@@ -1457,7 +1458,7 @@ export function AgentOnboardingModal({
                     <div style={{ fontSize: "0.75rem", color: "var(--color-muted)", marginTop: "4px" }} data-testid="tested-capabilities">
                       {t.onboarding.capabilitiesSummary(
                         Object.entries(testResult.capabilities)
-                          .map(([k, v]) => `${k}: ${v}`)
+                          .map(([k, v]) => `${k}: ${localizeCapabilitySupport(String(v), t)}`)
                           .join(", "),
                       )}
                     </div>

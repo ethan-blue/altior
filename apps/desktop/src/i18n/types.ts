@@ -194,6 +194,10 @@ export interface TranslationDictionary {
     readonly droppedMeta: (rank: number, tokens: number) => string;
     readonly dropReasonBudgetExhausted: string;
     readonly dropReasonScopeDisallowed: string;
+    readonly degradedCodeRetrievalError: string;
+    readonly degradedCodeMemoryQueryTruncated: string;
+    readonly degradedCodeIdentityBudgetExceeded: string;
+    readonly degradedCodeRenderedPromptOmitted: string;
     readonly whyFragMatchedTerms: string;
     readonly whyFragMatchedQuery: string;
     readonly whyFragAlgorithm: string;
@@ -312,6 +316,8 @@ export interface TranslationDictionary {
     readonly testFailed: (msg: string) => string;
     readonly capabilitiesLabel: string;
     readonly capabilitiesSummary: (list: string) => string;
+    readonly capabilitySupported: string;
+    readonly capabilityUnsupported: string;
     readonly agentRequiredNotice: string;
   };
   readonly markdown: {

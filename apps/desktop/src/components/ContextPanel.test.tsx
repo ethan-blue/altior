@@ -116,7 +116,7 @@ describe("ContextPanel (P2.2 inspector)", () => {
     );
 
     const badge = screen.getByTestId("context-degraded-badge");
-    expect(badge.textContent).toContain("retrieval_error");
+    expect(badge.textContent).toMatch(/retrieval_error|检索错误|retrieval error/);
   });
 
   it("hides dropped and identity sections when empty", () => {

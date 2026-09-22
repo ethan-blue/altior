@@ -1,5 +1,6 @@
 import { useI18n } from "../i18n";
 import {
+  localizeDegradedCode,
   localizeDropReason,
   localizeMemoryKind,
   localizeWhySelected,
@@ -75,7 +76,7 @@ export function ContextPanel({ snapshot, status, error }: ContextPanelProps) {
       {/* Degraded Badge */}
       {snapshot.degraded ? (
         <div className={shell.degradedBadge} data-testid="context-degraded-badge">
-          <span>{t.contextPanel.degraded(snapshot.degraded.code)}</span>
+          <span>{t.contextPanel.degraded(localizeDegradedCode(snapshot.degraded.code, t))}</span>
           {snapshot.degraded.detail ? (
             <span className={shell.degradedDetail}>({snapshot.degraded.detail})</span>
           ) : null}
