@@ -1,6 +1,6 @@
 /**
  * Evidence: identity document kinds outside memory kinds + zh demo fixture
- * assistant/error chrome (streamingReplyChunks left English — locked by App.test).
+ * assistant/error chrome; streamingReplyChunks are zh and App.test couples to the fixture.
  */
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
@@ -83,7 +83,7 @@ describe("p31 identity kinds + fixture assistant/error chrome", () => {
     expect(badges.join("|")).not.toContain("about");
   });
 
-  it("demo fixture assistant/error chrome is Chinese; streaming chunks stay English", () => {
+  it("demo fixture assistant/error/streaming chrome is Chinese", () => {
     const stdAssistant = standardThread.rows.find((r) => r.kind === "assistant-message");
     const aprAssistant = approvalThread.rows.find((r) => r.kind === "assistant-message");
     const faiAssistant = failureThread.rows.find((r) => r.kind === "assistant-message");
@@ -99,6 +99,6 @@ describe("p31 identity kinds + fixture assistant/error chrome", () => {
     expect(approved?.text).toBe("[已批准]");
     expect(unknown?.text).toContain("协议 v1");
 
-    expect(streamingReplyChunks.join("")).toContain("Frames are length-prefixed");
+    expect(streamingReplyChunks.join("")).toContain("帧为长度前缀");
   });
 });
