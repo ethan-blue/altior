@@ -65,9 +65,7 @@ export const TimelineRowView = memo(function TimelineRowView({
       data-row-id={rowId}
       data-row-kind={row.kind}
       data-testid={`timeline-row-${index}`}
-      className={`${rowStyles.row} ${rowStyles[row.kind]} ${
-        focused ? rowStyles.focused : ""
-      }`}
+      className={`${rowStyles.row}${focused ? ` ${rowStyles.focused}` : ""}`}
       tabIndex={focused ? 0 : -1}
       role="article"
       aria-label={t.timeline.entryAria(getKindLabel(row.kind))}
