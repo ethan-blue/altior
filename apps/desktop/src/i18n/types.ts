@@ -16,6 +16,7 @@ export interface TranslationDictionary {
     readonly cancel: string;
     readonly save: string;
     readonly close: string;
+    readonly refresh: string;
   };
   readonly rail: {
     readonly activityAria: string;
@@ -263,6 +264,7 @@ export interface TranslationDictionary {
     readonly verified: string;
     readonly verifiedWithLatency: (ms: number) => string;
     readonly testFailed: (msg: string) => string;
+    readonly capabilitiesLabel: string;
     readonly agentRequiredNotice: string;
   };
   readonly markdown: {

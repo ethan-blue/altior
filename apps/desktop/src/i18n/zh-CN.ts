@@ -15,6 +15,7 @@ export const zhCN: TranslationDictionary = {
     cancel: "取消",
     save: "保存",
     close: "关闭",
+    refresh: "刷新",
   },
   rail: {
     activityAria: "活动栏",
@@ -263,6 +264,7 @@ export const zhCN: TranslationDictionary = {
     verified: "连接已验证",
     verifiedWithLatency: (ms) => `连接已验证（${ms}ms）`,
     testFailed: (msg) => `测试失败：${msg}`,
+    capabilitiesLabel: "能力清单",
     agentRequiredNotice: "创建新会话前请先配置代理。",
   },
   markdown: {

@@ -630,7 +630,7 @@ export function RuntimeDiagnosticsView({
         </p>
         {onRefresh ? (
           <button type="button" className={shell.btnAction} onClick={onRefresh} style={{ display: "block", margin: "8px auto" }}>
-            Refresh
+            {t.common.refresh}
           </button>
         ) : null}
       </div>
@@ -662,7 +662,7 @@ export function RuntimeDiagnosticsView({
       </p>
       {onRefresh ? (
         <button type="button" className={shell.btnAction} onClick={onRefresh} style={{ marginTop: "8px" }} data-testid="diag-refresh-btn">
-          Refresh
+          {t.common.refresh}
         </button>
       ) : null}
     </div>
@@ -1436,7 +1436,7 @@ export function AgentOnboardingModal({
                   </span>
                   {testResult.capabilities && Object.keys(testResult.capabilities).length > 0 ? (
                     <div style={{ fontSize: "0.75rem", color: "var(--color-muted)", marginTop: "4px" }} data-testid="tested-capabilities">
-                      Capabilities: {Object.entries(testResult.capabilities).map(([k, v]) => `${k}: ${v}`).join(", ")}
+                      {t.onboarding.capabilitiesLabel}: {Object.entries(testResult.capabilities).map(([k, v]) => `${k}: ${v}`).join(", ")}
                     </div>
                   ) : null}
                 </div>

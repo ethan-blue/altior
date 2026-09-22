@@ -15,6 +15,7 @@ export const en: TranslationDictionary = {
     cancel: "Cancel",
     save: "Save",
     close: "Close",
+    refresh: "Refresh",
   },
   rail: {
     activityAria: "Activity",
@@ -264,6 +265,7 @@ export const en: TranslationDictionary = {
     verified: "Connection verified",
     verifiedWithLatency: (ms) => `Connection verified (${ms}ms)`,
     testFailed: (msg) => `Test failed: ${msg}`,
+    capabilitiesLabel: "Capabilities",
     agentRequiredNotice: "Please configure an agent before creating a new thread.",
   },
   markdown: {
