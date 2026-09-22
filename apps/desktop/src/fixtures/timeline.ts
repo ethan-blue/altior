@@ -135,11 +135,11 @@ export function hundredThousandRowThread(): ThreadFixture {
     if (index % 97 === 96) {
       rows[index] = unknownEvent(`big-${index}`, "acp.update.usage");
     } else if (index % 11 === 10) {
-      rows[index] = tool(`big-tool-${index}`, `scan batch ${index}`, "completed");
+      rows[index] = tool(`big-tool-${index}`, `扫描批次 ${index}`, "completed");
     } else if (index % 2 === 0) {
-      rows[index] = user(id, `deterministic question ${index}`);
+      rows[index] = user(id, `确定性提问 ${index}`);
     } else {
-      rows[index] = assistant(id, `deterministic answer ${index} about contracts.`);
+      rows[index] = assistant(id, `关于契约的确定性回答 ${index}。`);
     }
   }
   return {
@@ -160,8 +160,8 @@ export function olderHistory(count: number): TimelineRow[] {
     const id = `trn_old${String(seq).padStart(13, "0")}`;
     rows[index] =
       index % 2 === 0
-        ? user(id, `older question ${seq}`)
-        : assistant(id, `older answer ${seq}.`);
+        ? user(id, `更早的提问 ${seq}`)
+        : assistant(id, `更早的回答 ${seq}。`);
   }
   return rows;
 }
@@ -171,11 +171,11 @@ export function olderHistory(count: number): TimelineRow[] {
  * shell: chunked deltas in the P0.3 trace vocabulary, then completion.
  */
 export const streamingReplyChunks: readonly string[] = [
-  "Frames are ",
-  "length-prefixed; ",
-  "sessions replay ",
-  "through a retained window; ",
-  "reload never stops a turn.",
+  "帧为",
+  "长度前缀；",
+  "会话经保留窗口",
+  "重放；",
+  "重载不会停止轮次。",
 ];
 
 export function allThreads(includeHuge: boolean): ThreadFixture[] {

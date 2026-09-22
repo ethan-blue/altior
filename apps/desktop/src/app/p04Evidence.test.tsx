@@ -89,7 +89,7 @@ describe("P0.4 evidence", () => {
     await waitFor(() => {
       expect(document.activeElement?.getAttribute("data-row-id")).toBe("trn_big0000000099999");
     });
-    expect(screen.queryByText("deterministic question 0")).toBeNull();
+    expect(screen.queryByText("确定性提问 0")).toBeNull();
 
     // Jump home: big-0 remounts and retakes focus.
     fireEvent.keyDown(document.activeElement!, { key: "Home" });

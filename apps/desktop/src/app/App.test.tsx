@@ -1,6 +1,6 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { failureThread, standardThread } from "../fixtures/timeline";
+import { failureThread, standardThread, streamingReplyChunks } from "../fixtures/timeline";
 import { InMemoryTransport } from "../ipc/inMemoryTransport";
 import { App } from "./App";
 
@@ -157,9 +157,8 @@ describe("App workbench shell", () => {
 
     await waitFor(() => {
       const reply = document.querySelector("[data-row-id='send-1-reply']");
-      expect(reply?.textContent).toContain(
-        "Frames are length-prefixed; sessions replay through a retained window; reload never stops a turn.",
-      );
+      // Coupled to fixture so zh/en chrome stays aligned without weakening stream evidence.
+      expect(reply?.textContent).toContain(streamingReplyChunks.join(""));
     });
   });
 
