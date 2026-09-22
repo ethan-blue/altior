@@ -118,6 +118,12 @@ Constraints:
    - different `instance_id` (restart) → Desktop treats every old sequence
      as stale: it requests a snapshot, and its command ledger keeps
      `OperationId`s so no command is sent twice across the restart.
+   - `RequestSnapshot` replies with a versioned `SnapshotEnvelope`, never
+     diagnostics. An absent `thread_id` (or a missing payload) yields the
+     thread-list snapshot (`ThreadListResponseDto`); a present `thread_id`
+     yields the thread snapshot (`ThreadSnapshotDto`) already used by
+     `OpenThread`. Assembling a thread snapshot reads stored projections
+     only and does not open a harness session.
 4. Replay preserves original sequences and event ids; duplicates are
    detectable by `event_id`, so a reconnecting Desktop can drop re-delivered
    events idempotently.

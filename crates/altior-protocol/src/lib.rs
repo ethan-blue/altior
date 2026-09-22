@@ -30,7 +30,7 @@ pub use command::{
     CorrectMemoryCommand, CreateThreadCommand, DeleteIdentityDocumentCommand, DiagnosticsCommand,
     ForgetMemoryCommand, GetContextSnapshotCommand, GetHistoryCommand,
     ListIdentityDocumentsCommand, ListMemoriesCommand, ListThreadsCommand, OpenThreadCommand,
-    ProposeMemoryCommand, PutIdentityDocumentCommand, RejectMemoryCommand,
+    ProposeMemoryCommand, PutIdentityDocumentCommand, RejectMemoryCommand, RequestSnapshotCommand,
     RespondPermissionCommand, RuntimeStatusCommand, SearchThreadsCommand, StartTurnCommand,
     TestHarnessBindingCommand,
 };

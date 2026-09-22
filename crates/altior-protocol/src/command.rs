@@ -240,6 +240,29 @@ pub struct OpenThreadCommand {
     pub history_limit: Option<u32>,
 }
 
+
+/// Payload for requesting a gap-recovery snapshot (`request_snapshot`).
+///
+/// ADR 0006: after `stream.gap` or a Core restart, Desktop re-derives visible
+/// state from this snapshot envelope. An absent `thread_id` (or a missing
+/// payload) requests the thread-list snapshot; a present `thread_id` requests
+/// the same [`crate::dto::ThreadSnapshotDto`] envelope `open_thread` uses.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(
+    feature = "dto-export",
+    derive(ts_rs::TS),
+    ts(export, export_to = "../../../apps/desktop/src/ipc/dto/")
+)]
+pub struct RequestSnapshotCommand {
+    /// Optional thread to snapshot. Absent means the thread-list surface.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "dto-export", ts(as = "Option<String>"))]
+    pub thread_id: Option<ThreadId>,
+    /// Maximum turns to include in a thread snapshot (bounded to 500).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub history_limit: Option<u32>,
+}
+
 /// Payload for paginating turn history (`get_history`).
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(
@@ -964,6 +987,63 @@ impl CommandEnvelope {
             kind: CommandKind::Ping,
             payload: None,
             issued_at,
+        }
+    }
+
+
+    /// Builds a `request_snapshot` command (ADR 0006 gap recovery).
+    ///
+    /// A fully unscoped request (no `thread_id`, no `history_limit`) is
+    /// encoded without a payload so existing payload-free clients keep
+    /// working. Scoped requests carry [`RequestSnapshotCommand`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ProtocolError`] if payload serialization or bounds check fails.
+    pub fn request_snapshot(
+        thread_id: Option<ThreadId>,
+        history_limit: Option<u32>,
+        operation_id: OperationId,
+        issued_at: UnixMillis,
+        limits: &EnvelopeLimits,
+    ) -> Result<Self, ProtocolError> {
+        if thread_id.is_none() && history_limit.is_none() {
+            return Ok(Self {
+                protocol_version: ProtocolVersion::V1,
+                operation_id,
+                kind: CommandKind::RequestSnapshot,
+                payload: None,
+                issued_at,
+            });
+        }
+        let cmd = RequestSnapshotCommand {
+            thread_id,
+            history_limit,
+        };
+        Self::new_typed(
+            CommandKind::RequestSnapshot,
+            &cmd,
+            operation_id,
+            issued_at,
+            limits,
+        )
+    }
+
+    /// Extracts the payload of a `request_snapshot` command.
+    ///
+    /// A missing payload is treated as an unscoped snapshot request.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ProtocolError::MalformedEnvelope`] if a payload is present
+    /// but cannot be decoded.
+    pub fn request_snapshot_payload(&self) -> Result<RequestSnapshotCommand, ProtocolError> {
+        match &self.payload {
+            None => Ok(RequestSnapshotCommand {
+                thread_id: None,
+                history_limit: None,
+            }),
+            Some(_) => self.parse_payload(),
         }
     }
 
@@ -1872,6 +1952,53 @@ impl CommandEnvelope {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn request_snapshot_unscoped_is_payload_free() {
+        let envelope = CommandEnvelope::request_snapshot(
+            None,
+            None,
+            "op_fixture000000030".parse().unwrap(),
+            UnixMillis::from_millis(1_700_000_000_030),
+            &EnvelopeLimits::default(),
+        )
+        .unwrap();
+        envelope.validate(&EnvelopeLimits::default()).unwrap();
+        assert_eq!(envelope.kind, CommandKind::RequestSnapshot);
+        assert!(envelope.payload.is_none());
+        let payload = envelope.request_snapshot_payload().unwrap();
+        assert_eq!(payload.thread_id, None);
+        assert_eq!(payload.history_limit, None);
+
+        let json = envelope.to_json().unwrap();
+        let decoded = CommandEnvelope::from_json(&json).unwrap();
+        assert_eq!(decoded, envelope);
+    }
+
+    #[test]
+    fn request_snapshot_scoped_roundtrips_thread_id() {
+        let thread_id: ThreadId = "thr_fixture000000001".parse().unwrap();
+        let envelope = CommandEnvelope::request_snapshot(
+            Some(thread_id.clone()),
+            Some(50),
+            "op_fixture000000031".parse().unwrap(),
+            UnixMillis::from_millis(1_700_000_000_031),
+            &EnvelopeLimits::default(),
+        )
+        .unwrap();
+        envelope.validate(&EnvelopeLimits::default()).unwrap();
+        assert_eq!(envelope.kind, CommandKind::RequestSnapshot);
+        let payload = envelope.request_snapshot_payload().unwrap();
+        assert_eq!(
+            payload.thread_id.as_ref().map(ThreadId::as_str),
+            Some("thr_fixture000000001")
+        );
+        assert_eq!(payload.history_limit, Some(50));
+
+        let json = envelope.to_json().unwrap();
+        let decoded = CommandEnvelope::from_json(&json).unwrap();
+        assert_eq!(decoded, envelope);
+    }
 
     #[test]
     fn cancel_commands_carry_their_target_in_the_payload() {

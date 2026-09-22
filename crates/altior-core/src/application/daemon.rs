@@ -1536,18 +1536,58 @@ where
         now: UnixMillis,
     ) -> Result<(), CoreAppError> {
         let op_id = cmd.operation_id.clone();
-        let diag = app.get_diagnostics(None)?;
-        let active_threads = u32::try_from(diag.thread_states.len()).unwrap_or(u32::MAX);
-        let dto = RuntimeDiagnosticsDto {
-            instance_id: app.instance_id().clone(),
-            status: "ready".to_string(),
-            active_threads,
-            active_turns: 0,
-            summary: None,
+        let payload = match cmd.request_snapshot_payload() {
+            Ok(payload) => payload,
+            Err(err) => {
+                let err_event = Self::make_command_error_event(
+                    app,
+                    op_id,
+                    "REQUEST_SNAPSHOT_FAILED",
+                    &err.to_string(),
+                    now,
+                )?;
+                session.send_json(&err_event).map_err(CoreAppError::from)?;
+                return Ok(());
+            }
         };
-        let snap = SnapshotEnvelope::runtime_diagnostics(&dto, op_id, now, limits)
-            .map_err(CoreAppError::from)?;
-        session.send_json(&snap).map_err(CoreAppError::from)?;
+
+        if let Some(thread_id) = payload.thread_id {
+            match assemble_thread_snapshot(app, &thread_id, payload.history_limit) {
+                Ok(dto) => {
+                    let snap = SnapshotEnvelope::thread_snapshot(&dto, op_id, now, limits)
+                        .map_err(CoreAppError::from)?;
+                    session.send_json(&snap).map_err(CoreAppError::from)?;
+                }
+                Err(err) => {
+                    let err_event = Self::make_command_error_event(
+                        app,
+                        op_id,
+                        "REQUEST_SNAPSHOT_FAILED",
+                        &err.to_string(),
+                        now,
+                    )?;
+                    session.send_json(&err_event).map_err(CoreAppError::from)?;
+                }
+            }
+        } else {
+            match assemble_thread_list(app, None, REQUEST_SNAPSHOT_THREAD_LIST_LIMIT) {
+                Ok(dto) => {
+                    let snap = SnapshotEnvelope::thread_list(&dto, op_id, now, limits)
+                        .map_err(CoreAppError::from)?;
+                    session.send_json(&snap).map_err(CoreAppError::from)?;
+                }
+                Err(err) => {
+                    let err_event = Self::make_command_error_event(
+                        app,
+                        op_id,
+                        "REQUEST_SNAPSHOT_FAILED",
+                        &err.to_string(),
+                        now,
+                    )?;
+                    session.send_json(&err_event).map_err(CoreAppError::from)?;
+                }
+            }
+        }
         Ok(())
     }
 
@@ -2246,6 +2286,89 @@ fn is_control_command(kind: CommandKind) -> bool {
             | CommandKind::CancelTurn
             | CommandKind::RespondPermission
     )
+}
+
+
+/// Default page size for an unscoped `request_snapshot` thread list.
+const REQUEST_SNAPSHOT_THREAD_LIST_LIMIT: u32 = 20;
+
+/// Default turn page size for a scoped `request_snapshot` thread snapshot.
+const REQUEST_SNAPSHOT_TURN_LIMIT: u32 = 50;
+
+fn assemble_thread_list<H: HarnessRuntimePort>(
+    app: &CoreApplication<H, StoreCheckpointAdapter>,
+    before_cursor: Option<&ThreadCursor>,
+    limit_val: u32,
+) -> Result<ThreadListResponseDto, CoreAppError> {
+    let limit =
+        ThreadListLimit::try_new(limit_val).map_err(|e| CoreAppError::Other(e.to_string()))?;
+    let rows = app.list_threads(None, before_cursor, limit)?;
+    let mut summaries = Vec::new();
+    for r in &rows {
+        let thread_dto = thread_row_to_dto(r)?;
+        let last_turn = if let Ok(tid) = ThreadId::from_str(&r.thread_id) {
+            let turn_lim =
+                TurnListLimit::try_new(1).map_err(|e| CoreAppError::Other(e.to_string()))?;
+            app.get_thread_turns(&tid, None, turn_lim)
+                .ok()
+                .and_then(|t| t.into_iter().next())
+                .and_then(|tr| turn_row_to_dto(&tr).ok())
+        } else {
+            None
+        };
+        summaries.push(ThreadSummaryDto {
+            thread: thread_dto,
+            last_turn,
+            active_turn: None,
+        });
+    }
+    let has_more = summaries.len() == limit_val as usize;
+    let next_cursor = summaries.last().map(|s| ThreadCursorDto {
+        updated_at: s.thread.updated_at,
+        thread_id: s.thread.id.clone(),
+    });
+    Ok(ThreadListResponseDto {
+        threads: summaries,
+        next_cursor,
+        has_more,
+    })
+}
+
+fn assemble_thread_snapshot<H: HarnessRuntimePort>(
+    app: &CoreApplication<H, StoreCheckpointAdapter>,
+    thread_id: &ThreadId,
+    history_limit: Option<u32>,
+) -> Result<ThreadSnapshotDto, CoreAppError> {
+    let row = app
+        .get_thread(thread_id)?
+        .ok_or_else(|| CoreAppError::ThreadNotFound(thread_id.clone()))?;
+    let thread_dto = thread_row_to_dto(&row)?;
+    let profile_dto = if let Ok(pid) = AgentProfileId::from_str(&row.agent_profile_id) {
+        app.get_agent_profile(&pid)?.map(AgentProfileDto::from)
+    } else {
+        None
+    };
+    let limit_val = history_limit.unwrap_or(REQUEST_SNAPSHOT_TURN_LIMIT);
+    let turn_limit =
+        TurnListLimit::try_new(limit_val).map_err(|e| CoreAppError::Other(e.to_string()))?;
+    let turn_dtos: Vec<TurnDto> = app
+        .get_thread_turns(thread_id, None, turn_limit)?
+        .iter()
+        .map(turn_row_to_dto)
+        .collect::<Result<Vec<_>, _>>()?;
+    let perm_limit =
+        PermissionListLimit::try_new(50).map_err(|e| CoreAppError::Other(e.to_string()))?;
+    let perm_dtos: Vec<PermissionDto> = app
+        .get_thread_permissions(thread_id, None, perm_limit)?
+        .into_iter()
+        .map(PermissionDto::from)
+        .collect();
+    Ok(ThreadSnapshotDto {
+        thread: thread_dto,
+        agent_profile: profile_dto,
+        turns: turn_dtos,
+        pending_permissions: perm_dtos,
+    })
 }
 
 fn thread_row_to_dto(row: &ThreadRow) -> Result<ThreadDto, CoreAppError> {

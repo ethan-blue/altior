@@ -35,6 +35,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`request_snapshot` gap recovery**: `RequestSnapshot` now returns a real
+  `SnapshotEnvelope` — thread-list when unscoped, `ThreadSnapshotDto` when
+  `thread_id` is present — instead of a diagnostics DTO that contradicted
+  ADR 0006. Payload-free clients remain valid. Assembling a thread snapshot
+  reads stored projections only and does not open a harness session.
+
 - **Known wire events**: `permission.requested`, `turn.cancelled`, and `turn.failed` now serialize as typed `KnownEvent` variants instead of `Unknown` provider events, so typed clients (Desktop) can parse them.
 - **Cancellation of silent agents**: ACP child stdout is pumped through a reader thread; the prompt loop polls the cancel signal every 100 ms while the child produces no output, so quiet agents can be cancelled (and `close()` can no longer deadlock on a full stdout pipe buffer).
 

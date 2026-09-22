@@ -60,6 +60,10 @@ name = "p13_daemon_process"
 path = "tests/p13_daemon_process.rs"
 
 [[test]]
+name = "p13_request_snapshot"
+path = "tests/p13_request_snapshot.rs"
+
+[[test]]
 name = "p14_acceptance_journey"
 path = "tests/p14_acceptance_journey.rs"
 
