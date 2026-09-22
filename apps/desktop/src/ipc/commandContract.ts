@@ -157,7 +157,21 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function validatePayload(kind: string, payload: unknown): string | null {
   // Payload-free commands: the envelope may carry a null payload.
-  if (kind === "ping" || kind === "cancel" || kind === "subscribe" || kind === "request_snapshot") {
+  if (kind === "ping" || kind === "cancel" || kind === "subscribe") {
+    return null;
+  }
+  if (kind === "request_snapshot") {
+    if (payload == null) return null;
+    if (!isRecord(payload)) {
+      return "request_snapshot payload must be an object when present";
+    }
+    if (
+      payload.thread_id !== undefined &&
+      payload.thread_id !== null &&
+      typeof payload.thread_id !== "string"
+    ) {
+      return "request_snapshot thread_id must be a string";
+    }
     return null;
   }
   if (!isRecord(payload)) {

@@ -912,21 +912,90 @@ export class InMemoryTransport implements CoreTransport {
       }
 
       case "request_snapshot": {
-        const diagDto: RuntimeDiagnosticsDto = {
-          instance_id: "cor_fixture000000001",
-          status: "ready",
-          active_threads: this.#threadFixtures.length,
-          active_turns: 0,
-          summary: null,
+        // Mirror Core (e5d970a): unscoped -> ThreadListResponseDto;
+        // scoped -> ThreadSnapshotDto. Never wrap RuntimeDiagnosticsDto.
+        const snapPayload = command.payload as
+          | { thread_id?: string; history_limit?: number | null }
+          | null;
+        if (snapPayload?.thread_id) {
+          const threadId = snapPayload.thread_id;
+          const fixture =
+            this.#threadFixtures.find((t) => t.id === threadId) ??
+            allThreads(true).find((t) => t.id === threadId) ??
+            this.#threadFixtures[0];
+          const matchingAgent =
+            this.#agents.find(
+              (a) => a.display_name === fixture?.agent || a.id === fixture?.agent,
+            ) ?? this.#agents[0];
+          const threadDto: ThreadDto = {
+            id: fixture?.id ?? threadId,
+            agent_profile_id: matchingAgent?.id ?? "agp_fixture000000001",
+            title: fixture?.title ?? "Conversation",
+            state: fixture?.pinned ? "pinned" : "open",
+            project_id: null,
+            created_at: 1700000000000,
+            updated_at: 1700000000000,
+          };
+          const turns: TurnDto[] = (fixture?.rows ?? [])
+            .filter((r) => r.kind === "user-message" || r.kind === "assistant-message")
+            .map((r, idx) => ({
+              id: r.id,
+              thread_id: threadDto.id,
+              state: "completed",
+              delivery_state: "confirmed",
+              operation_id: null,
+              started_at: 1700000000000 + idx * 1000,
+              ended_at: BigInt(1700000000000 + idx * 1000 + 500),
+            }));
+          const threadBody = threadDto.id.slice("thr_".length);
+          const permissions: PermissionDto[] = (fixture?.rows ?? [])
+            .filter((r) => r.kind === "permission")
+            .map((r) => ({
+              event_id: r.id,
+              turn_id: `trn_${threadBody}pe`,
+              thread_id: threadDto.id,
+              kind: "execute",
+              description: r.text,
+              decision: r.permission?.decision ?? "pending",
+              requested_at: 1700000000000,
+              decided_at: r.permission?.decision ? BigInt(1700000001000) : null,
+            }));
+          const snapshotData: ThreadSnapshotDto = {
+            thread: threadDto,
+            agent_profile: matchingAgent ?? null,
+            turns,
+            pending_permissions: permissions,
+          };
+          return {
+            protocol_version: version,
+            operation_id: command.operation_id,
+            thread_id: threadDto.id,
+            as_of: Date.now(),
+            data: snapshotData,
+          } satisfies SnapshotEnvelope;
+        }
+
+        const summaries = this.#getThreadSummaries();
+        const limit = 20;
+        const page = summaries.slice(0, limit);
+        const response: ThreadListResponseDto = {
+          threads: page,
+          next_cursor:
+            page.length > 0
+              ? {
+                  updated_at: page[page.length - 1]!.thread.updated_at,
+                  thread_id: page[page.length - 1]!.thread.id,
+                }
+              : null,
+          has_more: limit < summaries.length,
         };
-        const snapshot: SnapshotEnvelope = {
+        return {
           protocol_version: version,
           operation_id: command.operation_id,
           thread_id: null,
           as_of: Date.now(),
-          data: diagDto,
-        };
-        return snapshot;
+          data: response,
+        } satisfies SnapshotEnvelope;
       }
 
       case "get_context_snapshot": {

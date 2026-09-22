@@ -643,7 +643,7 @@ describe("ApplicationStore", () => {
       expect(store.getState().error).toBe("[AGENT_NOT_FOUND] The requested agent does not exist");
     });
 
-    it("automatically triggers list_threads and open_thread snapshot recovery when stream.gap is received", async () => {
+    it("automatically triggers request_snapshot recovery when stream.gap is received", async () => {
       const transport = new InMemoryTransport();
       const store = createApplicationStore(transport);
       await store.init();
@@ -670,8 +670,7 @@ describe("ApplicationStore", () => {
 
       const newCommands = transport.sentCommands.slice(initialCount);
       const newKinds = newCommands.map((c) => c.kind);
-      expect(newKinds).toContain("list_threads");
-      expect(newKinds).toContain("open_thread");
+      expect(newKinds.filter((k) => k === "request_snapshot").length).toBeGreaterThanOrEqual(1);
     });
 
     it("refreshes threads and snapshot when core restarted greeting event arrives", async () => {
@@ -700,8 +699,7 @@ describe("ApplicationStore", () => {
 
       const newCommands = transport.sentCommands.slice(initialCount);
       const newKinds = newCommands.map((c) => c.kind);
-      expect(newKinds).toContain("list_threads");
-      expect(newKinds).toContain("open_thread");
+      expect(newKinds.filter((k) => k === "request_snapshot").length).toBeGreaterThanOrEqual(1);
     });
   });
 

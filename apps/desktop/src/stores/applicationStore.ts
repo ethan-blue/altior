@@ -851,6 +851,55 @@ export function createApplicationStore(
     }
   };
 
+  const requestSnapshotFromCore = async (
+    threadId?: string | null,
+  ): Promise<void> => {
+    const envelope: CommandEnvelope = {
+      protocol_version: state.negotiated?.selected_version ?? 1,
+      operation_id: createOperationId(),
+      kind: "request_snapshot",
+      payload: threadId
+        ? ({ thread_id: threadId, history_limit: 100 } as Record<string, unknown>)
+        : null,
+      issued_at: Date.now(),
+    };
+
+    const res = await transport.command<SnapshotEnvelope>(envelope);
+    if (!isSnapshotEnvelope(res) || !res.data) {
+      return;
+    }
+    if (!threadId) {
+      const listData = res.data as ThreadListResponseDto;
+      if (Array.isArray(listData.threads)) {
+        const listViews = applyListPage(listData.threads, {
+          append: false,
+          hasMore: listData.has_more ?? false,
+          cursor: listData.next_cursor ?? null,
+        });
+        updateState((prev) => {
+          const selectedThreadId =
+            prev.selectedThreadId || listViews[0]?.id || "";
+          return {
+            ...prev,
+            threads:
+              prev.searchActive && searchResultIds
+                ? viewsForIds(searchResultIds)
+                : listViews,
+            hasMoreThreads: listData.has_more ?? false,
+            selectedThreadId,
+            selectedThread: selectedThreadId
+              ? threadViews.get(selectedThreadId) ?? prev.selectedThread
+              : null,
+          };
+        });
+      }
+      return;
+    }
+
+    const snap = res.data as ThreadSnapshotDto;
+    applyThreadSnapshot(snap, threadId);
+  };
+
   const triggerSnapshotRecovery = async (): Promise<void> => {
     if (isRecovering) {
       recoveryQueued = true;
@@ -858,10 +907,10 @@ export function createApplicationStore(
     }
     isRecovering = true;
     try {
-      await listThreadsFromCore();
+      await requestSnapshotFromCore();
       const currentSelected = state.selectedThreadId;
       if (currentSelected) {
-        await openThread(currentSelected);
+        await requestSnapshotFromCore(currentSelected);
         await getHistory(currentSelected);
       }
     } catch {
