@@ -48,6 +48,10 @@ export interface TranslationDictionary {
     readonly themeToggle: (theme: string) => string;
     readonly themeLabel: string;
     readonly languageLabel: string;
+    readonly globalSearchPlaceholder: string;
+    readonly searchShortcut: string;
+    readonly vaultBadge: string;
+    readonly cancelTurn: string;
   };
   readonly composer: {
     readonly ariaLabel: string;
@@ -58,12 +62,24 @@ export interface TranslationDictionary {
     readonly stopFailed: string;
     readonly indeterminateDelivery: string;
     readonly coreUnavailable: string;
+    readonly shortcutHintSend: string;
+    readonly shortcutHintNewline: string;
+    readonly smartTools: string;
   };
   readonly permission: {
     readonly approve: string;
     readonly deny: string;
     readonly recording: string;
     readonly failed: string;
+    readonly securityGate: string;
+    readonly riskNotice: string;
+    readonly requestedAction: string;
+    readonly scope: string;
+    readonly authorizedByUser: string;
+    readonly deniedByUser: string;
+    readonly approveTitle: string;
+    readonly denyTitle: string;
+    readonly shortcutHint: string;
   };
   readonly inspector: {
     readonly ariaLabel: string;
@@ -117,6 +133,9 @@ export interface TranslationDictionary {
     readonly permissionDenied: string;
     readonly newActivity: (count: number) => string;
     readonly threadTimelineAria: (title: string) => string;
+    readonly executionError: string;
+    readonly preservedVerbatim: string;
+    readonly streaming: string;
   };
   readonly contextPanel: {
     readonly loading: string;
@@ -244,6 +263,7 @@ export interface TranslationDictionary {
     readonly verified: string;
     readonly verifiedWithLatency: (ms: number) => string;
     readonly testFailed: (msg: string) => string;
+    readonly agentRequiredNotice: string;
   };
   readonly markdown: {
     readonly copy: string;

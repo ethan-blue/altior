@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { CommandEnvelope } from "./dto/CommandEnvelope";
 import type { EventEnvelope } from "./dto/EventEnvelope";
 import {
@@ -8,7 +8,11 @@ import {
 } from "./errors";
 import { negotiatedFixture } from "./fixtures";
 import { InMemoryTransport } from "./inMemoryTransport";
-import { createDefaultTransport, TauriCoreTransport } from "./tauriTransport";
+import {
+  createDefaultTransport,
+  resolveTauriBridge,
+  TauriCoreTransport,
+} from "./tauriTransport";
 
 describe("TauriCoreTransport", () => {
   it("throws TransportUnavailableError when Tauri bridge is absent in production", async () => {
@@ -245,5 +249,111 @@ describe("createDefaultTransport entry decision (A02)", () => {
     expect(transport).toBeInstanceOf(TauriCoreTransport);
     await transport.connect();
     expect(mockInvoke).toHaveBeenCalledWith("core_handshake", { client: "altior-desktop" });
+  });
+});
+
+describe("real WebView internals bridge (A18): stock Tauri v2 has no internals.listen", () => {
+  const internalsBackup = (window as any).__TAURI_INTERNALS__;
+
+  afterEach(() => {
+    (window as any).__TAURI_INTERNALS__ = internalsBackup;
+  });
+
+  function installStockInternals(): {
+    invoke: ReturnType<typeof vi.fn>;
+    transformCallback: ReturnType<typeof vi.fn>;
+    deliver: (ev: { payload: EventEnvelope }) => void;
+  } {
+    let registered: ((message: unknown) => void) | null = null;
+    const invoke = vi.fn().mockImplementation((cmd: string) => {
+      if (cmd === "core_handshake") {
+        return Promise.resolve(negotiatedFixture);
+      }
+      if (cmd === "plugin:event|listen") {
+        return Promise.resolve(31);
+      }
+      if (cmd === "plugin:event|unlisten") {
+        return Promise.resolve();
+      }
+      return Promise.reject(new Error(`Unknown command: ${cmd}`));
+    });
+    const transformCallback = vi.fn().mockImplementation(
+      (callback: (message: unknown) => void) => {
+        registered = callback;
+        return 31;
+      },
+    );
+    (window as any).__TAURI_INTERNALS__ = { invoke, transformCallback };
+    return {
+      invoke,
+      transformCallback,
+      deliver: (ev) => registered!(ev),
+    };
+  }
+
+  it("detects the bridge from invoke + transformCallback alone", () => {
+    const { invoke } = installStockInternals();
+    const bridge = resolveTauriBridge({});
+    expect(bridge).not.toBeNull();
+    expect(bridge!.invoke).toBe(invoke);
+    expect(typeof bridge!.listen).toBe("function");
+  });
+
+  it("keeps the real WebView on the Tauri transport instead of dev fixtures", async () => {
+    installStockInternals();
+    const transport = createDefaultTransport({ isDev: true });
+    expect(transport).toBeInstanceOf(TauriCoreTransport);
+    expect((transport as TauriCoreTransport).isFallback).toBe(false);
+    await transport.connect();
+  });
+
+  it("assembles the official plugin:event contract for listen and unlisten", async () => {
+    const { invoke, transformCallback, deliver } = installStockInternals();
+    const transport = createDefaultTransport({ isDev: true });
+    await transport.connect();
+
+    const received: EventEnvelope[] = [];
+    const unsubscribe = transport.subscribe((event) => received.push(event));
+
+    await vi.waitFor(() =>
+      expect(invoke).toHaveBeenCalledWith("plugin:event|listen", {
+        event: "core_event",
+        target: { kind: "Any" },
+        handler: 31,
+      }),
+    );
+    expect(transformCallback).toHaveBeenCalledWith(
+      expect.any(Function),
+      false,
+    );
+
+    const testEvent: EventEnvelope = {
+      protocol_version: 1,
+      event_id: "evt_internals_1",
+      operation_id: null,
+      thread_id: "thread-1",
+      turn_id: "turn-1",
+      sequence: 7 as any,
+      occurred_at: Date.now(),
+      body: { kind: "turn.started" },
+    };
+    deliver({ payload: testEvent });
+    expect(received).toEqual([testEvent]);
+
+    unsubscribe();
+    await vi.waitFor(() =>
+      expect(invoke).toHaveBeenCalledWith("plugin:event|unlisten", {
+        event: "core_event",
+        eventId: 31,
+      }),
+    );
+    await transport.close();
+  });
+
+  it("still rejects a bridge when invoke is missing", () => {
+    (window as any).__TAURI_INTERNALS__ = {
+      transformCallback: vi.fn().mockReturnValue(1),
+    };
+    expect(resolveTauriBridge({})).toBeNull();
   });
 });

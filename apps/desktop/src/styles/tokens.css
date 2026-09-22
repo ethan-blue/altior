@@ -33,6 +33,18 @@
   --color-disabled-text: #8c929d;
   --color-disabled-surface: #eaecf0;
 
+  /* refined commercial surfaces & borders */
+  --color-surface-subtle: #f8f9fa;
+  --color-surface-hover: rgba(28, 31, 36, 0.04);
+  --color-surface-active: rgba(28, 31, 36, 0.08);
+  --color-header-bg: #ffffff;
+  --color-rail-bg: #f4f5f8;
+  --color-nav-bg: #fafbfc;
+  --color-border-subtle: #e5e8ec;
+  --color-badge-bg: rgba(47, 95, 215, 0.08);
+  --color-badge-text: #2f5fd7;
+  --color-status-online: #2e7d43;
+
   /* spacing */
   --spacing-2: 2px;
   --spacing-4: 4px;
@@ -56,7 +68,7 @@
   /* geometry */
   --control-height: 28px;
   --row-height: 24px;
-  --border-radius: 4px;
+  --border-radius: 6px;
   --divider-width: 1px;
   --focus-ring: 2px;
   --nav-width: 256px;
@@ -65,6 +77,14 @@
   --inspector-width: 360px;
   --inspector-width-min: 280px;
   --inspector-width-max: 640px;
+
+  /* modern radius system */
+  --radius-xs: 4px;
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+  --radius-full: 9999px;
 
   /* stacking order for the elevated surfaces */
   --z-menu: 20;
@@ -76,11 +96,21 @@
   --elevation-dialog: 0 8px 24px rgba(28, 31, 36, 0.2);
   --elevation-tooltip: 0 1px 4px rgba(28, 31, 36, 0.18);
 
+  /* modern layered shadows */
+  --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.04);
+  --shadow-sm: 0 2px 5px rgba(0, 0, 0, 0.06);
+  --shadow-md: 0 4px 14px rgba(0, 0, 0, 0.08);
+  --shadow-lg: 0 10px 30px rgba(0, 0, 0, 0.12);
+  --shadow-composer: 0 4px 20px -2px rgba(0, 0, 0, 0.08), 0 0 0 1px rgba(0, 0, 0, 0.08);
+  --shadow-composer-focus: 0 6px 24px -2px rgba(47, 95, 215, 0.18), 0 0 0 2px var(--color-accent);
+
   /* motion */
   --motion-fast: 120ms;
   --motion-normal: 200ms;
   --motion-slow: 320ms;
   --easing-standard: cubic-bezier(0.2, 0, 0, 1);
+  --transition-fast: 120ms cubic-bezier(0.2, 0, 0, 1);
+  --transition-normal: 200ms cubic-bezier(0.2, 0, 0, 1);
 }
 
 /*
@@ -114,9 +144,28 @@
   --color-disabled-text: #636b76;
   --color-disabled-surface: #262a32;
 
+  /* refined commercial surfaces & borders (dark) */
+  --color-surface-subtle: #17191f;
+  --color-surface-hover: rgba(228, 231, 236, 0.06);
+  --color-surface-active: rgba(228, 231, 236, 0.12);
+  --color-header-bg: #16181d;
+  --color-rail-bg: #111317;
+  --color-nav-bg: #17191e;
+  --color-border-subtle: #292e37;
+  --color-badge-bg: rgba(123, 160, 240, 0.12);
+  --color-badge-text: #7ba0f0;
+  --color-status-online: #6fbf8a;
+
   --elevation-menu: 0 2px 8px rgba(0, 0, 0, 0.5);
   --elevation-dialog: 0 8px 24px rgba(0, 0, 0, 0.6);
   --elevation-tooltip: 0 1px 4px rgba(0, 0, 0, 0.55);
+
+  --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow-sm: 0 2px 6px rgba(0, 0, 0, 0.4);
+  --shadow-md: 0 4px 16px rgba(0, 0, 0, 0.5);
+  --shadow-lg: 0 12px 36px rgba(0, 0, 0, 0.65);
+  --shadow-composer: 0 4px 24px -2px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(255, 255, 255, 0.08);
+  --shadow-composer-focus: 0 6px 28px -2px rgba(123, 160, 240, 0.25), 0 0 0 2px var(--color-accent);
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -124,6 +173,8 @@
     --motion-fast: 0ms;
     --motion-normal: 0ms;
     --motion-slow: 0ms;
+    --transition-fast: 0ms;
+    --transition-normal: 0ms;
   }
 }
 

@@ -18,7 +18,10 @@ pub use adapter::{
 pub use commands::{core_close, core_command, core_handshake, core_reconnect, core_status};
 pub use discovery::{CoreDiscovery, FsCoreDiscovery};
 pub use error::BridgeError;
-pub use manager::SpawnOrAttachManager;
+pub use manager::{
+    create_secure_data_dir, default_data_dir, validate_data_dir, DataDirEnv, DataDirError,
+    SpawnOrAttachManager,
+};
 pub use session::BridgeSession;
 pub use spawner::{CoreSpawner, DetachedCoreSpawner};
 pub use state::{AppIpcState, ReconnectCursor, TransportStatus};

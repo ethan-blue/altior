@@ -249,11 +249,41 @@ function viteDevFlag(): boolean {
 }
 
 /**
+ * Assembles the standard Tauri v2 event-plugin listener from the internals
+ * bridge. Stock Tauri v2 never exposes `listen` on `__TAURI_INTERNALS__`
+ * (`invoke`, `transformCallback`, `convertFileSrc`, … only); the event API
+ * ships in `@tauri-apps/api`, which this shell deliberately does not bundle
+ * (ADR 0008 §6). The payloads below replicate the official
+ * `plugin:event|listen` / `plugin:event|unlisten` contract, which the
+ * `core:event:default` permission inside `core:default` already allows.
+ */
+function internalsEventListen(
+  invoke: TauriInvokeFn,
+  transformCallback: (
+    callback: (message: unknown) => void,
+    once?: boolean,
+  ) => number,
+): TauriListenFn {
+  return (event, handler) =>
+    invoke<number>("plugin:event|listen", {
+      event,
+      target: { kind: "Any" },
+      handler: transformCallback(
+        (message) => handler(message as { payload: EventEnvelope }),
+        false,
+      ),
+    }).then((eventId) => () => {
+      void invoke("plugin:event|unlisten", { event, eventId });
+    });
+}
+
+/**
  * Resolves the Tauri bridge from explicit injection or, when the shell
  * exposes it, from `__TAURI_INTERNALS__`/`__TAURI__`. With
  * `withGlobalTauri: false` the production WebView only provides the
- * internals object; there is deliberately no global-object fallback beyond
- * that (ADR 0008 §6).
+ * internals object; `listen` is assembled from `invoke` +
+ * `transformCallback` when the webview does not preassemble it. There is
+ * deliberately no global-object fallback beyond that (ADR 0008 §6).
  */
 export function resolveTauriBridge(options: TauriCoreTransportOptions): {
   invoke: TauriInvokeFn;
@@ -264,10 +294,17 @@ export function resolveTauriBridge(options: TauriCoreTransportOptions): {
   }
 
   const win = typeof window !== "undefined" ? (window as any) : null;
-  const invoke = win?.__TAURI_INTERNALS__?.invoke ?? null;
-  const listen = win?.__TAURI_INTERNALS__?.listen ?? null;
+  const internals = win?.__TAURI_INTERNALS__ ?? null;
+  const invoke =
+    typeof internals?.invoke === "function" ? internals.invoke : null;
+  const listen =
+    typeof internals?.listen === "function"
+      ? internals.listen
+      : invoke && typeof internals?.transformCallback === "function"
+        ? internalsEventListen(invoke, internals.transformCallback)
+        : null;
 
-  if (typeof invoke === "function" && typeof listen === "function") {
+  if (invoke && listen) {
     return { invoke, listen };
   }
   return null;

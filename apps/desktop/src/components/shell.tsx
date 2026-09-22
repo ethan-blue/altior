@@ -112,28 +112,47 @@ export function ActivityRail({ active, onNavigate }: ActivityRailProps) {
     { id: "devices", label: t.rail.devices, arrives: "P3" },
     { id: "settings", label: t.rail.settings, arrives: null },
   ];
+
+  const topItems = destinations.slice(0, 5);
+  const bottomItems = destinations.slice(5);
+
+  const renderItem = ({
+    id,
+    label,
+    arrives,
+  }: {
+    id: string;
+    label: string;
+    arrives: string | null;
+  }) => {
+    const enabled = arrives == null;
+    return (
+      <button
+        key={id}
+        type="button"
+        className={`${shell.railItem} ${active === id ? shell.railActive : ""}`}
+        aria-current={active === id ? "page" : undefined}
+        aria-disabled={!enabled}
+        aria-label={label}
+        disabled={!enabled}
+        onClick={() => enabled && onNavigate?.(id)}
+        title={enabled ? label : `${label} — ${t.rail.arrivesWith(arrives!)}`}
+        data-testid={`rail-${id}`}
+      >
+        <RailIcon id={id} />
+        <span className={shell.railLabel}>{label}</span>
+      </button>
+    );
+  };
+
   return (
     <nav className={shell.rail} aria-label={t.rail.activityAria}>
-      {destinations.map(({ id, label, arrives }) => {
-        const enabled = arrives == null;
-        return (
-          <button
-            key={id}
-            type="button"
-            className={`${shell.railItem} ${active === id ? shell.railActive : ""}`}
-            aria-current={active === id ? "page" : undefined}
-            aria-disabled={!enabled}
-            aria-label={label}
-            disabled={!enabled}
-            onClick={() => enabled && onNavigate?.(id)}
-            title={enabled ? label : `${label} — ${t.rail.arrivesWith(arrives!)}`}
-            data-testid={`rail-${id}`}
-          >
-            <RailIcon id={id} />
-            <span className={shell.railLabel}>{label}</span>
-          </button>
-        );
-      })}
+      <div className={shell.railGroup}>
+        {topItems.map(renderItem)}
+      </div>
+      <div className={shell.railBottomGroup}>
+        {bottomItems.map(renderItem)}
+      </div>
     </nav>
   );
 }
@@ -226,17 +245,32 @@ export function ThreadsPane({
   return (
     <section className={shell.threadsPane} aria-label={t.nav.paneAria}>
       <div className={shell.threadsHeader}>
-        <input
-          type="search"
-          className={shell.search}
-          placeholder={t.nav.filterPlaceholder}
-          value={localFilter}
-          onChange={handleInputChange}
-          onCompositionStart={handleCompositionStart}
-          onCompositionEnd={handleCompositionEnd}
-          aria-label={t.nav.filterPlaceholder}
-          data-testid="thread-filter"
-        />
+        <div className={shell.searchWrapper}>
+          <svg
+            className={shell.searchIcon}
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden="true"
+          >
+            <circle cx="11" cy="11" r="8" />
+            <line x1="21" y1="21" x2="16.65" y2="16.65" />
+          </svg>
+          <input
+            type="search"
+            className={shell.search}
+            placeholder={t.nav.filterPlaceholder}
+            value={localFilter}
+            onChange={handleInputChange}
+            onCompositionStart={handleCompositionStart}
+            onCompositionEnd={handleCompositionEnd}
+            aria-label={t.nav.filterPlaceholder}
+            data-testid="thread-filter"
+          />
+        </div>
         {onCreateThread ? (
           <button
             type="button"
@@ -271,11 +305,11 @@ export function ThreadsPane({
       {hasMoreThreads && onLoadMore ? (
         <button
           type="button"
-          className={shell.newThreadBtn}
+          className={shell.loadMoreBtn}
           onClick={onLoadMore}
           data-testid="load-more-threads"
         >
-          Load more
+          {t.nav.loadMore}
         </button>
       ) : null}
     </section>
@@ -296,24 +330,26 @@ function ThreadSection({
   return (
     <section className={shell.threadSection} aria-label={title}>
       <h2 className={shell.sectionTitle}>{title}</h2>
-      {threads.map((thread) => (
-        <button
-          key={thread.id}
-          type="button"
-          className={`${shell.threadRow} ${
-            thread.id === selectedThreadId ? shell.threadSelected : ""
-          }`}
-          aria-current={thread.id === selectedThreadId ? "true" : undefined}
-          onClick={() => onSelect(thread.id)}
-          data-testid={`thread-${thread.id}`}
-        >
-          <span aria-hidden="true" data-status={thread.status} className={shell.statusGlyph}>
-            {statusGlyph[thread.status]}
-          </span>
-          <span className={shell.threadTitle}>{thread.title}</span>
-          <span className={shell.threadStatus}>{statusLabel[thread.status]}</span>
-        </button>
-      ))}
+      <div className={shell.threadList}>
+        {threads.map((thread) => (
+          <button
+            key={thread.id}
+            type="button"
+            className={`${shell.threadRow} ${
+              thread.id === selectedThreadId ? shell.threadSelected : ""
+            }`}
+            aria-current={thread.id === selectedThreadId ? "true" : undefined}
+            onClick={() => onSelect(thread.id)}
+            data-testid={`thread-${thread.id}`}
+          >
+            <span aria-hidden="true" data-status={thread.status} className={shell.statusGlyph}>
+              {statusGlyph[thread.status]}
+            </span>
+            <span className={shell.threadTitle}>{thread.title}</span>
+            <span className={shell.threadStatus}>{statusLabel[thread.status]}</span>
+          </button>
+        ))}
+      </div>
     </section>
   );
 }
@@ -350,42 +386,44 @@ export function ThreadHeader({
   const { t } = useI18n();
   return (
     <header className={shell.threadHeader}>
-      <h1 className={shell.threadTitleMain}>{title}</h1>
+      <div className={shell.headerTitleGroup}>
+        <h1 className={shell.threadTitleMain}>{title}</h1>
 
-      {agents && onSelectAgent ? (
-        <div style={{ display: "flex", gap: "var(--spacing-8)", alignItems: "center" }}>
-          <select
-            className={shell.agentSelect}
-            value={
-              selectedAgentId ??
-              agents.find((a) => a.name === agent || a.id === agent)?.id ??
-              agents[0]?.id
-            }
-            onChange={(e) => onSelectAgent(e.target.value)}
-            aria-label={t.workbench.selectAgent}
-            data-testid="agent-selector"
-          >
-            {agents.map((a) => (
-              <option key={a.id} value={a.id}>
-                {a.name} ({a.model})
-              </option>
-            ))}
-          </select>
-          {onAddAgent ? (
-            <button
-              type="button"
-              className={shell.reconnectBtn}
-              onClick={onAddAgent}
-              data-testid="add-agent-btn"
-              title="Add agent"
+        {agents && onSelectAgent ? (
+          <div className={shell.agentSelectorWrapper}>
+            <select
+              className={shell.agentSelect}
+              value={
+                selectedAgentId ??
+                agents.find((a) => a.name === agent || a.id === agent)?.id ??
+                agents[0]?.id
+              }
+              onChange={(e) => onSelectAgent(e.target.value)}
+              aria-label={t.workbench.selectAgent}
+              data-testid="agent-selector"
             >
-              {t.workbench.addAgent}
-            </button>
-          ) : null}
-        </div>
-      ) : (
-        <span className={shell.threadAgent}>{agent}</span>
-      )}
+              {agents.map((a) => (
+                <option key={a.id} value={a.id}>
+                  {a.name} ({a.model})
+                </option>
+              ))}
+            </select>
+            {onAddAgent ? (
+              <button
+                type="button"
+                className={shell.reconnectBtn}
+                onClick={onAddAgent}
+                data-testid="add-agent-btn"
+                title={t.workbench.addAgent}
+              >
+                {t.workbench.addAgent}
+              </button>
+            ) : null}
+          </div>
+        ) : (
+          <span className={shell.threadAgent}>{agent}</span>
+        )}
+      </div>
 
       <div className={shell.headerControls}>
         {isStreaming && onCancel ? (
@@ -395,7 +433,7 @@ export function ThreadHeader({
             className={shell.cancelBtn}
             data-testid="header-cancel-turn"
           >
-            Cancel turn
+            {t.workbench.cancelTurn}
           </button>
         ) : null}
         <button type="button" onClick={onToggleTheme} data-testid="theme-toggle">
@@ -432,55 +470,119 @@ export function Composer({
 }: ComposerProps) {
   const { t } = useI18n();
   const [isComposing, setIsComposing] = useState(false);
+  const [isFocused, setIsFocused] = useState(false);
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+
+  const handleCardClick = (e: React.MouseEvent) => {
+    if ((e.target as HTMLElement).closest("button, select, a")) return;
+    textareaRef.current?.focus();
+  };
 
   return (
     <div className={shell.composer}>
-      <textarea
-        className={shell.composerInput}
-        placeholder={disabledReason ?? t.composer.placeholder}
-        value={draft}
-        disabled={disabledReason != null}
-        onChange={(event) => onDraftChange(event.target.value)}
-        onCompositionStart={() => setIsComposing(true)}
-        onCompositionEnd={() => setIsComposing(false)}
-        onKeyDown={(event) => {
-          // Chinese IME / composition protection (A09 / F16):
-          // Never send on Enter when confirming IME candidates (isComposing or Windows keyCode 229)
-          if (
-            isComposing ||
-            event.nativeEvent.isComposing ||
-            event.keyCode === 229
-          ) {
-            return;
-          }
-          if (event.key === "Enter" && !event.shiftKey) {
-            event.preventDefault();
-            if (disabledReason == null) onSend();
-          }
-        }}
-        aria-label={t.composer.ariaLabel}
-        data-testid="composer"
-      />
-      {isStreaming && onCancel ? (
-        <button
-          type="button"
-          className={shell.cancelBtn}
-          onClick={onCancel}
-          disabled={cancelPending}
-          data-testid="cancel-turn"
-        >
-          {cancelPending ? t.composer.requestingStop : t.composer.stop}
-        </button>
-      ) : null}
-      <button
-        type="button"
-        className={shell.send}
-        onClick={onSend}
-        disabled={disabledReason != null || draft.trim().length === 0}
-        data-testid="send"
+      <div
+        className={`${shell.composerCard} ${isFocused ? shell.composerCardFocused : ""} ${
+          disabledReason != null ? shell.composerCardDisabled : ""
+        }`}
+        onClick={handleCardClick}
       >
-        {t.composer.send}
-      </button>
+        <textarea
+          ref={textareaRef}
+          className={shell.composerInput}
+          placeholder={disabledReason ?? t.composer.placeholder}
+          value={draft}
+          disabled={disabledReason != null}
+          onFocus={() => setIsFocused(true)}
+          onBlur={() => setIsFocused(false)}
+          onChange={(event) => onDraftChange(event.target.value)}
+          onCompositionStart={() => setIsComposing(true)}
+          onCompositionEnd={() => setIsComposing(false)}
+          onKeyDown={(event) => {
+            // Chinese IME / composition protection (A09 / F16):
+            // Never send on Enter when confirming IME candidates (isComposing or Windows keyCode 229)
+            if (
+              isComposing ||
+              event.nativeEvent.isComposing ||
+              event.keyCode === 229
+            ) {
+              return;
+            }
+            if (event.key === "Enter" && !event.shiftKey) {
+              event.preventDefault();
+              if (disabledReason == null) onSend();
+            }
+          }}
+          aria-label={t.composer.ariaLabel}
+          data-testid="composer"
+          rows={2}
+        />
+
+        <div className={shell.composerToolbar}>
+          <div className={shell.composerToolsLeft}>
+            <span className={shell.composerChip}>
+              <svg
+                width="12"
+                height="12"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+              >
+                <circle cx="12" cy="12" r="10" />
+                <polygon points="12 8 8 12 12 16 12 8" />
+              </svg>
+              <span>{t.composer.smartTools}</span>
+            </span>
+
+            <div className={shell.composerShortcuts}>
+              <kbd className={shell.composerKbd}>{t.composer.shortcutHintSend}</kbd>
+              <span className={shell.composerKbdDivider}>•</span>
+              <kbd className={shell.composerKbd}>{t.composer.shortcutHintNewline}</kbd>
+            </div>
+          </div>
+
+          <div className={shell.composerToolsRight}>
+            {isStreaming && onCancel ? (
+              <button
+                type="button"
+                className={shell.cancelBtn}
+                onClick={onCancel}
+                disabled={cancelPending}
+                data-testid="cancel-turn"
+              >
+                <span className={shell.cancelIndicator} aria-hidden="true">■</span>
+                {cancelPending ? t.composer.requestingStop : t.composer.stop}
+              </button>
+            ) : null}
+            <button
+              type="button"
+              className={shell.send}
+              onClick={onSend}
+              disabled={disabledReason != null || draft.trim().length === 0}
+              data-testid="send"
+            >
+              <span>{t.composer.send}</span>
+              <svg
+                width="13"
+                height="13"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+              >
+                <line x1="22" y1="2" x2="11" y2="13" />
+                <polygon points="22 2 15 22 11 13 2 9 22 2" />
+              </svg>
+            </button>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
@@ -987,6 +1089,7 @@ export interface AgentOnboardingModalProps {
   }) => Promise<TestAgentResult>;
   readonly isTesting: boolean;
   readonly testResult: TestAgentResult | null;
+  readonly notice?: React.ReactNode;
 }
 
 /** Minimal Agent Onboarding modal with opaque secret reference handling. */
@@ -997,6 +1100,7 @@ export function AgentOnboardingModal({
   onTest,
   isTesting,
   testResult,
+  notice,
 }: AgentOnboardingModalProps) {
   const { t } = useI18n();
   const [name, setName] = useState("");
@@ -1162,6 +1266,16 @@ export function AgentOnboardingModal({
           </button>
         </div>
 
+        {notice ? (
+          <div
+            className={shell.modalNotice}
+            role="status"
+            data-testid="onboarding-notice"
+          >
+            ⚠️ {notice}
+          </div>
+        ) : null}
+
         <form onSubmit={handleSubmit}>
           <div className={shell.formGrid}>
             <label htmlFor="agent-name">{t.onboarding.nameLabel}</label>
@@ -1186,7 +1300,7 @@ export function AgentOnboardingModal({
                 required
                 data-testid="agent-provider-input"
               />
-              <span style={{ fontSize: "0.75rem", color: "var(--color-fg-muted)", display: "block", marginTop: "2px" }}>
+              <span style={{ fontSize: "0.75rem", color: "var(--color-muted)", display: "block", marginTop: "2px" }}>
                 {t.agents.acpHarnessNote}
               </span>
             </div>
@@ -1201,7 +1315,7 @@ export function AgentOnboardingModal({
                 placeholder={t.onboarding.modelPlaceholder}
                 data-testid="agent-model-input"
               />
-              <span style={{ fontSize: "0.75rem", color: "var(--color-fg-muted)", display: "block", marginTop: "2px" }}>
+              <span style={{ fontSize: "0.75rem", color: "var(--color-muted)", display: "block", marginTop: "2px" }}>
                 {t.agents.modelOptionalNote}
               </span>
             </div>
@@ -1321,7 +1435,7 @@ export function AgentOnboardingModal({
                     ✓ {t.onboarding.verifiedWithLatency(testResult.latencyMs ?? 0)}
                   </span>
                   {testResult.capabilities && Object.keys(testResult.capabilities).length > 0 ? (
-                    <div style={{ fontSize: "0.75rem", color: "var(--color-fg-muted)", marginTop: "4px" }} data-testid="tested-capabilities">
+                    <div style={{ fontSize: "0.75rem", color: "var(--color-muted)", marginTop: "4px" }} data-testid="tested-capabilities">
                       Capabilities: {Object.entries(testResult.capabilities).map(([k, v]) => `${k}: ${v}`).join(", ")}
                     </div>
                   ) : null}

@@ -56,14 +56,14 @@ const DEFAULT_OVERSCAN = 6;
 function estimateRowHeight(row: TimelineRow): number {
   switch (row.kind) {
     case "permission":
-      return 88;
+      return 150;
     case "tool":
     case "unknown":
-      return 34;
+      return 56;
     case "error":
-      return 44;
+      return 60;
     default:
-      return Math.max(28, 22 + row.text.length * 0.55);
+      return Math.max(50, 36 + row.text.length * 0.55);
   }
 }
 

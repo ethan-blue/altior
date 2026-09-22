@@ -1,8 +1,13 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { failureThread, standardThread } from "../fixtures/timeline";
 import { InMemoryTransport } from "../ipc/inMemoryTransport";
 import { App } from "./App";
+
+afterEach(() => {
+  localStorage.clear();
+  cleanup();
+});
 
 /** Renders App and waits until the authoritative thread list has loaded. */
 async function renderWithThreads(transport: () => InMemoryTransport) {
@@ -66,6 +71,55 @@ describe("App workbench shell", () => {
     expect(screen.getByText("No conversations yet.", { selector: "p" })).toBeInTheDocument();
     // The clean vault opens onboarding.
     expect(await screen.findByRole("dialog", { name: "Agent Onboarding" })).toBeInTheDocument();
+  });
+
+  it("re-opens onboarding with internationalized notice when clicking new thread without agents", async () => {
+    localStorage.clear();
+    render(
+      <App
+        transport={new InMemoryTransport({ initialThreads: [], initialAgents: [] })}
+      />,
+    );
+
+    // Initial clean vault opens onboarding modal without notice
+    const initialDialog = await screen.findByRole("dialog", { name: "Agent Onboarding" });
+    expect(initialDialog).toBeInTheDocument();
+    expect(screen.queryByTestId("onboarding-notice")).toBeNull();
+
+    // Close onboarding modal
+    fireEvent.click(screen.getByTestId("onboarding-close"));
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog", { name: "Agent Onboarding" })).toBeNull();
+    });
+
+    // Clicking "New Thread" without any configured agent re-opens onboarding with i18n notice (en)
+    fireEvent.click(screen.getByTestId("new-thread"));
+    const reopenedDialog = await screen.findByRole("dialog", { name: "Agent Onboarding" });
+    expect(reopenedDialog).toBeInTheDocument();
+    const noticeEn = screen.getByTestId("onboarding-notice");
+    expect(noticeEn).toBeInTheDocument();
+    expect(noticeEn).toHaveTextContent("Please configure an agent before creating a new thread.");
+
+    // Close onboarding modal again
+    fireEvent.click(screen.getByTestId("onboarding-close"));
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog", { name: "Agent Onboarding" })).toBeNull();
+    });
+
+    // Switch locale to zh-CN via settings
+    fireEvent.click(screen.getByTestId("rail-settings"));
+    await screen.findByTestId("settings-modal");
+    fireEvent.change(screen.getByTestId("settings-locale-select"), {
+      target: { value: "zh-CN" },
+    });
+    fireEvent.click(screen.getByTestId("settings-close-btn"));
+
+    // Clicking "New Thread" again re-opens onboarding with Chinese notice
+    fireEvent.click(screen.getByTestId("new-thread"));
+    expect(await screen.findByRole("dialog", { name: "连接 ACP 代理" })).toBeInTheDocument();
+    const noticeZh = screen.getByTestId("onboarding-notice");
+    expect(noticeZh).toBeInTheDocument();
+    expect(noticeZh).toHaveTextContent("创建新会话前请先配置代理。");
   });
 
   it("an empty search result never unmounts the conversation being read (A03)", async () => {
@@ -163,5 +217,150 @@ describe("App workbench shell", () => {
     expect(root).toHaveAttribute("data-theme", "light");
     fireEvent.click(screen.getByTestId("theme-toggle"));
     expect(root).toHaveAttribute("data-theme", "dark");
+  });
+
+  it("marks vault switcher button as aria-disabled", async () => {
+    await renderWithThreads(() => new InMemoryTransport());
+    const vaultBtn = screen.getByRole("button", { name: /personal vault|个人保险库/i });
+    expect(vaultBtn).toHaveAttribute("aria-disabled", "true");
+  });
+
+  it("focuses search input and prevents default on Ctrl+K and Meta+K", async () => {
+    await renderWithThreads(() => new InMemoryTransport());
+    const searchInput = screen.getByTestId("global-search-input");
+    expect(searchInput).not.toHaveFocus();
+
+    // Ctrl+K
+    const ctrlKEvent = new KeyboardEvent("keydown", {
+      key: "k",
+      ctrlKey: true,
+      cancelable: true,
+      bubbles: true,
+    });
+    const ctrlPreventSpy = vi.spyOn(ctrlKEvent, "preventDefault");
+    window.dispatchEvent(ctrlKEvent);
+    expect(ctrlPreventSpy).toHaveBeenCalled();
+    expect(searchInput).toHaveFocus();
+
+    // Blur
+    searchInput.blur();
+    expect(searchInput).not.toHaveFocus();
+
+    // Meta+K (Cmd+K on macOS)
+    const metaKEvent = new KeyboardEvent("keydown", {
+      key: "k",
+      metaKey: true,
+      cancelable: true,
+      bubbles: true,
+    });
+    const metaPreventSpy = vi.spyOn(metaKEvent, "preventDefault");
+    window.dispatchEvent(metaKEvent);
+    expect(metaPreventSpy).toHaveBeenCalled();
+    expect(searchInput).toHaveFocus();
+
+    // Key "K" with Ctrl
+    searchInput.blur();
+    const upperKEvent = new KeyboardEvent("keydown", {
+      key: "K",
+      ctrlKey: true,
+      cancelable: true,
+      bubbles: true,
+    });
+    window.dispatchEvent(upperKEvent);
+    expect(searchInput).toHaveFocus();
+
+    // Plain "k" without Ctrl/Meta should not focus or prevent default
+    searchInput.blur();
+    const plainKEvent = new KeyboardEvent("keydown", {
+      key: "k",
+      cancelable: true,
+      bubbles: true,
+    });
+    const plainPreventSpy = vi.spyOn(plainKEvent, "preventDefault");
+    window.dispatchEvent(plainKEvent);
+    expect(plainPreventSpy).not.toHaveBeenCalled();
+    expect(searchInput).not.toHaveFocus();
+  });
+
+  it("does not trigger thread filter search during IME composition until composition ends", async () => {
+    const transport = new InMemoryTransport();
+    const commandSpy = vi.spyOn(transport, "command");
+    render(<App transport={transport} searchDebounceMs={50} />);
+    await screen.findByRole("heading", { level: 1, name: /Contract fixture walkthrough/ });
+
+    const searchInput = screen.getByTestId("global-search-input");
+    commandSpy.mockClear();
+
+    // Start composition and change value
+    fireEvent.compositionStart(searchInput);
+    fireEvent.change(searchInput, { target: { value: "ceshi" } });
+
+    // Wait longer than searchDebounceMs
+    await new Promise((resolve) => setTimeout(resolve, 80));
+
+    // During composition, search_threads should NOT be dispatched
+    const searchCallsDuring = commandSpy.mock.calls.filter(
+      (call) => call[0].kind === "search_threads",
+    );
+    expect(searchCallsDuring).toHaveLength(0);
+
+    // End composition with the committed Chinese text
+    fireEvent.change(searchInput, { target: { value: "测试" } });
+    fireEvent.compositionEnd(searchInput, { target: { value: "测试" } });
+
+    // After debounce finishes, search_threads is dispatched for "测试"
+    await waitFor(() => {
+      const searchCalls = commandSpy.mock.calls.filter(
+        (call) => call[0].kind === "search_threads",
+      );
+      expect(searchCalls).toHaveLength(1);
+      expect(searchCalls[0]?.[0].payload).toMatchObject({ query: "测试" });
+    });
+  });
+
+  it("debounces rapid input changes and triggers search only once", async () => {
+    const transport = new InMemoryTransport();
+    const commandSpy = vi.spyOn(transport, "command");
+    render(<App transport={transport} searchDebounceMs={60} />);
+    await screen.findByRole("heading", { level: 1, name: /Contract fixture walkthrough/ });
+
+    const searchInput = screen.getByTestId("global-search-input");
+    commandSpy.mockClear();
+
+    // Rapid keystrokes within the debounce window
+    fireEvent.change(searchInput, { target: { value: "a" } });
+    fireEvent.change(searchInput, { target: { value: "ab" } });
+    fireEvent.change(searchInput, { target: { value: "abc" } });
+
+    // Before debounce delay elapses, no search_threads command dispatched
+    const callsBefore = commandSpy.mock.calls.filter((c) => c[0].kind === "search_threads");
+    expect(callsBefore).toHaveLength(0);
+
+    // After debounce delay, search_threads is called exactly once with the final query
+    await waitFor(() => {
+      const callsAfter = commandSpy.mock.calls.filter((c) => c[0].kind === "search_threads");
+      expect(callsAfter).toHaveLength(1);
+      expect(callsAfter[0]?.[0].payload).toMatchObject({ query: "abc" });
+    });
+
+    // Verify no further calls fire
+    await new Promise((resolve) => setTimeout(resolve, 90));
+    const finalCalls = commandSpy.mock.calls.filter((c) => c[0].kind === "search_threads");
+    expect(finalCalls).toHaveLength(1);
+  });
+
+  it("syncs search input with external appState.threadFilter changes without loop", async () => {
+    const transport = new InMemoryTransport();
+    render(<App transport={transport} searchDebounceMs={0} />);
+    await screen.findByRole("heading", { level: 1, name: /Contract fixture walkthrough/ });
+
+    const searchInput = screen.getByTestId("global-search-input");
+    const paneFilter = screen.getByTestId("thread-filter");
+
+    // Changing the thread filter from ThreadsPane updates the top bar search input
+    fireEvent.change(paneFilter, { target: { value: "external-sync" } });
+    await waitFor(() => {
+      expect(searchInput).toHaveValue("external-sync");
+    });
   });
 });
