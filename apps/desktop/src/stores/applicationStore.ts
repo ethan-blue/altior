@@ -185,6 +185,7 @@ export interface ApplicationState {
   readonly agents: readonly AgentProfile[];
   readonly selectedAgentId: string;
   readonly isOnboardingOpen: boolean;
+  readonly onboardingNotice: string | null;
   readonly onboardingStatus: {
     readonly isTesting: boolean;
     readonly testResult: TestAgentResult | null;
@@ -241,7 +242,7 @@ export interface ApplicationStore {
 
   // Agent Operations
   selectAgent(agentId: string): void;
-  openOnboarding(open: boolean): void;
+  openOnboarding(open: boolean, notice?: string | null): void;
   onboardAgent(params: OnboardAgentParams): Promise<AgentProfile>;
   testAgent(params: TestAgentParams): Promise<TestAgentResult>;
 
@@ -550,6 +551,7 @@ export function createApplicationStore(
     agents: [],
     selectedAgentId: "",
     isOnboardingOpen: false,
+    onboardingNotice: null,
     onboardingStatus: {
       isTesting: false,
       testResult: null,
@@ -607,19 +609,10 @@ export function createApplicationStore(
   ): void => {
     const threadStore = getTimelineStore(threadId);
 
-    // If turns are in the snapshot and threadStore is currently empty, populate it
-    if (threadStore.rowCount() === 0 && snapshot.turns && snapshot.turns.length > 0) {
-      for (const turn of snapshot.turns) {
-        threadStore.appendRow({
-          id: turn.id,
-          kind: "assistant-message",
-          text: `Turn ${turn.id}`,
-          status: null,
-          permission: null,
-          streaming: turn.state === "active",
-        });
-      }
-    }
+    // Snapshot `turns` carry turn-level metadata only — rendering them as
+    // message rows is exactly review F07 ("Turn trn_…" placeholders). Real
+    // content arrives via get_history journal entries (ADR 0020), which
+    // openThread always requests after this call.
 
     if (snapshot.pending_permissions && snapshot.pending_permissions.length > 0) {
       for (const perm of snapshot.pending_permissions) {
@@ -1022,14 +1015,15 @@ export function createApplicationStore(
     };
 
     try {
+      // Journal order is authoritative (ADR 0020): load history entries
+      // first, then layer the snapshot on top — its pending-permission rows
+      // no-op when history already projected the same event, so rows keep
+      // journal order instead of permissions jumping to the top.
+      await getHistory(threadId);
       const res = await transport.command<SnapshotEnvelope>(envelope);
       if (isSnapshotEnvelope(res) && res.data) {
         const snap = res.data as ThreadSnapshotDto;
         applyThreadSnapshot(snap, threadId);
-      }
-      const threadStore = getTimelineStore(threadId);
-      if (threadStore.rowCount() === 0) {
-        await getHistory(threadId);
       }
     } catch {
       // Retain existing timeline store
@@ -1694,10 +1688,11 @@ export function createApplicationStore(
     updateState((prev) => ({ ...prev, selectedAgentId: agentId }));
   };
 
-  const openOnboarding = (open: boolean): void => {
+  const openOnboarding = (open: boolean, notice?: string | null): void => {
     updateState((prev) => ({
       ...prev,
       isOnboardingOpen: open,
+      onboardingNotice: open ? (notice ?? null) : null,
       onboardingStatus: { isTesting: false, testResult: null, bindingId: undefined },
     }));
   };
@@ -1778,6 +1773,7 @@ export function createApplicationStore(
       agents: [...prev.agents, newAgent],
       selectedAgentId: newAgent.id,
       isOnboardingOpen: false,
+      onboardingNotice: null,
       onboardingStatus: { isTesting: false, testResult: null, bindingId: undefined },
     }));
 
@@ -1960,6 +1956,11 @@ export function createApplicationStore(
     if (!targetAgentId) {
       // The create_thread contract requires an agent profile; refuse before
       // dispatching instead of inventing one (A01).
+      updateState((prev) => ({
+        ...prev,
+        isOnboardingOpen: true,
+        onboardingNotice: "agent_required",
+      }));
       throw new Error("Cannot create a thread without an agent profile");
     }
     const selectedAgent =

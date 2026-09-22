@@ -112,28 +112,47 @@ export function ActivityRail({ active, onNavigate }: ActivityRailProps) {
     { id: "devices", label: t.rail.devices, arrives: "P3" },
     { id: "settings", label: t.rail.settings, arrives: null },
   ];
+
+  const topItems = destinations.slice(0, 5);
+  const bottomItems = destinations.slice(5);
+
+  const renderItem = ({
+    id,
+    label,
+    arrives,
+  }: {
+    id: string;
+    label: string;
+    arrives: string | null;
+  }) => {
+    const enabled = arrives == null;
+    return (
+      <button
+        key={id}
+        type="button"
+        className={`${shell.railItem} ${active === id ? shell.railActive : ""}`}
+        aria-current={active === id ? "page" : undefined}
+        aria-disabled={!enabled}
+        aria-label={label}
+        disabled={!enabled}
+        onClick={() => enabled && onNavigate?.(id)}
+        title={enabled ? label : `${label} — ${t.rail.arrivesWith(arrives!)}`}
+        data-testid={`rail-${id}`}
+      >
+        <RailIcon id={id} />
+        <span className={shell.railLabel}>{label}</span>
+      </button>
+    );
+  };
+
   return (
-    <nav className={shell.rail} aria-label="Activity">
-      {destinations.map(({ id, label, arrives }) => {
-        const enabled = arrives == null;
-        return (
-          <button
-            key={id}
-            type="button"
-            className={`${shell.railItem} ${active === id ? shell.railActive : ""}`}
-            aria-current={active === id ? "page" : undefined}
-            aria-disabled={!enabled}
-            aria-label={label}
-            disabled={!enabled}
-            onClick={() => enabled && onNavigate?.(id)}
-            title={enabled ? label : `${label} — ${t.rail.arrivesWith(arrives!)}`}
-            data-testid={`rail-${id}`}
-          >
-            <RailIcon id={id} />
-            <span className={shell.railLabel}>{label}</span>
-          </button>
-        );
-      })}
+    <nav className={shell.rail} aria-label={t.rail.activityAria}>
+      <div className={shell.railGroup}>
+        {topItems.map(renderItem)}
+      </div>
+      <div className={shell.railBottomGroup}>
+        {bottomItems.map(renderItem)}
+      </div>
     </nav>
   );
 }
@@ -224,19 +243,34 @@ export function ThreadsPane({
   const recent = threads.filter((thread) => !thread.pinned);
 
   return (
-    <section className={shell.threadsPane} aria-label="Threads">
+    <section className={shell.threadsPane} aria-label={t.nav.paneAria}>
       <div className={shell.threadsHeader}>
-        <input
-          type="search"
-          className={shell.search}
-          placeholder={t.nav.filterPlaceholder}
-          value={localFilter}
-          onChange={handleInputChange}
-          onCompositionStart={handleCompositionStart}
-          onCompositionEnd={handleCompositionEnd}
-          aria-label={t.nav.filterPlaceholder}
-          data-testid="thread-filter"
-        />
+        <div className={shell.searchWrapper}>
+          <svg
+            className={shell.searchIcon}
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden="true"
+          >
+            <circle cx="11" cy="11" r="8" />
+            <line x1="21" y1="21" x2="16.65" y2="16.65" />
+          </svg>
+          <input
+            type="search"
+            className={shell.search}
+            placeholder={t.nav.filterPlaceholder}
+            value={localFilter}
+            onChange={handleInputChange}
+            onCompositionStart={handleCompositionStart}
+            onCompositionEnd={handleCompositionEnd}
+            aria-label={t.nav.filterPlaceholder}
+            data-testid="thread-filter"
+          />
+        </div>
         {onCreateThread ? (
           <button
             type="button"
@@ -271,11 +305,11 @@ export function ThreadsPane({
       {hasMoreThreads && onLoadMore ? (
         <button
           type="button"
-          className={shell.newThreadBtn}
+          className={shell.loadMoreBtn}
           onClick={onLoadMore}
           data-testid="load-more-threads"
         >
-          Load more
+          {t.nav.loadMore}
         </button>
       ) : null}
     </section>
@@ -296,24 +330,26 @@ function ThreadSection({
   return (
     <section className={shell.threadSection} aria-label={title}>
       <h2 className={shell.sectionTitle}>{title}</h2>
-      {threads.map((thread) => (
-        <button
-          key={thread.id}
-          type="button"
-          className={`${shell.threadRow} ${
-            thread.id === selectedThreadId ? shell.threadSelected : ""
-          }`}
-          aria-current={thread.id === selectedThreadId ? "true" : undefined}
-          onClick={() => onSelect(thread.id)}
-          data-testid={`thread-${thread.id}`}
-        >
-          <span aria-hidden="true" data-status={thread.status} className={shell.statusGlyph}>
-            {statusGlyph[thread.status]}
-          </span>
-          <span className={shell.threadTitle}>{thread.title}</span>
-          <span className={shell.threadStatus}>{statusLabel[thread.status]}</span>
-        </button>
-      ))}
+      <div className={shell.threadList}>
+        {threads.map((thread) => (
+          <button
+            key={thread.id}
+            type="button"
+            className={`${shell.threadRow} ${
+              thread.id === selectedThreadId ? shell.threadSelected : ""
+            }`}
+            aria-current={thread.id === selectedThreadId ? "true" : undefined}
+            onClick={() => onSelect(thread.id)}
+            data-testid={`thread-${thread.id}`}
+          >
+            <span aria-hidden="true" data-status={thread.status} className={shell.statusGlyph}>
+              {statusGlyph[thread.status]}
+            </span>
+            <span className={shell.threadTitle}>{thread.title}</span>
+            <span className={shell.threadStatus}>{statusLabel[thread.status]}</span>
+          </button>
+        ))}
+      </div>
     </section>
   );
 }
@@ -350,42 +386,44 @@ export function ThreadHeader({
   const { t } = useI18n();
   return (
     <header className={shell.threadHeader}>
-      <h1 className={shell.threadTitleMain}>{title}</h1>
+      <div className={shell.headerTitleGroup}>
+        <h1 className={shell.threadTitleMain}>{title}</h1>
 
-      {agents && onSelectAgent ? (
-        <div style={{ display: "flex", gap: "var(--spacing-8)", alignItems: "center" }}>
-          <select
-            className={shell.agentSelect}
-            value={
-              selectedAgentId ??
-              agents.find((a) => a.name === agent || a.id === agent)?.id ??
-              agents[0]?.id
-            }
-            onChange={(e) => onSelectAgent(e.target.value)}
-            aria-label={t.workbench.selectAgent}
-            data-testid="agent-selector"
-          >
-            {agents.map((a) => (
-              <option key={a.id} value={a.id}>
-                {a.name} ({a.model})
-              </option>
-            ))}
-          </select>
-          {onAddAgent ? (
-            <button
-              type="button"
-              className={shell.reconnectBtn}
-              onClick={onAddAgent}
-              data-testid="add-agent-btn"
-              title="Add agent"
+        {agents && onSelectAgent ? (
+          <div className={shell.agentSelectorWrapper}>
+            <select
+              className={shell.agentSelect}
+              value={
+                selectedAgentId ??
+                agents.find((a) => a.name === agent || a.id === agent)?.id ??
+                agents[0]?.id
+              }
+              onChange={(e) => onSelectAgent(e.target.value)}
+              aria-label={t.workbench.selectAgent}
+              data-testid="agent-selector"
             >
-              {t.workbench.addAgent}
-            </button>
-          ) : null}
-        </div>
-      ) : (
-        <span className={shell.threadAgent}>{agent}</span>
-      )}
+              {agents.map((a) => (
+                <option key={a.id} value={a.id}>
+                  {a.name} ({a.model})
+                </option>
+              ))}
+            </select>
+            {onAddAgent ? (
+              <button
+                type="button"
+                className={shell.reconnectBtn}
+                onClick={onAddAgent}
+                data-testid="add-agent-btn"
+                title={t.workbench.addAgent}
+              >
+                {t.workbench.addAgent}
+              </button>
+            ) : null}
+          </div>
+        ) : (
+          <span className={shell.threadAgent}>{agent}</span>
+        )}
+      </div>
 
       <div className={shell.headerControls}>
         {isStreaming && onCancel ? (
@@ -395,7 +433,7 @@ export function ThreadHeader({
             className={shell.cancelBtn}
             data-testid="header-cancel-turn"
           >
-            Cancel turn
+            {t.workbench.cancelTurn}
           </button>
         ) : null}
         <button type="button" onClick={onToggleTheme} data-testid="theme-toggle">
@@ -432,55 +470,119 @@ export function Composer({
 }: ComposerProps) {
   const { t } = useI18n();
   const [isComposing, setIsComposing] = useState(false);
+  const [isFocused, setIsFocused] = useState(false);
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+
+  const handleCardClick = (e: React.MouseEvent) => {
+    if ((e.target as HTMLElement).closest("button, select, a")) return;
+    textareaRef.current?.focus();
+  };
 
   return (
     <div className={shell.composer}>
-      <textarea
-        className={shell.composerInput}
-        placeholder={disabledReason ?? t.composer.placeholder}
-        value={draft}
-        disabled={disabledReason != null}
-        onChange={(event) => onDraftChange(event.target.value)}
-        onCompositionStart={() => setIsComposing(true)}
-        onCompositionEnd={() => setIsComposing(false)}
-        onKeyDown={(event) => {
-          // Chinese IME / composition protection (A09 / F16):
-          // Never send on Enter when confirming IME candidates (isComposing or Windows keyCode 229)
-          if (
-            isComposing ||
-            event.nativeEvent.isComposing ||
-            event.keyCode === 229
-          ) {
-            return;
-          }
-          if (event.key === "Enter" && !event.shiftKey) {
-            event.preventDefault();
-            if (disabledReason == null) onSend();
-          }
-        }}
-        aria-label="Composer"
-        data-testid="composer"
-      />
-      {isStreaming && onCancel ? (
-        <button
-          type="button"
-          className={shell.cancelBtn}
-          onClick={onCancel}
-          disabled={cancelPending}
-          data-testid="cancel-turn"
-        >
-          {cancelPending ? t.composer.requestingStop : t.composer.stop}
-        </button>
-      ) : null}
-      <button
-        type="button"
-        className={shell.send}
-        onClick={onSend}
-        disabled={disabledReason != null || draft.trim().length === 0}
-        data-testid="send"
+      <div
+        className={`${shell.composerCard} ${isFocused ? shell.composerCardFocused : ""} ${
+          disabledReason != null ? shell.composerCardDisabled : ""
+        }`}
+        onClick={handleCardClick}
       >
-        {t.composer.send}
-      </button>
+        <textarea
+          ref={textareaRef}
+          className={shell.composerInput}
+          placeholder={disabledReason ?? t.composer.placeholder}
+          value={draft}
+          disabled={disabledReason != null}
+          onFocus={() => setIsFocused(true)}
+          onBlur={() => setIsFocused(false)}
+          onChange={(event) => onDraftChange(event.target.value)}
+          onCompositionStart={() => setIsComposing(true)}
+          onCompositionEnd={() => setIsComposing(false)}
+          onKeyDown={(event) => {
+            // Chinese IME / composition protection (A09 / F16):
+            // Never send on Enter when confirming IME candidates (isComposing or Windows keyCode 229)
+            if (
+              isComposing ||
+              event.nativeEvent.isComposing ||
+              event.keyCode === 229
+            ) {
+              return;
+            }
+            if (event.key === "Enter" && !event.shiftKey) {
+              event.preventDefault();
+              if (disabledReason == null) onSend();
+            }
+          }}
+          aria-label={t.composer.ariaLabel}
+          data-testid="composer"
+          rows={2}
+        />
+
+        <div className={shell.composerToolbar}>
+          <div className={shell.composerToolsLeft}>
+            <span className={shell.composerChip}>
+              <svg
+                width="12"
+                height="12"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+              >
+                <circle cx="12" cy="12" r="10" />
+                <polygon points="12 8 8 12 12 16 12 8" />
+              </svg>
+              <span>{t.composer.smartTools}</span>
+            </span>
+
+            <div className={shell.composerShortcuts}>
+              <kbd className={shell.composerKbd}>{t.composer.shortcutHintSend}</kbd>
+              <span className={shell.composerKbdDivider}>•</span>
+              <kbd className={shell.composerKbd}>{t.composer.shortcutHintNewline}</kbd>
+            </div>
+          </div>
+
+          <div className={shell.composerToolsRight}>
+            {isStreaming && onCancel ? (
+              <button
+                type="button"
+                className={shell.cancelBtn}
+                onClick={onCancel}
+                disabled={cancelPending}
+                data-testid="cancel-turn"
+              >
+                <span className={shell.cancelIndicator} aria-hidden="true">■</span>
+                {cancelPending ? t.composer.requestingStop : t.composer.stop}
+              </button>
+            ) : null}
+            <button
+              type="button"
+              className={shell.send}
+              onClick={onSend}
+              disabled={disabledReason != null || draft.trim().length === 0}
+              data-testid="send"
+            >
+              <span>{t.composer.send}</span>
+              <svg
+                width="13"
+                height="13"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+              >
+                <line x1="22" y1="2" x2="11" y2="13" />
+                <polygon points="22 2 15 22 11 13 2 9 22 2" />
+              </svg>
+            </button>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
@@ -624,12 +726,12 @@ export function Inspector({
   );
 
   return (
-    <aside className={shell.inspector} style={{ width }} aria-label="Inspector">
+    <aside className={shell.inspector} style={{ width }} aria-label={t.inspector.ariaLabel}>
       <div
         className={shell.resizeHandle}
         role="slider"
         tabIndex={0}
-        aria-label="Inspector width"
+        aria-label={t.inspector.widthAria}
         aria-valuemin={INSPECTOR_MIN}
         aria-valuemax={INSPECTOR_MAX}
         aria-valuenow={width}
@@ -650,7 +752,7 @@ export function Inspector({
       />
       <div className={shell.inspectorBody}>
         <div className={shell.inspectorHeader}>
-          <div className={shell.inspectorTabs} role="tablist" aria-label="Inspector Views">
+          <div className={shell.inspectorTabs} role="tablist" aria-label={t.inspector.viewsAria}>
             <button
               type="button"
               role="tab"
@@ -834,13 +936,14 @@ export function NavResizeHandle({
   readonly width: number;
   readonly onWidthChange: (width: number) => void;
 }) {
+  const { t } = useI18n();
   const dragState = useRef<{ startX: number; startWidth: number } | null>(null);
   return (
     <div
       className={shell.navResize}
       role="slider"
       tabIndex={0}
-      aria-label="Threads pane width"
+      aria-label={t.nav.widthAria}
       aria-valuemin={NAV_MIN}
       aria-valuemax={NAV_MAX}
       aria-valuenow={width}
@@ -876,19 +979,73 @@ export function StatusBar({
   threadStatus,
   streamState,
   onReconnect,
+  ipcVersion,
 }: {
   readonly coreState: string;
   readonly threadStatus: string;
   readonly streamState?: string;
   readonly onReconnect?: () => void;
+  readonly ipcVersion?: number | string;
 }) {
   const { t } = useI18n();
-  const isDisconnected = coreState.includes("disconnected") || coreState.includes("unavailable");
+  const isDisconnected = coreState === "disconnected" || coreState === "unavailable";
+
+  const coreDetail = (() => {
+    if (ipcVersion !== undefined && ipcVersion !== null && coreState === "connected") {
+      return t.statusBar.coreConnected(ipcVersion);
+    }
+    switch (coreState) {
+      case "connected":
+        return t.statusBar.coreConnected("?");
+      case "disconnected":
+        return t.statusBar.coreDisconnected;
+      case "connecting":
+        return t.statusBar.coreConnecting;
+      case "reconnecting":
+        return t.statusBar.coreReconnecting;
+      case "unavailable":
+        return t.statusBar.coreUnavailable;
+      default:
+        return coreState;
+    }
+  })();
+
+  const threadDetail = (() => {
+    switch (threadStatus) {
+      case "completed":
+        return t.statusBar.threadCompleted;
+      case "running":
+        return t.statusBar.threadRunning;
+      case "failed":
+        return t.statusBar.threadFailed;
+      case "waiting-for-permission":
+        return t.statusBar.threadWaitingPermission;
+      default:
+        return "Thread · " + threadStatus;
+    }
+  })();
+
+  const streamDetail = (() => {
+    if (!streamState) return null;
+    switch (streamState) {
+      case "live":
+        return t.statusBar.streamLive;
+      case "interrupted":
+        return t.statusBar.streamInterrupted;
+      case "replaying":
+        return t.statusBar.streamReplaying;
+      case "ready":
+        return t.statusBar.streamReady;
+      default:
+        return "Stream · " + streamState;
+    }
+  })();
+
   return (
     <footer className={shell.statusBar} data-testid="status-bar">
-      <span>Core · {coreState}</span>
-      <span>Thread · {threadStatus}</span>
-      {streamState ? <span>Stream · {streamState}</span> : null}
+      <span>{t.statusBar.coreLine(coreDetail)}</span>
+      <span>{threadDetail}</span>
+      {streamDetail ? <span>{streamDetail}</span> : null}
       <span>{t.statusBar.localNoSync}</span>
       {isDisconnected && onReconnect ? (
         <button
@@ -897,7 +1054,7 @@ export function StatusBar({
           className={shell.reconnectBtn}
           data-testid="reconnect-button"
         >
-          Reconnect
+          {t.statusBar.reconnect}
         </button>
       ) : null}
     </footer>
@@ -932,6 +1089,7 @@ export interface AgentOnboardingModalProps {
   }) => Promise<TestAgentResult>;
   readonly isTesting: boolean;
   readonly testResult: TestAgentResult | null;
+  readonly notice?: React.ReactNode;
 }
 
 /** Minimal Agent Onboarding modal with opaque secret reference handling. */
@@ -942,6 +1100,7 @@ export function AgentOnboardingModal({
   onTest,
   isTesting,
   testResult,
+  notice,
 }: AgentOnboardingModalProps) {
   const { t } = useI18n();
   const [name, setName] = useState("");
@@ -1099,79 +1258,89 @@ export function AgentOnboardingModal({
           <button
             type="button"
             onClick={onClose}
-            aria-label="Close onboarding modal"
-            title="Close"
+            aria-label={t.onboarding.closeAria}
+            title={t.common.close}
             data-testid="onboarding-close"
           >
             ×
           </button>
         </div>
 
+        {notice ? (
+          <div
+            className={shell.modalNotice}
+            role="status"
+            data-testid="onboarding-notice"
+          >
+            ⚠️ {notice}
+          </div>
+        ) : null}
+
         <form onSubmit={handleSubmit}>
           <div className={shell.formGrid}>
-            <label htmlFor="agent-name">Name</label>
+            <label htmlFor="agent-name">{t.onboarding.nameLabel}</label>
             <input
               id="agent-name"
               className={shell.formInput}
               value={name}
               onChange={(e) => setName(e.target.value)}
-              placeholder="e.g. Gamma Agent"
+              placeholder={t.onboarding.namePlaceholder}
               required
               data-testid="agent-name-input"
             />
 
-            <label htmlFor="agent-provider">Provider</label>
+            <label htmlFor="agent-provider">{t.onboarding.providerLabel}</label>
             <div>
               <input
                 id="agent-provider"
                 className={shell.formInput}
                 value={provider}
                 onChange={(e) => setProvider(e.target.value)}
-                placeholder="acp"
+                placeholder={t.onboarding.providerPlaceholder}
                 required
                 data-testid="agent-provider-input"
               />
-              <span style={{ fontSize: "0.75rem", color: "var(--color-fg-muted)", display: "block", marginTop: "2px" }}>
+              <span style={{ fontSize: "0.75rem", color: "var(--color-muted)", display: "block", marginTop: "2px" }}>
                 {t.agents.acpHarnessNote}
               </span>
             </div>
 
-            <label htmlFor="agent-model">Model</label>
+            <label htmlFor="agent-model">{t.onboarding.modelLabel}</label>
             <div>
               <input
                 id="agent-model"
                 className={shell.formInput}
                 value={model}
                 onChange={(e) => setModel(e.target.value)}
-                placeholder="optional (agent-managed)"
+                placeholder={t.onboarding.modelPlaceholder}
                 data-testid="agent-model-input"
               />
-              <span style={{ fontSize: "0.75rem", color: "var(--color-fg-muted)", display: "block", marginTop: "2px" }}>
+              <span style={{ fontSize: "0.75rem", color: "var(--color-muted)", display: "block", marginTop: "2px" }}>
                 {t.agents.modelOptionalNote}
               </span>
             </div>
 
-            <label htmlFor="agent-program">Program</label>
+            <label htmlFor="agent-program">{t.onboarding.programPathLabel}</label>
             <input
               id="agent-program"
               className={shell.formInput}
               value={program}
               onChange={(e) => setProgram(e.target.value)}
-              placeholder="/usr/local/bin/acp-agent or acp-agent.exe"
+              placeholder={t.onboarding.programPathPlaceholder}
               data-testid="agent-program-input"
             />
 
-            <label htmlFor="agent-args">Args</label>
+            <label htmlFor="agent-args">{t.onboarding.argsLabel}</label>
             <input
               id="agent-args"
               className={shell.formInput}
               value={args}
               onChange={(e) => setArgs(e.target.value)}
-              placeholder='--mode server --config "C:\path with spaces\config.json"'
+              placeholder={t.onboarding.argsPlaceholder}
               data-testid="agent-args-input"
             />
 
-            <label htmlFor="agent-env-keys">Env Keys & Secret Refs</label>
+            <label htmlFor="agent-env-keys">{t.onboarding.envSecretsLabel}</label>
             <div>
               <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
                 <input
@@ -1179,7 +1348,7 @@ export function AgentOnboardingModal({
                   className={shell.formInput}
                   value={envKeys}
                   onChange={(e) => setEnvKeys(e.target.value)}
-                  placeholder="e.g. ANTHROPIC_API_KEY (leave blank if no auth)"
+                  placeholder={t.onboarding.envKeysPlaceholder}
                   data-testid="agent-env-keys-input"
                   style={{ flex: 1 }}
                 />
@@ -1188,7 +1357,7 @@ export function AgentOnboardingModal({
                   className={shell.formInput}
                   value={secretRef}
                   onChange={(e) => setSecretRef(e.target.value)}
-                  placeholder="sec_... or vault://..."
+                  placeholder={t.onboarding.secretPointerPlaceholder}
                   data-testid="agent-secret-ref"
                   style={{ flex: 1 }}
                 />
@@ -1198,7 +1367,7 @@ export function AgentOnboardingModal({
                   data-testid="add-env-mapping-btn"
                   style={{ padding: "0 var(--spacing-8)", height: "var(--control-height)", cursor: "pointer" }}
                 >
-                  + Add
+                  {t.onboarding.addMapping}
                 </button>
               </div>
 
@@ -1211,7 +1380,7 @@ export function AgentOnboardingModal({
                       const v = e.target.value;
                       setExtraMappings((prev) => prev.map((r) => r.id === row.id ? { ...r, envKey: v } : r));
                     }}
-                    placeholder="Variable Key"
+                    placeholder={t.onboarding.variableKeyPlaceholder}
                     data-testid={`env-key-input-${idx}`}
                     style={{ flex: 1 }}
                   />
@@ -1222,7 +1391,7 @@ export function AgentOnboardingModal({
                       const v = e.target.value;
                       setExtraMappings((prev) => prev.map((r) => r.id === row.id ? { ...r, secretRef: v } : r));
                     }}
-                    placeholder="Secret Ref (sec_..., vault://...)"
+                    placeholder={t.onboarding.secretRefPlaceholder}
                     data-testid={`secret-ref-input-${idx}`}
                     style={{ flex: 1 }}
                   />
@@ -1231,7 +1400,8 @@ export function AgentOnboardingModal({
                     onClick={() => setExtraMappings((prev) => prev.filter((r) => r.id !== row.id))}
                     data-testid={`remove-mapping-btn-${idx}`}
                     style={{ background: "transparent", border: "none", color: "var(--color-danger, #b3362b)", cursor: "pointer", fontSize: "1.2rem", padding: "0 4px" }}
-                    title="Remove mapping"
+                    title={t.onboarding.removeMappingAria}
+                    aria-label={t.onboarding.removeMappingAria}
                   >
                     ×
                   </button>
@@ -1239,18 +1409,18 @@ export function AgentOnboardingModal({
               ))}
             </div>
 
-            <label htmlFor="agent-label">Label</label>
+            <label htmlFor="agent-label">{t.onboarding.labelLabel}</label>
             <input
               id="agent-label"
               className={shell.formInput}
               value={label}
               onChange={(e) => setLabel(e.target.value)}
-              placeholder="Primary ACP Binding"
+              placeholder={t.onboarding.primaryBindingPlaceholder}
               data-testid="agent-label-input"
             />
 
             <p className={shell.secretNotice}>
-              🔒 Credentials must reside in the OS secret store; enter only the opaque reference pointer (sec_..., vault://..., env:...). Plaintext API keys are rejected.
+              🔒 {t.onboarding.secretNotice}
             </p>
             <p style={{ fontSize: "0.75rem", color: "var(--color-muted)", marginTop: "4px" }} data-testid="agent-deferred-notice">
               ℹ️ {t.agents.deferredNotice}
@@ -1262,17 +1432,17 @@ export function AgentOnboardingModal({
               testResult.success ? (
                 <div>
                   <span className={shell.testResultOk}>
-                    ✓ Connection verified ({testResult.latencyMs}ms)
+                    ✓ {t.onboarding.verifiedWithLatency(testResult.latencyMs ?? 0)}
                   </span>
                   {testResult.capabilities && Object.keys(testResult.capabilities).length > 0 ? (
-                    <div style={{ fontSize: "0.75rem", color: "var(--color-fg-muted)", marginTop: "4px" }} data-testid="tested-capabilities">
+                    <div style={{ fontSize: "0.75rem", color: "var(--color-muted)", marginTop: "4px" }} data-testid="tested-capabilities">
                       Capabilities: {Object.entries(testResult.capabilities).map(([k, v]) => `${k}: ${v}`).join(", ")}
                     </div>
                   ) : null}
                 </div>
               ) : (
                 <span className={shell.testResultErr}>
-                  × Test failed: {testResult.error}
+                  × {t.onboarding.testFailed(testResult.error ?? "")}
                 </span>
               )
             ) : null}

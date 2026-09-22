@@ -652,7 +652,10 @@ export class InMemoryTransport implements CoreTransport {
             ended_at: BigInt(1700000000000 + idx * 1000 + 500),
           }));
 
-        // Project journal entries (ADR 0020, review A05)
+        // Project journal entries (ADR 0020, review A05). The fixture row id
+        // IS that row's journal identity in the fixture world, so projected
+        // entries keep it: user/unknown rows carry it as event_id, assistant
+        // deltas carry it as turn_id (the reducer keys delta rows by turn).
         const allEntries: HistoryEntryDto[] = rows.map((r, idx) => {
           const seq = idx + 1;
           const occurred_at = 1700000000000 + idx * 1000;
@@ -663,7 +666,7 @@ export class InMemoryTransport implements CoreTransport {
           if (r.kind === "user-message") {
             return {
               entry_kind: "user_message",
-              event_id: `evt_user${String(seq).padStart(12, "0")}`,
+              event_id: r.id,
               turn_id,
               seq,
               text: r.text,
@@ -682,10 +685,10 @@ export class InMemoryTransport implements CoreTransport {
               occurred_at,
             };
           }
-          if (r.kind === "unknown") {
+          if (r.kind === "unknown" || r.kind === "error") {
             return {
               entry_kind: "unknown",
-              event_id: `evt_unkn${String(seq).padStart(12, "0")}`,
+              event_id: r.id,
               seq,
               kind: r.text.split(":")[0]?.trim() || "unknown.fact",
               diagnostic: r.text,
@@ -695,7 +698,7 @@ export class InMemoryTransport implements CoreTransport {
           return {
             entry_kind: "assistant_delta",
             event_id: `evt_asst${String(seq).padStart(12, "0")}`,
-            turn_id,
+            turn_id: r.id,
             seq,
             text: r.text,
             occurred_at,

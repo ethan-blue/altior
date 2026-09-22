@@ -2,42 +2,258 @@
 
 .shell {
   display: grid;
-  grid-template-rows: auto 1fr auto;
-  grid-template-columns: auto auto 1fr auto;
+  grid-template-rows: 40px 1fr auto;
+  grid-template-columns: 48px auto 1fr auto;
   grid-template-areas:
     "header header header header"
     "rail   nav    main   inspector"
     "footer footer footer footer";
   height: 100vh;
+  width: 100vw;
   background: var(--color-canvas);
   color: var(--color-text);
   font-family: var(--font-ui);
   overflow: hidden;
+  user-select: none;
 }
 
+/* Commercial Titlebar / Global Header */
 .titleBar {
   grid-area: header;
   display: flex;
   align-items: center;
-  gap: var(--spacing-12);
-  padding: var(--spacing-4) var(--spacing-12);
+  justify-content: space-between;
+  gap: var(--spacing-16);
+  padding: 0 var(--spacing-12);
   border-bottom: var(--divider-width) solid var(--color-border);
-  background: var(--color-surface);
+  background: var(--color-header-bg, var(--color-surface));
   font-size: var(--font-size-ui);
+  z-index: var(--z-menu, 20);
+  box-shadow: var(--shadow-xs);
+  min-width: 0;
 }
 
+.headerLeft {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-12);
+  flex-shrink: 0;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-8);
+  color: var(--color-text);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  text-decoration: none;
+}
+
+.brandLogo {
+  width: 20px;
+  height: 20px;
+  color: var(--color-accent);
+  flex-shrink: 0;
+}
+
+.brandName {
+  font-weight: 700;
+  font-size: 14px;
+  color: var(--color-text);
+}
+
+.brandBadge {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 1px var(--spacing-6);
+  border-radius: var(--radius-sm);
+  background: var(--color-badge-bg);
+  color: var(--color-badge-text);
+  border: 1px solid var(--color-border-subtle);
+}
+
+.vaultSwitcher {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--spacing-6);
+  padding: 2px var(--spacing-8);
+  height: 24px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--color-border);
+  background: var(--color-surface);
+  color: var(--color-muted);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: var(--transition-fast);
+}
+
+.vaultSwitcher:hover {
+  background: var(--color-surface-hover);
+  color: var(--color-text);
+  border-color: var(--color-control-border);
+}
+
+.vaultSwitcher:disabled,
+.vaultSwitcher[aria-disabled="true"] {
+  cursor: not-allowed;
+  opacity: 0.65;
+}
+
+.vaultSwitcher:disabled:hover,
+.vaultSwitcher[aria-disabled="true"]:hover {
+  background: var(--color-surface);
+  color: var(--color-muted);
+  border-color: var(--color-border);
+}
+
+.vaultIcon {
+  width: 14px;
+  height: 14px;
+  color: var(--color-muted);
+}
+
+.chevronIcon {
+  width: 12px;
+  height: 12px;
+  opacity: 0.6;
+}
+
+/* Center Global Search / Command Bar Appearance */
+.headerCenter {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 1;
+  max-width: 480px;
+  min-width: 0;
+}
+
+.globalSearch {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-8);
+  width: 100%;
+  height: 26px;
+  padding: 0 var(--spacing-12);
+  border-radius: var(--radius-full, 9999px);
+  border: 1px solid var(--color-border);
+  background: var(--color-surface-subtle, var(--color-canvas));
+  color: var(--color-text);
+  transition: var(--transition-fast);
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.03);
+}
+
+.globalSearch:focus-within {
+  border-color: var(--color-focus);
+  background: var(--color-surface);
+  outline: 1px solid var(--color-focus);
+  box-shadow: 0 0 0 3px rgba(47, 95, 215, 0.12);
+}
+
+.globalSearchIcon {
+  width: 14px;
+  height: 14px;
+  color: var(--color-muted);
+  flex-shrink: 0;
+}
+
+.globalSearchInput {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  background: transparent;
+  color: var(--color-text);
+  font: var(--font-size-ui) / var(--line-height-compact) var(--font-ui);
+  outline: none;
+  padding: 0;
+}
+
+.globalSearchInput::placeholder {
+  color: var(--color-muted);
+  opacity: 0.8;
+}
+
+.shortcutBadge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1px var(--spacing-6);
+  border-radius: var(--radius-xs);
+  border: 1px solid var(--color-border);
+  background: var(--color-surface);
+  color: var(--color-muted);
+  font-family: var(--font-ui);
+  font-size: 11px;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+/* Header Right info */
+.headerRight {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-12);
+  flex-shrink: 0;
+}
+
+.statusPill {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--spacing-6);
+  padding: 2px var(--spacing-8);
+  border-radius: var(--radius-full);
+  border: 1px solid var(--color-border-subtle, var(--color-border));
+  background: var(--color-surface);
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--color-muted);
+}
+
+.statusDot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--color-status-online);
+}
+
+.statusDot[data-status="connecting"] {
+  background: var(--color-warning);
+  animation: pulse 1.5s infinite;
+}
+
+.statusDot[data-status="disconnected"] {
+  background: var(--color-danger);
+}
+
+@keyframes pulse {
+  0% { opacity: 0.4; }
+  50% { opacity: 1; }
+  100% { opacity: 0.4; }
+}
+
+/* Rail Area (Fixed 48px) */
 .railArea {
   grid-area: rail;
+  width: 48px;
   height: 100%;
+  background: var(--color-rail-bg, var(--color-surface));
+  border-right: var(--divider-width) solid var(--color-border);
 }
 
+/* Navigation Pane Area */
 .navArea {
   grid-area: nav;
   display: flex;
   min-width: 0;
   height: 100%;
+  background: var(--color-nav-bg, var(--color-surface));
 }
 
+/* Main Workbench */
 .workbench {
   grid-area: main;
   display: flex;
@@ -45,22 +261,27 @@
   min-width: 0;
   min-height: 0;
   height: 100%;
+  background: var(--color-canvas);
+  position: relative;
 }
 
+/* Inspector */
 .inspectorArea {
   grid-area: inspector;
   display: flex;
   min-width: 0;
   height: 100%;
+  background: var(--color-surface);
 }
 
+/* Status Bar Area */
 .statusBarArea {
   grid-area: footer;
 }
 
 /* Narrow widths (F14): inspector transitions to an overlay drawer */
 .shell[data-narrow="true"] {
-  grid-template-columns: auto auto 1fr;
+  grid-template-columns: 48px auto 1fr;
   grid-template-areas:
     "header header header"
     "rail   nav    main"
@@ -69,11 +290,11 @@
 
 .shell[data-narrow="true"] .inspectorArea aside {
   position: fixed;
-  top: 0;
+  top: 40px;
   right: 0;
-  bottom: 0;
+  bottom: 24px;
   z-index: var(--z-overlay, 100);
-  box-shadow: var(--elevation-menu);
+  box-shadow: var(--elevation-dialog);
 }
 
 .drawerOverlay {
@@ -81,15 +302,20 @@
   inset: 0;
   background: var(--color-overlay);
   z-index: calc(var(--z-overlay) - 1);
+  backdrop-filter: blur(2px);
 }
 
-/* Empty workbench surface: loading / error / empty / select-a-thread states
-   (review A03). Centered, muted text on the workbench background. */
+/* Empty workbench surface: loading / error / empty / select-a-thread states */
 .emptyState {
   margin: auto;
-  padding: 16px;
+  padding: var(--spacing-24);
   color: var(--color-muted);
   font-size: var(--font-size-body, 14px);
   text-align: center;
   max-width: 46ch;
+  line-height: var(--line-height-normal);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
 }

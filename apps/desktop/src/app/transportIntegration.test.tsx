@@ -120,7 +120,7 @@ describe("Transport Integration & UI Workflow", () => {
     render(<App transport={transport} />);
 
     await waitFor(() => {
-      expect(screen.getByTestId("status-bar")).toHaveTextContent("Core · connected");
+      expect(screen.getByTestId("status-bar")).toHaveTextContent(/connected|已连接/);
     });
 
     // Simulate disconnect on the transport
@@ -130,7 +130,7 @@ describe("Transport Integration & UI Workflow", () => {
     if (reconnectBtn) {
       fireEvent.click(reconnectBtn);
       await waitFor(() => {
-        expect(screen.getByTestId("status-bar")).toHaveTextContent("Core · connected");
+        expect(screen.getByTestId("status-bar")).toHaveTextContent(/connected|已连接/);
       });
     }
   });
@@ -144,7 +144,7 @@ describe("Transport Integration & UI Workflow", () => {
     render(<App transport={devFallbackTransport} />);
 
     await waitFor(() => {
-      expect(screen.getByTestId("status-bar")).toHaveTextContent("Core · connected");
+      expect(screen.getByTestId("status-bar")).toHaveTextContent(/connected|已连接/);
     });
     expect(await screen.findByTestId("ipc-version")).toHaveTextContent("IPC v");
   });

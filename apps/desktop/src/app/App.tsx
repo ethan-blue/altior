@@ -49,12 +49,15 @@ export interface AppProps {
   }[];
   /** Test injection for the timeline viewport (jsdom has no layout). */
   readonly timelineViewportHeight?: number;
+  /** Debounce delay for global search filter in ms (defaults to 280ms, within 250~300ms window). Set to 0 in tests for immediate dispatch. */
+  readonly searchDebounceMs?: number;
 }
 
 export function App({
   transport,
   fixtureTimelineRows,
   timelineViewportHeight,
+  searchDebounceMs = 280,
 }: AppProps) {
   const [resolvedTransport] = useState(() => transport ?? createDefaultTransport());
   const [appStore] = useState(() =>
@@ -74,6 +77,84 @@ export function App({
   const [focusedRowId, setFocusedRowId] = useState<string | null>(null);
   const [narrow, setNarrow] = useState(false);
   const rootRef = useRef<HTMLDivElement | null>(null);
+
+  const [searchValue, setSearchValue] = useState(appState.threadFilter);
+  const isComposingRef = useRef(false);
+  const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const searchInputRef = useRef<HTMLInputElement | null>(null);
+
+  // Sync external appState.threadFilter to local input state and avoid cycles
+  useEffect(() => {
+    setSearchValue(appState.threadFilter);
+    if (searchTimerRef.current != null) {
+      clearTimeout(searchTimerRef.current);
+      searchTimerRef.current = null;
+    }
+  }, [appState.threadFilter]);
+
+  // Clean up pending search debounce timer on unmount
+  useEffect(() => {
+    return () => {
+      if (searchTimerRef.current != null) {
+        clearTimeout(searchTimerRef.current);
+      }
+    };
+  }, []);
+
+  // Global Ctrl+K / Meta+K shortcut to focus search input and prevent default
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && (e.key === "k" || e.key === "K")) {
+        e.preventDefault();
+        searchInputRef.current?.focus();
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, []);
+
+  const dispatchSearchDebounced = useCallback(
+    (value: string) => {
+      if (searchTimerRef.current != null) {
+        clearTimeout(searchTimerRef.current);
+        searchTimerRef.current = null;
+      }
+      if (searchDebounceMs <= 0) {
+        void appStore.setThreadFilter(value);
+        return;
+      }
+      searchTimerRef.current = setTimeout(() => {
+        searchTimerRef.current = null;
+        void appStore.setThreadFilter(value);
+      }, searchDebounceMs);
+    },
+    [appStore, searchDebounceMs],
+  );
+
+  const onSearchChange = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      const nextValue = e.target.value;
+      setSearchValue(nextValue);
+      if (!isComposingRef.current) {
+        dispatchSearchDebounced(nextValue);
+      }
+    },
+    [dispatchSearchDebounced],
+  );
+
+  const onSearchCompositionStart = useCallback(() => {
+    isComposingRef.current = true;
+  }, []);
+
+  const onSearchCompositionEnd = useCallback(
+    (e: React.CompositionEvent<HTMLInputElement>) => {
+      isComposingRef.current = false;
+      const nextValue = e.currentTarget.value;
+      setSearchValue(nextValue);
+      dispatchSearchDebounced(nextValue);
+    },
+    [dispatchSearchDebounced],
+  );
 
   // Initialize transport connection on mount.
   // Cleanup releases the renderer's event listener only; it never closes
@@ -191,6 +272,10 @@ export function App({
   );
 
   const onCreateThread = useCallback(async () => {
+    if (appState.agents.length === 0) {
+      appStore.openOnboarding(true, "agent_required");
+      return;
+    }
     const targetAgentId = appState.selectedAgentId || activeAgent?.id;
     try {
       const newThread = await appStore.createThread(
@@ -203,7 +288,7 @@ export function App({
       // composer/list stay usable (A03: no fabricated created thread).
     }
     setFocusedRowId(null);
-  }, [activeAgent?.id, appState.selectedAgentId, appState.threads.length, appStore, uiStore]);
+  }, [activeAgent?.id, appState.agents.length, appState.selectedAgentId, appState.threads.length, appStore, uiStore]);
 
   const onActivityNavigate = useCallback(
     (dest: string) => {
@@ -238,14 +323,110 @@ export function App({
         data-fixture-ready={appState.connectionStatus === "connected" && appState.threads.length > 0}
       >
       <header className={styles.titleBar}>
-        <strong>Altior</strong>
-        <span data-testid="ipc-version">
-          {appState.negotiated
-            ? `IPC v${appState.negotiated.selected_version}`
-            : appState.connectionStatus === "connecting"
-              ? "IPC connecting…"
-              : `IPC (${appState.connectionStatus})`}
-        </span>
+        <div className={styles.headerLeft}>
+          <div className={styles.brand}>
+            <svg
+              className={styles.brandLogo}
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2.5"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden="true"
+            >
+              <polygon points="12 2 2 22 22 22 12 2" />
+              <line x1="12" y1="9" x2="12" y2="15" />
+            </svg>
+            <strong className={styles.brandName}>Altior</strong>
+            <span className={styles.brandBadge}>v0.1</span>
+          </div>
+          <button
+            type="button"
+            className={styles.vaultSwitcher}
+            title={getDictionary(ui.locale).common.personalVault}
+            aria-label={getDictionary(ui.locale).common.personalVault}
+            aria-disabled="true"
+          >
+            <svg
+              className={styles.vaultIcon}
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden="true"
+            >
+              <rect x="3" y="3" width="18" height="18" rx="2" />
+              <circle cx="12" cy="12" r="3" />
+              <path d="M12 15v3" />
+            </svg>
+            <span>{getDictionary(ui.locale).common.personalVault}</span>
+            <svg
+              className={styles.chevronIcon}
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden="true"
+            >
+              <polyline points="6 9 12 15 18 9" />
+            </svg>
+          </button>
+        </div>
+
+        <div className={styles.headerCenter}>
+          <div className={styles.globalSearch}>
+            <svg
+              className={styles.globalSearchIcon}
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden="true"
+            >
+              <circle cx="11" cy="11" r="8" />
+              <line x1="21" y1="21" x2="16.65" y2="16.65" />
+            </svg>
+            <input
+              ref={searchInputRef}
+              type="search"
+              className={styles.globalSearchInput}
+              placeholder={getDictionary(ui.locale).workbench.globalSearchPlaceholder}
+              value={searchValue}
+              onChange={onSearchChange}
+              onCompositionStart={onSearchCompositionStart}
+              onCompositionEnd={onSearchCompositionEnd}
+              aria-label={getDictionary(ui.locale).workbench.globalSearchPlaceholder}
+              data-testid="global-search-input"
+            />
+            <kbd className={styles.shortcutBadge}>
+              {getDictionary(ui.locale).workbench.searchShortcut}
+            </kbd>
+          </div>
+        </div>
+
+        <div className={styles.headerRight}>
+          <div className={styles.statusPill}>
+            <span
+              className={styles.statusDot}
+              data-status={appState.connectionStatus}
+              aria-hidden="true"
+            />
+            <span data-testid="ipc-version">
+              {appState.negotiated
+                ? `IPC v${appState.negotiated.selected_version}`
+                : appState.connectionStatus === "connecting"
+                  ? "IPC connecting…"
+                  : `IPC (${appState.connectionStatus})`}
+            </span>
+          </div>
+        </div>
       </header>
 
       <div className={styles.railArea}>
@@ -393,11 +574,8 @@ export function App({
 
       <div className={styles.statusBarArea}>
         <StatusBar
-          coreState={
-            appState.negotiated
-              ? `connected (IPC v${appState.negotiated.selected_version})`
-              : appState.connectionStatus
-          }
+          coreState={appState.negotiated ? "connected" : appState.connectionStatus}
+          ipcVersion={appState.negotiated?.selected_version}
           threadStatus={currentThread?.status ?? "completed"}
           streamState={appState.streamState !== "idle" ? appState.streamState : undefined}
           onReconnect={() => void appStore.reconnect()}
@@ -416,6 +594,11 @@ export function App({
         }}
         isTesting={appState.onboardingStatus.isTesting}
         testResult={appState.onboardingStatus.testResult}
+        notice={
+          appState.onboardingNotice === "agent_required"
+            ? getDictionary(ui.locale).onboarding.agentRequiredNotice
+            : appState.onboardingNotice
+        }
       />
 
       <SettingsModal

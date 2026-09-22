@@ -1,4 +1,8 @@
-/* Timeline styling: token-driven only (docs/UI_ARCHITECTURE.md). */
+/*
+ * Commercial UI Phase 1: Virtualized card-based conversation stream.
+ * Token-driven only (docs/UI_ARCHITECTURE.md, tokens.css).
+ * Replaces legacy 72px dual-column table with centered, scannable conversation cards.
+ */
 
 .timelineShell {
   position: relative;
@@ -14,58 +18,107 @@
   overflow-y: auto;
   overflow-x: hidden;
   min-height: 0;
+  padding: var(--spacing-8) 0;
 }
 
 .spacer {
   position: relative;
 }
 
+/* Centered scannable stream container */
 .slot {
   position: absolute;
-  left: var(--spacing-12);
-  right: var(--spacing-12);
-  overflow: hidden;
+  left: 0;
+  right: 0;
+  display: flex;
+  justify-content: center;
+  padding: 0 var(--spacing-16);
+  box-sizing: border-box;
 }
 
-/* Rows are compact disclosure sections, not chat bubbles. */
+/* Row wrapper: manages roving tabindex, focus geometry and card spacing */
 .row {
-  display: grid;
-  grid-template-columns: 72px 1fr;
-  gap: var(--spacing-8);
-  align-items: start;
-  padding: var(--spacing-4) var(--spacing-8);
-  border-bottom: var(--divider-width) solid var(--color-border);
-  min-height: 100%;
+  width: 100%;
+  max-width: 768px;
   box-sizing: border-box;
+  padding: var(--spacing-4) 0;
+  cursor: default;
+  outline: none;
+}
+
+/* Core conversational card container */
+.card {
+  width: 100%;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-8);
+  padding: var(--spacing-12) var(--spacing-16);
+  border-radius: var(--border-radius);
+  border: var(--divider-width) solid var(--color-border);
+  background: var(--color-surface);
   font: var(--font-size-body) / var(--line-height-normal) var(--font-body);
   color: var(--color-text);
-  cursor: default;
+  transition: border-color var(--motion-fast) var(--easing-standard),
+              box-shadow var(--motion-fast) var(--easing-standard);
 }
 
-.row.focused {
+/* Row focus state via roving tabindex */
+.row.focused .card {
   outline: var(--focus-ring) solid var(--color-focus);
-  outline-offset: calc(-1 * var(--focus-ring));
-  background: var(--color-selection);
+  outline-offset: 1px;
+  border-color: var(--color-focus);
+}
+
+/* Card Header: sender role identity & meta status */
+.cardHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--spacing-8);
+  min-height: 20px;
+}
+
+.roleBadge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--spacing-6);
+  color: var(--color-muted);
+}
+
+.roleIcon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
 }
 
 .kindLabel {
   font: var(--font-size-ui) / var(--line-height-compact) var(--font-ui);
-  color: var(--color-muted);
+  font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.04em;
-  padding-top: var(--spacing-2);
 }
 
+.headerMeta {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--spacing-6);
+}
+
+/* Card Content Body */
 .body {
   display: flex;
   flex-direction: column;
-  gap: var(--spacing-4);
+  gap: var(--spacing-6);
   min-width: 0;
 }
 
 .text {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+  font: var(--font-size-body) / var(--line-height-normal) var(--font-body);
+  color: var(--color-text);
 }
 
 .caret {
@@ -73,37 +126,366 @@
   margin-left: var(--spacing-2);
 }
 
-.row[data-row-kind="user-message"] .text {
+/* Live streaming status badge */
+.streamingBadge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--spacing-4);
+  font: var(--font-size-code) / var(--line-height-compact) var(--font-ui);
+  color: var(--color-accent);
+}
+
+.streamingDot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--color-accent);
+}
+
+/* --- Visual Hierarchy per Row Kind --- */
+
+/* 1. User message: clear visual anchor with subtle accent edge */
+.row[data-row-kind="user-message"] .card {
+  border-left: calc(var(--divider-width) * 3) solid var(--color-accent);
+  background: var(--color-surface);
+}
+
+.row[data-row-kind="user-message"] .roleBadge {
+  color: var(--color-accent);
+}
+
+/* 2. Assistant message: neutral readable card */
+.row[data-row-kind="assistant-message"] .card {
+  border-left: calc(var(--divider-width) * 3) solid var(--color-control-border);
+  background: var(--color-surface);
+}
+
+.row[data-row-kind="assistant-message"] .roleBadge {
   color: var(--color-text);
 }
 
-.row[data-row-kind="assistant-message"] .text {
-  color: var(--color-text);
+/* 3. Tool execution card: compact, technical presentation */
+.row[data-row-kind="tool"] .card {
+  background: var(--color-surface);
+  border: var(--divider-width) solid var(--color-border);
+  padding: var(--spacing-8) var(--spacing-12);
 }
 
-.row[data-row-kind="tool"] {
+.row[data-row-kind="tool"] .body {
+  font-family: var(--font-code);
+  font-size: var(--font-size-code);
+}
+
+/* 4. Unknown event card: preserved diagnostic container */
+.row[data-row-kind="unknown"] .card {
+  background: var(--color-surface);
+  border: var(--divider-width) dashed var(--color-control-border);
+  padding: var(--spacing-8) var(--spacing-12);
+}
+
+.unknownTag {
+  font: var(--font-size-code) / var(--line-height-compact) var(--font-code);
+  color: var(--color-muted);
+  padding: var(--spacing-2) var(--spacing-6);
+  background: var(--color-hover);
+  border-radius: var(--border-radius);
+}
+
+.unknownBody {
   font-family: var(--font-code);
   font-size: var(--font-size-code);
   color: var(--color-muted);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
-.row[data-row-kind="error"] {
-  border-left: var(--divider-width) solid var(--color-danger);
-  padding-left: var(--spacing-8);
+/* 5. Error card: prominent risk and failure visibility */
+.row[data-row-kind="error"] .card {
+  background: var(--color-danger-surface);
+  border: var(--divider-width) solid var(--color-danger);
+  border-left: calc(var(--divider-width) * 3) solid var(--color-danger);
 }
 
-.row[data-row-kind="error"] .text {
+.row[data-row-kind="error"] .roleBadge {
   color: var(--color-danger);
 }
 
-.row[data-row-kind="unknown"] {
+.errorTag {
+  font: var(--font-size-ui) / var(--line-height-compact) var(--font-ui);
+  color: var(--color-danger);
+  font-weight: 500;
+}
+
+.errorText {
+  color: var(--color-danger);
+  overflow-wrap: anywhere;
+}
+
+/* 6. Permission Approval: High-Trust Security Card */
+.row[data-row-kind="permission"] .card {
+  border: var(--divider-width) solid var(--color-warning);
+  border-left: calc(var(--divider-width) * 3) solid var(--color-warning);
+  box-shadow: var(--elevation-menu);
+  background: var(--color-surface);
+}
+
+.row[data-row-kind="permission"] .roleBadge {
+  color: var(--color-warning);
+}
+
+.riskBadge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--spacing-4);
+  font: var(--font-size-ui) / var(--line-height-compact) var(--font-ui);
+  color: var(--color-warning);
+  background: var(--color-warning-surface);
+  padding: var(--spacing-2) var(--spacing-8);
+  border-radius: var(--border-radius);
+  border: var(--divider-width) solid var(--color-warning);
+  font-weight: 500;
+}
+
+.permissionCardContent {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-12);
+}
+
+/* Context: Security notice / risk awareness */
+.riskNotice {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--spacing-6);
+  padding: var(--spacing-6) var(--spacing-8);
+  background: var(--color-warning-surface);
+  border-radius: var(--border-radius);
+  font: var(--font-size-ui) / var(--line-height-normal) var(--font-ui);
+  color: var(--color-text);
+}
+
+.riskNoticeIcon {
+  flex-shrink: 0;
+  color: var(--color-warning);
+  margin-top: 2px;
+}
+
+/* Context: Command Action & Target Scope */
+.permissionDetails {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-8);
+}
+
+.permissionField {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-4);
+}
+
+.fieldLabel {
+  font: var(--font-size-ui) / var(--line-height-compact) var(--font-ui);
+  color: var(--color-muted);
+  font-weight: 500;
+}
+
+.codeBox {
+  background: var(--color-canvas);
+  border: var(--divider-width) solid var(--color-border);
+  border-radius: var(--border-radius);
+  padding: var(--spacing-6) var(--spacing-8);
+  overflow-x: auto;
+}
+
+.mono {
+  font-family: var(--font-code);
+  font-size: var(--font-size-code);
+  color: var(--color-text);
+  overflow-wrap: anywhere;
+  word-break: break-all;
+}
+
+.scopeBox {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--spacing-6);
+  color: var(--color-muted);
+}
+
+.scopeIcon {
+  flex-shrink: 0;
+}
+
+.scope {
   font-family: var(--font-code);
   font-size: var(--font-size-code);
   color: var(--color-muted);
-  border-left: var(--divider-width) dotted var(--color-border);
-  padding-left: var(--spacing-8);
+  overflow-wrap: anywhere;
 }
 
+/* Approval Actions & Controls */
+.permissionAsk {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-8);
+  padding-top: var(--spacing-6);
+  border-top: var(--divider-width) solid var(--color-border);
+}
+
+.permissionControls {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-8);
+}
+
+.buttonGroup {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-8);
+  flex-wrap: wrap;
+}
+
+.approveButton,
+.denyButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--spacing-8);
+  min-height: var(--control-height);
+  padding: var(--spacing-4) var(--spacing-12);
+  border-radius: var(--border-radius);
+  font: var(--font-size-ui) / var(--line-height-compact) var(--font-ui);
+  font-weight: 500;
+  cursor: pointer;
+  border: var(--divider-width) solid transparent;
+  transition: background-color var(--motion-fast) var(--easing-standard),
+              color var(--motion-fast) var(--easing-standard),
+              border-color var(--motion-fast) var(--easing-standard);
+}
+
+.btnContent {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--spacing-6);
+}
+
+.approveButton {
+  background: var(--color-success);
+  color: var(--color-accent-foreground);
+  border-color: var(--color-success);
+}
+
+.approveButton:hover:not(:disabled) {
+  filter: brightness(1.1);
+}
+
+.denyButton {
+  background: transparent;
+  color: var(--color-danger);
+  border-color: var(--color-danger);
+}
+
+.denyButton:hover:not(:disabled) {
+  background: var(--color-danger-surface);
+}
+
+.approveButton:disabled,
+.denyButton:disabled {
+  background: var(--color-disabled-surface);
+  color: var(--color-disabled-text);
+  border-color: transparent;
+  cursor: not-allowed;
+}
+
+/* Keyboard Shortcut Badges */
+.kbd {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 var(--spacing-4);
+  font-family: var(--font-code);
+  font-size: 10px;
+  line-height: 1;
+  font-weight: 600;
+  border-radius: var(--border-radius);
+  box-sizing: border-box;
+  border: var(--divider-width) solid currentColor;
+}
+
+.approveButton .kbd {
+  background: var(--color-hover);
+  color: inherit;
+}
+
+.denyButton .kbd {
+  background: var(--color-danger-surface);
+  color: inherit;
+}
+
+.shortcutHint {
+  display: flex;
+  align-items: center;
+}
+
+.shortcutText {
+  font: var(--font-size-code) / var(--line-height-compact) var(--font-ui);
+  color: var(--color-muted);
+}
+
+.submissionError {
+  color: var(--color-danger);
+  font: var(--font-size-ui) / var(--line-height-compact) var(--font-ui);
+}
+
+/* Decided Security Audit State */
+.permissionDecided {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--spacing-8);
+  padding-top: var(--spacing-6);
+  border-top: var(--divider-width) solid var(--color-border);
+}
+
+.decisionBanner {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-8);
+  flex-wrap: wrap;
+}
+
+.decisionChip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--spacing-4);
+  font: var(--font-size-ui) / var(--line-height-compact) var(--font-ui);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: var(--spacing-2) var(--spacing-8);
+  border-radius: var(--border-radius);
+}
+
+.decisionChip.approved {
+  color: var(--color-success);
+  background: var(--color-success-surface);
+  border: var(--divider-width) solid var(--color-success);
+}
+
+.decisionChip.denied {
+  color: var(--color-danger);
+  background: var(--color-danger-surface);
+  border: var(--divider-width) solid var(--color-danger);
+}
+
+.decisionAuditNote {
+  font: var(--font-size-ui) / var(--line-height-compact) var(--font-ui);
+  color: var(--color-muted);
+}
+
+/* Tool execution status helpers */
 .toolStatus {
   font: var(--font-size-ui) / var(--line-height-compact) var(--font-ui);
 }
@@ -120,95 +502,7 @@
   color: var(--color-danger);
 }
 
-.permissionAsk,
-.permissionDecided {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--spacing-8);
-  align-items: center;
-}
-
-.permissionAsk {
-  border: var(--divider-width) solid var(--color-accent);
-  padding: var(--spacing-8);
-  border-radius: var(--border-radius);
-  justify-content: space-between;
-}
-
-.permissionAction {
-  display: flex;
-  flex-direction: column;
-  gap: var(--spacing-2);
-  min-width: 0;
-}
-
-.mono {
-  font-family: var(--font-code);
-  font-size: var(--font-size-code);
-  overflow-wrap: anywhere;
-}
-
-.scope {
-  color: var(--color-muted);
-  font-size: var(--font-size-ui);
-}
-
-.permissionControls {
-  display: flex;
-  gap: var(--spacing-8);
-  align-items: center;
-}
-
-.permissionControls button {
-  padding: var(--spacing-4) var(--spacing-12);
-  border-radius: var(--border-radius);
-  font: var(--font-size-ui) / var(--line-height-compact) var(--font-ui);
-  cursor: pointer;
-  border: 1px solid transparent;
-  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
-}
-
-.permissionControls button:disabled {
-  background: var(--color-disabled-surface);
-  color: var(--color-disabled-text);
-  border-color: transparent;
-  cursor: not-allowed;
-}
-
-.approveButton {
-  background: var(--color-success);
-  color: var(--color-accent-foreground);
-  border-color: var(--color-success);
-}
-
-.approveButton:hover:not(:disabled) {
-  filter: brightness(1.1);
-}
-
-.denyButton {
-  background: transparent;
-  color: var(--color-danger);
-  border: 1px solid var(--color-danger);
-}
-
-.denyButton:hover:not(:disabled) {
-  background: var(--color-danger-surface);
-}
-
-.decisionChip {
-  font: var(--font-size-ui) / var(--line-height-compact) var(--font-ui);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-}
-
-.decisionChip.approved {
-  color: var(--color-success);
-}
-
-.decisionChip.denied {
-  color: var(--color-danger);
-}
-
+/* New Activity Pill Affordance */
 .newActivity {
   position: absolute;
   bottom: var(--spacing-12);
@@ -222,8 +516,14 @@
   font: var(--font-size-ui) / var(--line-height-compact) var(--font-ui);
   border-radius: var(--border-radius);
   cursor: pointer;
+  box-shadow: var(--elevation-tooltip);
 }
 
+.newActivity:hover {
+  background: var(--color-surface);
+}
+
+/* Screen reader announcement utility */
 .visuallyHidden {
   position: absolute;
   width: 1px;
@@ -231,4 +531,21 @@
   overflow: hidden;
   clip: rect(0 0 0 0);
   white-space: nowrap;
+}
+
+/* Responsive / Narrow Viewports */
+@media (max-width: 640px) {
+  .slot {
+    padding: 0 var(--spacing-8);
+  }
+  .card {
+    padding: var(--spacing-8) var(--spacing-12);
+  }
+  .buttonGroup {
+    width: 100%;
+  }
+  .approveButton,
+  .denyButton {
+    flex: 1;
+  }
 }

@@ -117,9 +117,13 @@ describe("A11 evidence: zh-CN/en dual-language & device-local preferences", () =
 
     // Action text is untouched (user/execution content is never machine-translated)
     expect(screen.getByText(/cargo tree --workspace --edges all/)).toBeInTheDocument();
-    // But UI buttons are translated according to DESIGN_I18N §5
-    expect(screen.getByTestId("approve")).toHaveTextContent("批准 (Y)");
-    expect(screen.getByTestId("deny")).toHaveTextContent("拒绝 (D)");
+    // UI action labels remain translated while shortcuts render as semantic keycaps.
+    const approve = screen.getByTestId("approve");
+    const deny = screen.getByTestId("deny");
+    expect(approve).toHaveTextContent("批准");
+    expect(deny).toHaveTextContent("拒绝");
+    expect(approve.querySelector("kbd")).toHaveTextContent("Y");
+    expect(deny.querySelector("kbd")).toHaveTextContent("D");
   });
 
   it("display preferences persist to localStorage and reload into fresh store on restart", () => {

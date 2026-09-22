@@ -128,7 +128,7 @@ describe("P2.4 Context & Memory Product Wiring Evidence (TASKS.md §A14)", () =>
 
     // Initially empty Personal Vault
     expect(screen.getByTestId("memory-empty")).toBeTruthy();
-    expect(screen.getByTestId("memory-empty").textContent).toContain("Personal Vault 为空");
+    expect(screen.getByTestId("memory-empty").textContent).toContain("Personal Vault is empty");
   });
 
   it("3. Memory lifecycle journey: Propose -> Confirm -> Correct -> Forget", async () => {
@@ -150,7 +150,7 @@ describe("P2.4 Context & Memory Product Wiring Evidence (TASKS.md §A14)", () =>
 
     await waitFor(() => {
       expect(screen.getByText("User prefers async/await in Rust")).toBeTruthy();
-      expect(screen.getByText("candidate")).toBeTruthy();
+      expect(screen.getByText("Candidate")).toBeTruthy();
     });
 
     // B. Confirm the Candidate Memory
@@ -158,7 +158,7 @@ describe("P2.4 Context & Memory Product Wiring Evidence (TASKS.md §A14)", () =>
     fireEvent.click(confirmBtn);
 
     await waitFor(() => {
-      expect(screen.getByText("confirmed")).toBeTruthy();
+      expect(screen.getByText("Confirmed")).toBeTruthy();
     });
 
     // C. Correct the Confirmed Memory
@@ -172,7 +172,7 @@ describe("P2.4 Context & Memory Product Wiring Evidence (TASKS.md §A14)", () =>
 
     await waitFor(() => {
       expect(screen.getByText("User prefers synchronous Rust with std::thread")).toBeTruthy();
-      expect(screen.getByText("superseded")).toBeTruthy();
+      expect(screen.getByText("Superseded")).toBeTruthy();
     });
 
     // D. Forget the new Confirmed Memory
@@ -181,7 +181,7 @@ describe("P2.4 Context & Memory Product Wiring Evidence (TASKS.md §A14)", () =>
     fireEvent.click(forgetBtns[0]!);
 
     await waitFor(() => {
-      expect(screen.getByText("forgotten")).toBeTruthy();
+      expect(screen.getByText("Forgotten")).toBeTruthy();
     });
   });
 
