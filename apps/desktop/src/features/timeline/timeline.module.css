@@ -66,8 +66,15 @@
 /* Row focus state via roving tabindex */
 .row.focused .card {
   outline: var(--focus-ring) solid var(--color-focus);
-  outline-offset: 1px;
+  outline-offset: 2px;
   border-color: var(--color-focus);
+}
+
+/* Pending permission: keep warning edge while focused so security chrome stays obvious. */
+.row[data-row-kind="permission"].focused .card {
+  border-color: var(--color-warning);
+  box-shadow: var(--elevation-menu), 0 0 0 var(--focus-ring) var(--color-focus);
+  outline: none;
 }
 
 /* Card Header: sender role identity & meta status */
@@ -249,15 +256,15 @@
 .permissionCardContent {
   display: flex;
   flex-direction: column;
-  gap: var(--spacing-12);
+  gap: var(--spacing-16);
 }
 
 /* Context: Security notice / risk awareness */
 .riskNotice {
   display: flex;
   align-items: flex-start;
-  gap: var(--spacing-6);
-  padding: var(--spacing-6) var(--spacing-8);
+  gap: var(--spacing-8);
+  padding: var(--spacing-8) var(--spacing-12);
   background: var(--color-warning-surface);
   border-radius: var(--border-radius);
   font: var(--font-size-ui) / var(--line-height-normal) var(--font-ui);
@@ -328,7 +335,7 @@
   display: flex;
   flex-direction: column;
   gap: var(--spacing-8);
-  padding-top: var(--spacing-6);
+  padding-top: var(--spacing-12);
   border-top: var(--divider-width) solid var(--color-border);
 }
 
@@ -341,7 +348,7 @@
 .buttonGroup {
   display: flex;
   align-items: center;
-  gap: var(--spacing-8);
+  gap: var(--spacing-12);
   flex-wrap: wrap;
 }
 
@@ -387,6 +394,14 @@
 
 .denyButton:hover:not(:disabled) {
   background: var(--color-danger-surface);
+}
+
+/* Keyboard focus: token ring (not browser default black outline). */
+.approveButton:focus-visible,
+.denyButton:focus-visible {
+  outline: var(--focus-ring) solid var(--color-focus);
+  outline-offset: 2px;
+  z-index: 1;
 }
 
 .approveButton:disabled,
