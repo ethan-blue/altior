@@ -69,6 +69,7 @@ export const zhCN: TranslationDictionary = {
     statusStreaming: "生成中",
     statusStopping: "正在停止",
     statusUnavailable: "暂不可用",
+    statusCancelFailed: "停止未确认",
     cancelFailed: (reason) => `未能确认停止，代理可能仍在运行。（${reason}）`,
   },
   permission: {

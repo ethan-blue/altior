@@ -75,6 +75,8 @@ export interface TranslationDictionary {
     readonly statusStopping: string;
     /** Ready-state chip when the composer is disabled / Core unavailable. */
     readonly statusUnavailable: string;
+    /** Ready-state chip after cancel_turn failed while the turn is still live. */
+    readonly statusCancelFailed: string;
     readonly cancelFailed: (reason: string) => string;
   };
   readonly permission: {

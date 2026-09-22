@@ -525,6 +525,7 @@ export function App({
             onCancel={onCancelTurn}
             isStreaming={isCurrentThreadStreaming}
             cancelPending={currentThreadActiveTurn?.cancelState === "requested"}
+            cancelFailed={currentThreadActiveTurn?.cancelState === "failed"}
             disabledReason={
               appState.connectionStatus === "disconnected"
                 ? getDictionary(ui.locale).workbenchEmpty.coreDisconnected
