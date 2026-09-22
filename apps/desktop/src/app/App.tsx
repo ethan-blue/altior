@@ -507,7 +507,15 @@ export function App({
               data-testid="turn-notice"
               style={{ margin: "0 auto", padding: "4px 16px" }}
             >
-              {currentThreadActiveTurn.notice}
+              {(() => {
+                const notice = currentThreadActiveTurn.notice;
+                if (notice?.startsWith("cancel_failed:")) {
+                  return getDictionary(ui.locale).composer.cancelFailed(
+                    notice.slice("cancel_failed:".length),
+                  );
+                }
+                return notice;
+              })()}
             </p>
           ) : null}
           <Composer

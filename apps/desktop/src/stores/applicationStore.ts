@@ -2186,7 +2186,7 @@ export function createApplicationStore(
         ...prev,
         activeTurns: prev.activeTurns.map((t) =>
           t.replyRowId === active.replyRowId
-            ? { ...t, cancelState: "failed", notice: `Cancel request failed — the turn may still be running. (${reason})` }
+            ? { ...t, cancelState: "failed", notice: `cancel_failed:${reason}` }
             : t,
         ),
         error: `Cancel request failed: ${reason}`,

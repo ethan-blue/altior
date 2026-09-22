@@ -66,6 +66,7 @@ export interface TranslationDictionary {
     readonly shortcutHintSend: string;
     readonly shortcutHintNewline: string;
     readonly smartTools: string;
+    readonly cancelFailed: (reason: string) => string;
   };
   readonly permission: {
     readonly approve: string;
