@@ -1,4 +1,4 @@
-import type { TranslationDictionary } from "./types";
+﻿import type { TranslationDictionary } from "./types";
 
 export const en: TranslationDictionary = {
   common: {
@@ -119,6 +119,16 @@ export const en: TranslationDictionary = {
     text: "Text",
     loadMore: "Load more",
     createThreadTitle: "Create new thread",
+    program: "Program",
+    bindingLabel: "Binding Label",
+    bindingId: "Binding ID",
+    decisionPending: "pending",
+  },
+  threadStatus: {
+    running: "running",
+    waiting: "waiting",
+    failed: "failed",
+    completed: "completed",
   },
   timeline: {
     you: "You",
@@ -162,6 +172,8 @@ export const en: TranslationDictionary = {
     dropReason: "Drop Reason",
     identityDocuments: (count) => `Identity Documents (${count})`,
     tokensUnit: "tokens",
+    tokensScore: "Tokens / Score",
+    tokensScoreValue: (tokens, score) => `${tokens} tokens · total_score: ${score}`,
   },
   memoryPane: {
     title: "Memory Vault",

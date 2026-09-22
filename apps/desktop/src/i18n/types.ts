@@ -1,4 +1,4 @@
-export type SupportedLocale = "zh-CN" | "en";
+﻿export type SupportedLocale = "zh-CN" | "en";
 export type LocaleSource = "system" | SupportedLocale;
 
 export interface TranslationDictionary {
@@ -120,6 +120,16 @@ export interface TranslationDictionary {
     readonly text: string;
     readonly loadMore: string;
     readonly createThreadTitle: string;
+    readonly program: string;
+    readonly bindingLabel: string;
+    readonly bindingId: string;
+    readonly decisionPending: string;
+  };
+  readonly threadStatus: {
+    readonly running: string;
+    readonly waiting: string;
+    readonly failed: string;
+    readonly completed: string;
   };
   readonly timeline: {
     readonly you: string;
@@ -162,6 +172,8 @@ export interface TranslationDictionary {
     readonly dropReason: string;
     readonly identityDocuments: (count: number) => string;
     readonly tokensUnit: string;
+    readonly tokensScore: string;
+    readonly tokensScoreValue: (tokens: number, score: number) => string;
   };
   readonly memoryPane: {
     readonly title: string;

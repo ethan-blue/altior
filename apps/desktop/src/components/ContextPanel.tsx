@@ -135,9 +135,9 @@ export function ContextPanel({ snapshot, status, error }: ContextPanelProps) {
                     <dt>{t.contextPanel.confidence}</dt>
                     <dd>{mem.confidence}%</dd>
 
-                    <dt>Tokens / Score</dt>
+                    <dt>{t.contextPanel.tokensScore}</dt>
                     <dd className={shell.mono}>
-                      {mem.tokens} tokens · total_score: {mem.score}
+                      {t.contextPanel.tokensScoreValue(mem.tokens, mem.score)}
                     </dd>
 
                     <dt>{t.contextPanel.whySelected}</dt>

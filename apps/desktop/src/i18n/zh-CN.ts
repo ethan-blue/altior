@@ -1,4 +1,4 @@
-import type { TranslationDictionary } from "./types";
+﻿import type { TranslationDictionary } from "./types";
 
 export const zhCN: TranslationDictionary = {
   common: {
@@ -119,6 +119,16 @@ export const zhCN: TranslationDictionary = {
     text: "文本内容",
     loadMore: "加载更多",
     createThreadTitle: "新建会话",
+    program: "程序",
+    bindingLabel: "绑定标签",
+    bindingId: "绑定 ID",
+    decisionPending: "待定",
+  },
+  threadStatus: {
+    running: "运行中",
+    waiting: "等待授权",
+    failed: "失败",
+    completed: "已完成",
   },
   timeline: {
     you: "你",
@@ -161,6 +171,8 @@ export const zhCN: TranslationDictionary = {
     dropReason: "舍弃原因",
     identityDocuments: (count) => `身份文档 (${count})`,
     tokensUnit: "词元",
+    tokensScore: "词元 / 得分",
+    tokensScoreValue: (tokens, score) => `${tokens} 词元 · 总分: ${score}`,
   },
   memoryPane: {
     title: "记忆库",
