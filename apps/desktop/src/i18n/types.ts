@@ -65,7 +65,14 @@ export interface TranslationDictionary {
     readonly coreUnavailable: string;
     readonly shortcutHintSend: string;
     readonly shortcutHintNewline: string;
+    /** Ready-state chip when the agent can accept a prompt. */
     readonly smartTools: string;
+    /** Ready-state chip while a turn is streaming. */
+    readonly statusStreaming: string;
+    /** Ready-state chip while cancel_turn is in flight. */
+    readonly statusStopping: string;
+    /** Ready-state chip when the composer is disabled / Core unavailable. */
+    readonly statusUnavailable: string;
     readonly cancelFailed: (reason: string) => string;
   };
   readonly permission: {

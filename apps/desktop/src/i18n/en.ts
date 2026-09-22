@@ -64,7 +64,10 @@ export const en: TranslationDictionary = {
     coreUnavailable: "The local service is unavailable. Your input is preserved.",
     shortcutHintSend: "↵ Send",
     shortcutHintNewline: "⇧↵ Newline",
-    smartTools: "Agent Active",
+    smartTools: "Agent ready",
+    statusStreaming: "Generating",
+    statusStopping: "Stopping",
+    statusUnavailable: "Unavailable",
     cancelFailed: (reason) => `Could not confirm stop ? the agent may still be running. (${reason})`,
   },
   permission: {

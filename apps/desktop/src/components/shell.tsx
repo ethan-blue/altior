@@ -494,6 +494,33 @@ export function Composer({
     textareaRef.current?.focus();
   };
 
+  const chipState: "ready" | "streaming" | "stopping" | "unavailable" =
+    disabledReason != null
+      ? "unavailable"
+      : cancelPending
+        ? "stopping"
+        : isStreaming
+          ? "streaming"
+          : "ready";
+
+  const chipLabel =
+    chipState === "unavailable"
+      ? t.composer.statusUnavailable
+      : chipState === "stopping"
+        ? t.composer.statusStopping
+        : chipState === "streaming"
+          ? t.composer.statusStreaming
+          : t.composer.smartTools;
+
+  const chipClass =
+    chipState === "unavailable"
+      ? shell.composerChipUnavailable
+      : chipState === "stopping"
+        ? shell.composerChipStopping
+        : chipState === "streaming"
+          ? shell.composerChipStreaming
+          : shell.composerChipReady;
+
   return (
     <div className={shell.composer}>
       <div
@@ -535,22 +562,20 @@ export function Composer({
 
         <div className={shell.composerToolbar}>
           <div className={shell.composerToolsLeft}>
-            <span className={shell.composerChip}>
-              <svg
-                width="12"
-                height="12"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2.5"
-                strokeLinecap="round"
-                strokeLinejoin="round"
+            <span
+              className={`${shell.composerChip} ${chipClass}`}
+              role="status"
+              aria-live="polite"
+              data-testid="composer-ready-chip"
+              data-chip-state={chipState}
+            >
+              <span
+                className={`${shell.composerChipDot}${
+                  chipState === "streaming" ? ` ${shell.composerChipDotPulse}` : ""
+                }`}
                 aria-hidden="true"
-              >
-                <circle cx="12" cy="12" r="10" />
-                <polygon points="12 8 8 12 12 16 12 8" />
-              </svg>
-              <span>{t.composer.smartTools}</span>
+              />
+              <span className={shell.composerChipLabel}>{chipLabel}</span>
             </span>
 
             <div className={shell.composerShortcuts}>
