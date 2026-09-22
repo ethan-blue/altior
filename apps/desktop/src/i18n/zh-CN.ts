@@ -122,6 +122,10 @@ export const zhCN: TranslationDictionary = {
     program: "程序",
     bindingLabel: "绑定标签",
     bindingId: "绑定 ID",
+    runtimeReady: "就绪",
+    runtimeBusy: "繁忙",
+    runtimeDegraded: "降级",
+    runtimeShuttingDown: "正在关闭",
     decisionPending: "待定",
   },
   threadStatus: {
@@ -145,7 +149,8 @@ export const zhCN: TranslationDictionary = {
     threadTimelineAria: (title) => `${title} 的时间线`,
     executionError: "执行中断",
     preservedVerbatim: "协议兼容保留",
-    streaming: "生成中…",
+    streaming: "生成中",
+    turnFailed: "本轮失败",
   },
   contextPanel: {
     loading: "加载上下文快照中…",

@@ -122,6 +122,10 @@ export const en: TranslationDictionary = {
     program: "Program",
     bindingLabel: "Binding Label",
     bindingId: "Binding ID",
+    runtimeReady: "ready",
+    runtimeBusy: "busy",
+    runtimeDegraded: "degraded",
+    runtimeShuttingDown: "shutting down",
     decisionPending: "pending",
   },
   threadStatus: {
@@ -146,7 +150,8 @@ export const en: TranslationDictionary = {
     threadTimelineAria: (title) => `${title} timeline`,
     executionError: "Execution Error",
     preservedVerbatim: "Preserved verbatim",
-    streaming: "Streaming…",
+    streaming: "Streaming",
+    turnFailed: "Turn failed",
   },
   contextPanel: {
     loading: "Loading context snapshot…",

@@ -123,6 +123,10 @@ export interface TranslationDictionary {
     readonly program: string;
     readonly bindingLabel: string;
     readonly bindingId: string;
+    readonly runtimeReady: string;
+    readonly runtimeBusy: string;
+    readonly runtimeDegraded: string;
+    readonly runtimeShuttingDown: string;
     readonly decisionPending: string;
   };
   readonly threadStatus: {
@@ -147,6 +151,7 @@ export interface TranslationDictionary {
     readonly executionError: string;
     readonly preservedVerbatim: string;
     readonly streaming: string;
+    readonly turnFailed: string;
   };
   readonly contextPanel: {
     readonly loading: string;

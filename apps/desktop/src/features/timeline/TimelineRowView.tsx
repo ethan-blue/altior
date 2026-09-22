@@ -147,7 +147,13 @@ export const TimelineRowView = memo(function TimelineRowView({
             <div className={rowStyles.unknownBody}>{row.text}</div>
           ) : (
             <div className={rowStyles.text}>
-              <SafeMarkdown text={row.text} />
+              <SafeMarkdown
+                text={
+                  row.kind === "error" && (!row.text || row.text === "Turn failed")
+                    ? t.timeline.turnFailed
+                    : row.text
+                }
+              />
               {row.streaming ? (
                 <span className={rowStyles.caret} aria-hidden="true">
                   ▌

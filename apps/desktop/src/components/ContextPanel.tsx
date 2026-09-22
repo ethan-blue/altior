@@ -1,4 +1,5 @@
 import { useI18n } from "../i18n";
+import { localizeMemoryKind } from "../i18n/localizeEnums";
 import type { ContextSnapshotDto } from "../ipc/dto/ContextSnapshotDto";
 import shell from "./shell.module.css";
 
@@ -122,7 +123,7 @@ export function ContextPanel({ snapshot, status, error }: ContextPanelProps) {
                 >
                   <div className={shell.memoryCardHeader}>
                     <span className={shell.mono}>{mem.memory_id}</span>
-                    <span className={shell.memoryKindBadge}>{mem.kind}</span>
+                    <span className={shell.memoryKindBadge}>{localizeMemoryKind(mem.kind, t)}</span>
                     <span className={shell.memoryConfidence}>{mem.confidence}%</span>
                   </div>
                   <dl className={shell.inspectorFields} style={{ marginTop: "var(--spacing-6)" }}>
@@ -130,7 +131,7 @@ export function ContextPanel({ snapshot, status, error }: ContextPanelProps) {
                     <dd data-testid="memory-summary">{customSummary}</dd>
 
                     <dt>{t.inspector.kind}</dt>
-                    <dd>{mem.kind}</dd>
+                    <dd>{localizeMemoryKind(mem.kind, t)}</dd>
 
                     <dt>{t.contextPanel.confidence}</dt>
                     <dd>{mem.confidence}%</dd>
@@ -199,7 +200,7 @@ export function ContextPanel({ snapshot, status, error }: ContextPanelProps) {
             {snapshot.identity.map((idoc) => (
               <li key={idoc.document_id} className={shell.droppedItem}>
                 <span className={shell.mono}>{idoc.document_id}</span>
-                <span className={shell.memoryKindBadge}>{idoc.kind}</span>
+                <span className={shell.memoryKindBadge}>{localizeMemoryKind(idoc.kind, t)}</span>
                 <span className={shell.mono}>
                   {idoc.tokens} {t.contextPanel.tokensUnit}
                 </span>

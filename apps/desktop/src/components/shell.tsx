@@ -25,6 +25,7 @@ import {
 } from "../app/uiStore";
 import { ContextPanel, type ContextPanelProps } from "./ContextPanel";
 import { useI18n } from "../i18n";
+import { localizeRuntimeStatus } from "../i18n/localizeEnums";
 import type { ThemeSource, LocaleSource } from "../app/uiStore";
 import shell from "./shell.module.css";
 
@@ -654,7 +655,7 @@ export function RuntimeDiagnosticsView({
 
         <dt>{t.inspector.status}</dt>
         <dd data-testid="diag-status">
-          <span className={shell.memoryKindBadge}>{diagnostics.status}</span>
+          <span className={shell.memoryKindBadge}>{localizeRuntimeStatus(diagnostics.status, t)}</span>
         </dd>
 
         <dt>{t.inspector.activeThreads}</dt>
