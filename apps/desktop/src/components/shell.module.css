@@ -59,9 +59,9 @@
 }
 
 .railItem:disabled {
+  /* Color alone marks deferred/disabled rail items (A10: avoid blanket opacity). */
   color: var(--color-disabled-text);
   cursor: not-allowed;
-  opacity: 0.5;
 }
 
 .railActive {
@@ -584,7 +584,6 @@
   gap: var(--spacing-6);
   color: var(--color-muted);
   font-size: 11px;
-  opacity: 0.9;
 }
 
 .composerKbd {
@@ -592,7 +591,8 @@
   align-items: center;
   padding: 1px var(--spacing-6);
   border-radius: var(--radius-xs);
-  border: 1px solid var(--color-border);
+  /* control-border keeps keycap chrome ≥3:1 (decorative --color-border is ~1.4:1 dark). */
+  border: 1px solid var(--color-control-border);
   background: var(--color-surface);
   color: var(--color-muted);
   font-family: var(--font-ui);
@@ -601,7 +601,8 @@
 }
 
 .composerKbdDivider {
-  opacity: 0.5;
+  color: var(--color-muted);
+  opacity: 0.85;
 }
 
 .composerToolsRight {
