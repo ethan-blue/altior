@@ -324,7 +324,7 @@ describe("P0.4 evidence", () => {
     await screen.findByRole("heading", { level: 1, name: /Contract fixture walkthrough|契约夹具演练/ });
     const unknown = document.querySelector("[data-row-kind='unknown']");
     expect(unknown?.textContent).toContain("acp.update.plan");
-    expect(unknown?.textContent).toContain("preserved verbatim");
+    expect(unknown?.textContent).toMatch(/preserved verbatim|原文保留/i);
   });
 
   it("the new-activity affordance appears only when scrolled away", async () => {

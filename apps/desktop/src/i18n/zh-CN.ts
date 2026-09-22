@@ -209,6 +209,8 @@ export const zhCN: TranslationDictionary = {
     whyFragExplicitPlus: "显式 +",
     whyFragTotal: "总分：",
     whyFragBm25: "bm25：",
+    identityKindName: "名称",
+    identityKindAbout: "简介",
   },
   memoryPane: {
     title: "记忆库",

@@ -36,6 +36,25 @@ export function localizeMemoryKind(
   }
 }
 
+/** Identity document kinds (name/about + shared preference/instruction). */
+export function localizeIdentityKind(
+  kind: string,
+  t: TranslationDictionary,
+): string {
+  switch (kind) {
+    case "name":
+      return t.contextPanel.identityKindName;
+    case "about":
+      return t.contextPanel.identityKindAbout;
+    case "preference":
+      return t.memoryPane.kindPreference;
+    case "instruction":
+      return t.memoryPane.kindInstruction;
+    default:
+      return kind;
+  }
+}
+
 export function localizeMemoryState(
   state: string,
   t: TranslationDictionary,
