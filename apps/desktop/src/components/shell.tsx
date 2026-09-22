@@ -284,9 +284,33 @@ export function ThreadsPane({
         ) : null}
       </div>
       {threads.length === 0 ? (
-        <p className={shell.threadsEmpty} role="status">
-          {searchActive ? t.nav.noMatches : t.nav.empty}
-        </p>
+        <div
+          className={`${shell.threadsEmpty}${searchActive ? ` ${shell.threadsEmptySearch}` : ""}`}
+          role="status"
+          data-testid={searchActive ? "threads-search-empty" : "threads-empty"}
+          data-empty-kind={searchActive ? "search" : "vault"}
+        >
+          <p className={shell.threadsEmptyTitle}>
+            {searchActive ? t.nav.noMatches : t.nav.empty}
+          </p>
+          {searchActive ? (
+            <button
+              type="button"
+              className={shell.threadsEmptyAction}
+              onClick={() => {
+                setLocalFilter("");
+                if (timerRef.current != null) {
+                  clearTimeout(timerRef.current);
+                  timerRef.current = null;
+                }
+                onFilterChange("");
+              }}
+              data-testid="clear-thread-filter"
+            >
+              {t.nav.clearFilter}
+            </button>
+          ) : null}
+        </div>
       ) : null}
       {pinned.length > 0 ? (
         <ThreadSection
@@ -296,12 +320,14 @@ export function ThreadsPane({
           onSelect={onSelect}
         />
       ) : null}
-      <ThreadSection
-        title={t.nav.recent}
-        threads={recent}
-        selectedThreadId={selectedThreadId}
-        onSelect={onSelect}
-      />
+      {recent.length > 0 ? (
+        <ThreadSection
+          title={t.nav.recent}
+          threads={recent}
+          selectedThreadId={selectedThreadId}
+          onSelect={onSelect}
+        />
+      ) : null}
       {hasMoreThreads && onLoadMore ? (
         <button
           type="button"

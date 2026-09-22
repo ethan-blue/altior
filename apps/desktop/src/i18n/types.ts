@@ -37,6 +37,8 @@ export interface TranslationDictionary {
     readonly recent: string;
     readonly empty: string;
     readonly noMatches: string;
+    /** Clear the active thread filter (search empty affordance). */
+    readonly clearFilter: string;
     readonly loadMore: string;
     readonly loadingHistory: string;
     readonly moreHistoryFailed: string;
