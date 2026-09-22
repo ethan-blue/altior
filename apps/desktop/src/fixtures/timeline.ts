@@ -77,12 +77,12 @@ function unknownEvent(id: string, providerKind: string): TimelineRow {
 /** A normal completed thread: prompt, tool, answered permission, reply. */
 export const standardThread: ThreadFixture = {
   id: "thr_fixture000000001",
-  title: "Contract fixture walkthrough",
+  title: "契约夹具演练",
   agent: "alpha (ACP)",
   status: "completed",
   pinned: true,
   rows: [
-    user("trn_fixture000000101", "Summarize the P0.2 IPC contract in three bullets."),
+    user("trn_fixture000000101", "用三条要点概括 P0.2 IPC 契约。"),
     tool("std-2", "rg --files crates/altior-ipc", "completed"),
     permission("evt_fixture000000101", "read crates/altior-ipc/src", "project:altior"),
     user("trn_fixture000000103", "[approved]"),
@@ -97,12 +97,12 @@ export const standardThread: ThreadFixture = {
 /** A thread parked on an unanswered permission request. */
 export const approvalThread: ThreadFixture = {
   id: "thr_fixture000000002",
-  title: "Dependency audit with approvals",
+  title: "依赖审计（需审批）",
   agent: "alpha (ACP)",
   status: "waiting-for-permission",
   pinned: false,
   rows: [
-    user("trn_fixture000000111", "Audit the workspace dependencies and flag anything risky."),
+    user("trn_fixture000000111", "审计工作区依赖并标出风险项。"),
     tool("apr-2", "cargo tree --workspace", "completed"),
     permission("evt_fixture000000111", "cargo tree --workspace --edges all", "project:altior"),
     assistant("trn_fixture000000113", "Waiting for your decision before reading the full graph.", true),
@@ -112,12 +112,12 @@ export const approvalThread: ThreadFixture = {
 /** A failed turn: error diagnostics and an indeterminate delivery note. */
 export const failureThread: ThreadFixture = {
   id: "thr_fixture000000003",
-  title: "Interrupted spike run",
+  title: "中断的尖峰试跑",
   agent: "beta (ACP)",
   status: "failed",
   pinned: false,
   rows: [
-    user("trn_fixture000000121", "Draft the relay spike outline."),
+    user("trn_fixture000000121", "起草中继尖峰试跑大纲。"),
     assistant("trn_fixture000000123", "The relay needs an envelope format, ack semantics, and…", true),
     error("fai-3", "turn stopped: refusal — the agent declined this request"),
     error("fai-4", "delivery: indeterminate (process exited mid-turn); no resend"),
@@ -144,7 +144,7 @@ export function hundredThousandRowThread(): ThreadFixture {
   }
   return {
     id: "thr_fixture000000100",
-    title: "100,000-row history (acceptance size)",
+    title: "10万行历史（验收规模）",
     agent: "alpha (ACP)",
     status: "completed",
     pinned: false,

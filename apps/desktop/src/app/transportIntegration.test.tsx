@@ -58,7 +58,7 @@ describe("Transport Integration & UI Workflow", () => {
 
     // Wait for the authoritative list and the snapshot-provided agent
     // profile before creating (A03: no local defaults to lean on).
-    await screen.findByRole("heading", { level: 1, name: /Contract fixture walkthrough/ });
+    await screen.findByRole("heading", { level: 1, name: /Contract fixture walkthrough|契约夹具演练/ });
     fireEvent.click(screen.getByTestId("new-thread"));
 
     await waitFor(() => {
@@ -93,7 +93,7 @@ describe("Transport Integration & UI Workflow", () => {
     });
 
     render(<App transport={transport} />);
-    await screen.findByRole("heading", { level: 1, name: /Contract fixture walkthrough/ });
+    await screen.findByRole("heading", { level: 1, name: /Contract fixture walkthrough|契约夹具演练/ });
 
     const composer = screen.getByTestId("composer");
     fireEvent.change(composer, { target: { value: "Perform heavy analysis" } });

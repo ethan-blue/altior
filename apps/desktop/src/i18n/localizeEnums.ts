@@ -150,6 +150,38 @@ export function localizeDropReason(
   }
 }
 
+export function localizeCapabilitySupport(
+  support: string,
+  t: TranslationDictionary,
+): string {
+  switch (support) {
+    case "supported":
+      return t.onboarding.capabilitySupported;
+    case "unsupported":
+      return t.onboarding.capabilityUnsupported;
+    default:
+      return support;
+  }
+}
+
+export function localizeDegradedCode(
+  code: string,
+  t: TranslationDictionary,
+): string {
+  switch (code) {
+    case "retrieval_error":
+      return t.contextPanel.degradedCodeRetrievalError;
+    case "memory_query_truncated":
+      return t.contextPanel.degradedCodeMemoryQueryTruncated;
+    case "identity_budget_exceeded":
+      return t.contextPanel.degradedCodeIdentityBudgetExceeded;
+    case "rendered_prompt_omitted":
+      return t.contextPanel.degradedCodeRenderedPromptOmitted;
+    default:
+      return code;
+  }
+}
+
 /** Cheap Desktop mapper for protocol why_selected explain strings. */
 export function localizeWhySelected(
   raw: string,

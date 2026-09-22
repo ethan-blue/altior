@@ -147,6 +147,8 @@ describe("p28 continuous product polish zh-CN i18n", () => {
     );
     expect(screen.getByTestId("tested-capabilities").textContent).toContain("能力：");
     expect(screen.getByTestId("tested-capabilities").textContent).toContain("session.update");
+    expect(screen.getByTestId("tested-capabilities").textContent).toContain("支持");
+    expect(screen.getByTestId("tested-capabilities").textContent).not.toContain(": supported");
   });
 
   it("dictionary keys for continuous polish exist in both locales", () => {

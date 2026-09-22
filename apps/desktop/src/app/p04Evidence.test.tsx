@@ -321,7 +321,7 @@ describe("P0.4 evidence", () => {
     render(
       <App transport={new InMemoryTransport()} fixtureTimelineRows={[standardThread]} />,
     );
-    await screen.findByRole("heading", { level: 1, name: /Contract fixture walkthrough/ });
+    await screen.findByRole("heading", { level: 1, name: /Contract fixture walkthrough|契约夹具演练/ });
     const unknown = document.querySelector("[data-row-kind='unknown']");
     expect(unknown?.textContent).toContain("acp.update.plan");
     expect(unknown?.textContent).toContain("preserved verbatim");

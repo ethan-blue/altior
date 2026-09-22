@@ -12,7 +12,7 @@ afterEach(() => {
 /** Renders App and waits until the authoritative thread list has loaded. */
 async function renderWithThreads(transport: () => InMemoryTransport) {
   const view = render(<App transport={transport()} />);
-  await screen.findByRole("heading", { level: 1, name: /Contract fixture walkthrough/ });
+  await screen.findByRole("heading", { level: 1, name: /Contract fixture walkthrough|契约夹具演练/ });
   return view;
 }
 
@@ -47,7 +47,7 @@ describe("App workbench shell", () => {
     // Threads arrive from the Core list response; the header renders once
     // the selected conversation is known (A03: no local defaults).
     expect(await screen.findByRole("heading", { level: 1 })).toHaveTextContent(
-      "Contract fixture walkthrough",
+      "契约夹具演练",
     );
     expect(screen.getByRole("textbox", { name: "Composer" })).toBeEnabled();
     await waitFor(() =>
@@ -125,7 +125,7 @@ describe("App workbench shell", () => {
   it("an empty search result never unmounts the conversation being read (A03)", async () => {
     const transport = new InMemoryTransport();
     render(<App transport={transport} />);
-    await screen.findByRole("heading", { level: 1, name: /Contract fixture walkthrough/ });
+    await screen.findByRole("heading", { level: 1, name: /Contract fixture walkthrough|契约夹具演练/ });
 
     const filter = screen.getByTestId("thread-filter");
     fireEvent.change(filter, { target: { value: "zzz-no-such-thread" } });
@@ -136,7 +136,7 @@ describe("App workbench shell", () => {
     // The nav list is empty but the read conversation stays mounted with
     // its rows; this is the exact path behind the review's TypeError probe.
     expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent(
-      "Contract fixture walkthrough",
+      "契约夹具演练",
     );
     expect(
       document.querySelector("[data-row-id='trn_fixture000000101']"),
@@ -286,7 +286,7 @@ describe("App workbench shell", () => {
     const transport = new InMemoryTransport();
     const commandSpy = vi.spyOn(transport, "command");
     render(<App transport={transport} searchDebounceMs={50} />);
-    await screen.findByRole("heading", { level: 1, name: /Contract fixture walkthrough/ });
+    await screen.findByRole("heading", { level: 1, name: /Contract fixture walkthrough|契约夹具演练/ });
 
     const searchInput = screen.getByTestId("global-search-input");
     commandSpy.mockClear();
@@ -322,7 +322,7 @@ describe("App workbench shell", () => {
     const transport = new InMemoryTransport();
     const commandSpy = vi.spyOn(transport, "command");
     render(<App transport={transport} searchDebounceMs={60} />);
-    await screen.findByRole("heading", { level: 1, name: /Contract fixture walkthrough/ });
+    await screen.findByRole("heading", { level: 1, name: /Contract fixture walkthrough|契约夹具演练/ });
 
     const searchInput = screen.getByTestId("global-search-input");
     commandSpy.mockClear();
@@ -352,7 +352,7 @@ describe("App workbench shell", () => {
   it("syncs search input with external appState.threadFilter changes without loop", async () => {
     const transport = new InMemoryTransport();
     render(<App transport={transport} searchDebounceMs={0} />);
-    await screen.findByRole("heading", { level: 1, name: /Contract fixture walkthrough/ });
+    await screen.findByRole("heading", { level: 1, name: /Contract fixture walkthrough|契约夹具演练/ });
 
     const searchInput = screen.getByTestId("global-search-input");
     const paneFilter = screen.getByTestId("thread-filter");

@@ -879,7 +879,7 @@ describe("ApplicationStore", () => {
 
       // Request A is slow, request B resolves first and must win.
       const slow = store.setThreadFilter("slow-query");
-      const fast = store.setThreadFilter("audit");
+      const fast = store.setThreadFilter("审计");
       await fast;
       expect(store.getState().searchActive).toBe(true);
       expect(store.getState().threads.map((t) => t.id)).toEqual([approvalThread.id]);
@@ -897,7 +897,7 @@ describe("ApplicationStore", () => {
       await store.selectThread(approvalThread.id);
       expect(store.getState().selectedThread?.id).toBe(approvalThread.id);
 
-      await store.setThreadFilter("audit");
+      await store.setThreadFilter("审计");
       expect(store.getState().threads.map((t) => t.id)).toEqual([approvalThread.id]);
       expect(store.getState().selectedThread?.id).toBe(approvalThread.id);
 
@@ -970,7 +970,7 @@ describe("ApplicationStore", () => {
       const store = createApplicationStore(transport);
       await store.init();
 
-      await store.setThreadFilter("audit");
+      await store.setThreadFilter("审计");
       expect(store.getState().threads.map((t) => t.id)).toEqual([approvalThread.id]);
 
       await store.selectThread(approvalThread.id);
