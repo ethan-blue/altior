@@ -497,6 +497,8 @@ export interface ComposerProps {
   readonly isStreaming?: boolean;
   /** True while a cancel_turn is in flight (button reads "Cancelling…"). */
   readonly cancelPending?: boolean;
+  /** True after cancel_turn failed while the turn is still live (chip danger chrome). */
+  readonly cancelFailed?: boolean;
   readonly disabledReason: string | null;
 }
 
@@ -508,6 +510,7 @@ export function Composer({
   onCancel,
   isStreaming,
   cancelPending = false,
+  cancelFailed = false,
   disabledReason,
 }: ComposerProps) {
   const { t } = useI18n();
@@ -520,32 +523,38 @@ export function Composer({
     textareaRef.current?.focus();
   };
 
-  const chipState: "ready" | "streaming" | "stopping" | "unavailable" =
+  const chipState: "ready" | "streaming" | "stopping" | "cancel_failed" | "unavailable" =
     disabledReason != null
       ? "unavailable"
       : cancelPending
         ? "stopping"
-        : isStreaming
-          ? "streaming"
-          : "ready";
+        : cancelFailed && isStreaming
+          ? "cancel_failed"
+          : isStreaming
+            ? "streaming"
+            : "ready";
 
   const chipLabel =
     chipState === "unavailable"
       ? t.composer.statusUnavailable
-      : chipState === "stopping"
-        ? t.composer.statusStopping
-        : chipState === "streaming"
-          ? t.composer.statusStreaming
-          : t.composer.smartTools;
+      : chipState === "cancel_failed"
+        ? t.composer.statusCancelFailed
+        : chipState === "stopping"
+          ? t.composer.statusStopping
+          : chipState === "streaming"
+            ? t.composer.statusStreaming
+            : t.composer.smartTools;
 
   const chipClass =
     chipState === "unavailable"
       ? shell.composerChipUnavailable
-      : chipState === "stopping"
-        ? shell.composerChipStopping
-        : chipState === "streaming"
-          ? shell.composerChipStreaming
-          : shell.composerChipReady;
+      : chipState === "cancel_failed"
+        ? shell.composerChipCancelFailed
+        : chipState === "stopping"
+          ? shell.composerChipStopping
+          : chipState === "streaming"
+            ? shell.composerChipStreaming
+            : shell.composerChipReady;
 
   return (
     <div className={shell.composer}>
@@ -618,7 +627,9 @@ export function Composer({
                 className={shell.cancelBtn}
                 onClick={onCancel}
                 disabled={cancelPending}
+                title={cancelFailed && !cancelPending ? t.composer.stopFailed : undefined}
                 data-testid="cancel-turn"
+                data-cancel-failed={cancelFailed ? "true" : undefined}
               >
                 <span className={shell.cancelIndicator} aria-hidden="true">■</span>
                 {cancelPending ? t.composer.requestingStop : t.composer.stop}

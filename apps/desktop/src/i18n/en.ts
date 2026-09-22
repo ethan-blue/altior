@@ -69,6 +69,7 @@ export const en: TranslationDictionary = {
     statusStreaming: "Generating",
     statusStopping: "Stopping",
     statusUnavailable: "Unavailable",
+    statusCancelFailed: "Stop unconfirmed",
     cancelFailed: (reason) => `Could not confirm stop ? the agent may still be running. (${reason})`,
   },
   permission: {

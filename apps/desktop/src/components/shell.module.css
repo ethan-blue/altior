@@ -564,6 +564,13 @@
   border-color: var(--color-warning);
 }
 
+/* Cancel failed: danger chrome — stop not confirmed, turn still live */
+.composerChipCancelFailed {
+  background: var(--color-danger-surface);
+  color: var(--color-danger);
+  border-color: var(--color-danger);
+}
+
 /* Unavailable: muted disabled surface when composer is blocked */
 .composerChipUnavailable {
   background: var(--color-disabled-surface);
