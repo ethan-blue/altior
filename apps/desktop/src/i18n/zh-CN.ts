@@ -179,6 +179,14 @@ export const zhCN: TranslationDictionary = {
     tokensUnit: "词元",
     tokensScore: "词元 / 得分",
     tokensScoreValue: (tokens, score) => `${tokens} 词元 · 总分: ${score}`,
+    tokensFraction: (used, limit) => `${used} / ${limit} 词元`,
+    tokensCount: (n) => `${n} 词元`,
+    provenanceThread: "会话 ID",
+    provenanceTurn: "轮次 ID",
+    provenanceExcerpt: "摘录",
+    unknownValue: "未知",
+    noneValue: "（无）",
+    droppedMeta: (rank, tokens) => `排名 #${rank} · ${tokens} 词元`,
   },
   memoryPane: {
     title: "记忆库",
@@ -251,6 +259,8 @@ export const zhCN: TranslationDictionary = {
     coreUnavailable: "不可用",
     streamReplaying: "传输 · 回放中",
     streamReady: "传输 · 就绪",
+    threadLine: (status) => `会话 · ${status}`,
+    streamLine: (status) => `传输 · ${status}`,
   },
   onboarding: {
     title: "连接 ACP 代理",
@@ -283,6 +293,7 @@ export const zhCN: TranslationDictionary = {
     verifiedWithLatency: (ms) => `连接已验证（${ms}ms）`,
     testFailed: (msg) => `测试失败：${msg}`,
     capabilitiesLabel: "能力清单",
+    capabilitiesSummary: (list) => `能力：${list}`,
     agentRequiredNotice: "创建新会话前请先配置代理。",
   },
   markdown: {
@@ -297,10 +308,13 @@ export const zhCN: TranslationDictionary = {
     expandOutput: (extraLines) =>
       `展开完整输出（+${extraLines} 行）`,
     openImage: "（打开图片）",
+    toolStatusCompleted: "已完成",
+    toolStatusFailed: "失败",
+    toolStatusRunning: "运行中",
   },
   workbenchEmpty: {
-    connecting: "正在连接 Core…",
-    coreDisconnected: "Core 已断开",
+    connecting: "正在连接本地服务…",
+    coreDisconnected: "本地服务已断开",
     noConversations: "还没有会话。新建一个，或先配置代理再开始。",
     selectConversation: "从左侧选择一个会话继续。",
   },

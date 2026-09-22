@@ -611,6 +611,12 @@
 .inspectorEmpty {
   color: var(--color-muted);
   font: var(--font-size-ui) / var(--line-height-normal) var(--font-ui);
+  margin: var(--spacing-16) 0;
+  padding: var(--spacing-12) var(--spacing-8);
+  text-align: center;
+  border: var(--divider-width) dashed var(--color-border);
+  border-radius: var(--border-radius);
+  background: var(--color-bg, var(--color-surface));
 }
 
 .inspectorFields {
@@ -766,8 +772,10 @@
 .statusBar {
   grid-column: 1 / -1;
   display: flex;
-  gap: var(--spacing-24);
+  flex-wrap: wrap;
+  gap: var(--spacing-8) var(--spacing-16);
   align-items: center;
+  min-height: 28px;
   padding: var(--spacing-4) var(--spacing-12);
   border-top: var(--divider-width) solid var(--color-border);
   background: var(--color-surface);
@@ -895,7 +903,11 @@
 /* Empty thread-pane note (review A03): honest "nothing here" instead of
    decorative demo rows. */
 .threadsEmpty {
-  margin: 8px 4px;
+  margin: var(--spacing-12) var(--spacing-8);
+  padding: var(--spacing-12) var(--spacing-8);
   color: var(--color-muted);
   font-size: var(--font-size-body);
+  text-align: center;
+  border: var(--divider-width) dashed var(--color-border);
+  border-radius: var(--border-radius);
 }

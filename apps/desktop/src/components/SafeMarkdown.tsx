@@ -11,6 +11,7 @@
  */
 import { useState, type ReactNode } from "react";
 import { useI18n } from "../i18n";
+import { localizeToolStatus } from "../i18n/localizeEnums";
 import styles from "./safeMarkdown.module.css";
 
 export async function copyToClipboard(text: string): Promise<boolean> {
@@ -117,8 +118,8 @@ export function ToolBlock({ text, status, onToggle }: ToolBlockProps) {
         <div style={{ display: "flex", alignItems: "center", gap: "var(--spacing-8)" }}>
           <span>{t.markdown.toolExecution}</span>
           {status ? (
-            <span className={`${styles.toolStatusBadge} ${statusClass}`}>
-              {status}
+            <span className={`${styles.toolStatusBadge} ${statusClass}`} data-testid="tool-status-badge">
+              {localizeToolStatus(status, t)}
             </span>
           ) : null}
         </div>

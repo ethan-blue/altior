@@ -88,16 +88,22 @@ export function ContextPanel({ snapshot, status, error }: ContextPanelProps) {
           <dd className={shell.mono}>{snapshot.budget.memory_limit_tokens}</dd>
           <dt>{t.contextPanel.identityTokens}</dt>
           <dd className={shell.mono}>
-            {snapshot.budget.identity_tokens} / {snapshot.budget.identity_limit_tokens} tokens
+            {t.contextPanel.tokensFraction(
+              snapshot.budget.identity_tokens,
+              snapshot.budget.identity_limit_tokens,
+            )}
           </dd>
           <dt>{t.contextPanel.memoryTokens}</dt>
           <dd className={shell.mono}>
-            {snapshot.budget.memory_tokens} / {snapshot.budget.memory_limit_tokens} tokens
+            {t.contextPanel.tokensFraction(
+              snapshot.budget.memory_tokens,
+              snapshot.budget.memory_limit_tokens,
+            )}
           </dd>
           <dt>{t.contextPanel.promptTokens}</dt>
-          <dd className={shell.mono}>{snapshot.budget.prompt_tokens} tokens</dd>
+          <dd className={shell.mono}>{t.contextPanel.tokensCount(snapshot.budget.prompt_tokens)}</dd>
           <dt>{t.contextPanel.totalTokens}</dt>
-          <dd className={shell.mono}>{snapshot.budget.total_tokens} tokens</dd>
+          <dd className={shell.mono}>{t.contextPanel.tokensCount(snapshot.budget.total_tokens)}</dd>
         </dl>
       </section>
 
@@ -150,9 +156,25 @@ export function ContextPanel({ snapshot, status, error }: ContextPanelProps) {
 
                     <dt>{t.contextPanel.provenance}</dt>
                     <dd data-testid="memory-provenance">
-                      <div>thread_id: <span className={shell.mono}>{mem.provenance_thread_id ?? "unknown"}</span></div>
-                      <div>turn_id: <span className={shell.mono}>{mem.provenance_turn_id ?? "unknown"}</span></div>
-                      <div>excerpt: <span>{(mem as unknown as { excerpt?: string }).excerpt ?? "(none)"}</span></div>
+                      <div>
+                        {t.contextPanel.provenanceThread}:{" "}
+                        <span className={shell.mono}>
+                          {mem.provenance_thread_id ?? t.contextPanel.unknownValue}
+                        </span>
+                      </div>
+                      <div>
+                        {t.contextPanel.provenanceTurn}:{" "}
+                        <span className={shell.mono}>
+                          {mem.provenance_turn_id ?? t.contextPanel.unknownValue}
+                        </span>
+                      </div>
+                      <div>
+                        {t.contextPanel.provenanceExcerpt}:{" "}
+                        <span>
+                          {(mem as unknown as { excerpt?: string }).excerpt ??
+                            t.contextPanel.noneValue}
+                        </span>
+                      </div>
                     </dd>
                   </dl>
                 </div>
@@ -178,7 +200,7 @@ export function ContextPanel({ snapshot, status, error }: ContextPanelProps) {
                 <span className={shell.mono}>{item.memory_id}</span>
                 <span className={shell.droppedReason}>({item.reason})</span>
                 <span className={shell.droppedMeta}>
-                  rank #{item.rank} · {item.tokens} tokens
+                  {t.contextPanel.droppedMeta(item.rank, item.tokens)}
                 </span>
               </li>
             ))}
@@ -202,7 +224,7 @@ export function ContextPanel({ snapshot, status, error }: ContextPanelProps) {
                 <span className={shell.mono}>{idoc.document_id}</span>
                 <span className={shell.memoryKindBadge}>{localizeMemoryKind(idoc.kind, t)}</span>
                 <span className={shell.mono}>
-                  {idoc.tokens} {t.contextPanel.tokensUnit}
+                  {t.contextPanel.tokensCount(idoc.tokens)}
                 </span>
               </li>
             ))}

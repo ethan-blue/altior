@@ -180,6 +180,14 @@ export interface TranslationDictionary {
     readonly tokensUnit: string;
     readonly tokensScore: string;
     readonly tokensScoreValue: (tokens: number, score: number) => string;
+    readonly tokensFraction: (used: number, limit: number) => string;
+    readonly tokensCount: (n: number) => string;
+    readonly provenanceThread: string;
+    readonly provenanceTurn: string;
+    readonly provenanceExcerpt: string;
+    readonly unknownValue: string;
+    readonly noneValue: string;
+    readonly droppedMeta: (rank: number, tokens: number) => string;
   };
   readonly memoryPane: {
     readonly title: string;
@@ -252,6 +260,8 @@ export interface TranslationDictionary {
     readonly coreUnavailable: string;
     readonly streamReplaying: string;
     readonly streamReady: string;
+    readonly threadLine: (status: string) => string;
+    readonly streamLine: (status: string) => string;
   };
   readonly onboarding: {
     readonly title: string;
@@ -283,6 +293,7 @@ export interface TranslationDictionary {
     readonly verifiedWithLatency: (ms: number) => string;
     readonly testFailed: (msg: string) => string;
     readonly capabilitiesLabel: string;
+    readonly capabilitiesSummary: (list: string) => string;
     readonly agentRequiredNotice: string;
   };
   readonly markdown: {
@@ -296,6 +307,9 @@ export interface TranslationDictionary {
     readonly collapseOutput: string;
     readonly expandOutput: (extraLines: number) => string;
     readonly openImage: string;
+    readonly toolStatusCompleted: string;
+    readonly toolStatusFailed: string;
+    readonly toolStatusRunning: string;
   };
   readonly workbenchEmpty: {
     readonly connecting: string;
