@@ -65,6 +65,9 @@ export const zhCN: TranslationDictionary = {
     shortcutHintSend: "↵ 发送",
     shortcutHintNewline: "⇧↵ 换行",
     smartTools: "代理已就绪",
+    statusStreaming: "生成中",
+    statusStopping: "正在停止",
+    statusUnavailable: "暂不可用",
     cancelFailed: (reason) => `未能确认停止，代理可能仍在运行。（${reason}）`,
   },
   permission: {

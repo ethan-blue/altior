@@ -274,7 +274,13 @@ describe("P0.4 evidence", () => {
       ).toContain("approved");
     });
     await waitFor(() => {
-      expect(screen.getByRole("status")).toHaveTextContent("Permission approved");
+      // Composer ready-chip also uses role="status"; match the live announcement.
+      const statuses = screen.getAllByRole("status");
+      expect(
+        statuses.some((el) =>
+          /Permission approved|已批准权限请求/.test(el.textContent ?? ""),
+        ),
+      ).toBe(true);
     });
   });
 

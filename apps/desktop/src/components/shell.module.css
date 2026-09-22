@@ -494,29 +494,90 @@
 .composerToolsLeft {
   display: flex;
   align-items: center;
-  gap: var(--spacing-8);
+  gap: var(--spacing-12);
   min-width: 0;
 }
 
 .composerChip {
   display: inline-flex;
   align-items: center;
-  gap: var(--spacing-4);
-  padding: 2px var(--spacing-8);
+  gap: var(--spacing-6);
+  min-height: 22px;
+  padding: var(--spacing-2) var(--spacing-8);
   border-radius: var(--radius-full, 9999px);
-  font-size: 11px;
-  font-weight: 500;
+  font: 600 11px / var(--line-height-compact) var(--font-ui);
+  letter-spacing: 0.01em;
+  border: var(--divider-width) solid transparent;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.composerChipLabel {
+  max-width: 12em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.composerChipDot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  flex-shrink: 0;
+}
+
+.composerChipDotPulse {
+  animation: composerChipPulse 1.5s ease-in-out infinite;
+}
+
+@keyframes composerChipPulse {
+  0% { opacity: 0.35; }
+  50% { opacity: 1; }
+  100% { opacity: 0.35; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .composerChipDotPulse {
+    animation: none;
+    opacity: 1;
+  }
+}
+
+/* Ready: success chrome — clear "can send" affordance */
+.composerChipReady {
+  background: var(--color-success-surface);
+  color: var(--color-success);
+  border-color: var(--color-success);
+}
+
+/* Streaming: accent badge with live pulse */
+.composerChipStreaming {
   background: var(--color-badge-bg);
   color: var(--color-badge-text);
-  border: 1px solid var(--color-border-subtle);
+  border-color: var(--color-accent);
+}
+
+/* Stopping: warning chrome while cancel_turn is in flight */
+.composerChipStopping {
+  background: var(--color-warning-surface);
+  color: var(--color-warning);
+  border-color: var(--color-warning);
+}
+
+/* Unavailable: muted disabled surface when composer is blocked */
+.composerChipUnavailable {
+  background: var(--color-disabled-surface);
+  color: var(--color-disabled-text);
+  border-color: var(--color-border);
 }
 
 .composerShortcuts {
   display: flex;
   align-items: center;
-  gap: var(--spacing-4);
+  gap: var(--spacing-6);
   color: var(--color-muted);
   font-size: 11px;
+  opacity: 0.9;
 }
 
 .composerKbd {
