@@ -49,7 +49,7 @@ export const en: TranslationDictionary = {
     themeLabel: "Theme",
     languageLabel: "Language",
     globalSearchPlaceholder: "Search threads, commands, memory…",
-    searchShortcut: "⌘K",
+    searchShortcut: "Ctrl+K",
     vaultBadge: "Personal Vault",
     cancelTurn: "Cancel turn",
   },

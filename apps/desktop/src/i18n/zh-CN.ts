@@ -49,7 +49,7 @@ export const zhCN: TranslationDictionary = {
     themeLabel: "主题",
     languageLabel: "语言",
     globalSearchPlaceholder: "搜索会话、命令、记忆…",
-    searchShortcut: "⌘K",
+    searchShortcut: "Ctrl+K",
     vaultBadge: "个人知识库",
     cancelTurn: "取消轮次",
   },
