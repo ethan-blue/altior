@@ -109,6 +109,8 @@ export interface TranslationDictionary {
     readonly loadingDiagnostics: string;
     readonly diagnosticsFailed: string;
     readonly selectRowToInspect: string;
+    readonly selectRowHint: string;
+    readonly activeAgentSection: string;
     readonly agent: string;
     readonly model: string;
     readonly provider: string;
