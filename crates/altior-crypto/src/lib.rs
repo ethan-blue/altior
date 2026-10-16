@@ -18,8 +18,12 @@ pub mod device;
 pub mod error;
 pub mod pairing;
 pub mod session;
+pub mod session_v2;
 
 pub use device::{DeviceId, DeviceIdentity, DeviceKeys};
 pub use error::CryptoError;
 pub use pairing::PairingTranscript;
 pub use session::{ReplayWindow, Session};
+pub use session_v2::{
+    CounterBlock, CounterLease, COUNTER_BLOCK_SIZE, SessionEpoch, SessionV2,
+};
