@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { approvalThread, failureThread, standardThread } from "../fixtures/timeline";
 import { validateCommandEnvelope } from "../ipc/commandContract";
 import type { CommandEnvelope } from "../ipc/dto/CommandEnvelope";
@@ -359,6 +359,200 @@ describe("ApplicationStore", () => {
         (c) => c.kind === "open_thread" && (c.payload as OpenThreadCommand).thread_id === approvalThread.id,
       );
       expect(openCmd).toBeDefined();
+    });
+
+    it("surfaces snapshot session_error on the selected thread view", async () => {
+      const transport = new InMemoryTransport();
+      const store = createApplicationStore(transport);
+      await store.init();
+
+      await store.selectThread(approvalThread.id);
+      // A clean open carries no session failure.
+      expect(store.getState().selectedThread?.sessionError ?? null).toBeNull();
+
+      const reason = "spawn failed for program C:\\fixture\\missing-agent.exe: not found";
+      transport.setCommandHandler((cmd) => {
+        if (cmd.kind === "open_thread") {
+          const payload = cmd.payload as OpenThreadCommand;
+          return {
+            protocol_version: 1,
+            operation_id: cmd.operation_id,
+            thread_id: payload.thread_id,
+            as_of: 1700000000000,
+            data: {
+              thread: {
+                id: payload.thread_id,
+                agent_profile_id: "agp_fixture000000001",
+                title: approvalThread.title,
+                state: "open",
+                project_id: null,
+                created_at: 1700000000000,
+                updated_at: 1700000000000,
+              },
+              agent_profile: null,
+              turns: [],
+              pending_permissions: [],
+              session_error: reason,
+            },
+          };
+        }
+        return undefined;
+      });
+
+      await store.selectThread(approvalThread.id);
+      const view = store.getState().selectedThread;
+      expect(view?.sessionError).toBe(reason);
+    });
+
+    it("session_error survives list refresh and snapshot recovery until a clean open_thread", async () => {
+      const transport = new InMemoryTransport();
+      const store = createApplicationStore(transport);
+      await store.init();
+
+      const reason = "spawn failed for program C:\\fixture\\missing-agent.exe: not found";
+      let openSessionError: string | null = reason;
+      const snapshotFor = (cmd: CommandEnvelope, sessionError: string | null) => {
+        const payload = cmd.payload as { thread_id?: string | null } | null;
+        return {
+          protocol_version: 1,
+          operation_id: cmd.operation_id,
+          thread_id: payload?.thread_id ?? null,
+          as_of: 1700000000000,
+          data: {
+            thread: {
+              id: payload?.thread_id ?? null,
+              agent_profile_id: "agp_fixture000000001",
+              title: approvalThread.title,
+              state: "open",
+              project_id: null,
+              created_at: 1700000000000,
+              updated_at: 1700000000000,
+            },
+            agent_profile: null,
+            turns: [],
+            pending_permissions: [],
+            ...(sessionError !== null ? { session_error: sessionError } : {}),
+          },
+        };
+      };
+      transport.setCommandHandler((cmd) => {
+        if (cmd.kind === "open_thread") {
+          return snapshotFor(cmd, openSessionError);
+        }
+        if (cmd.kind === "request_snapshot") {
+          const payload = cmd.payload as { thread_id?: string | null } | null;
+          // request_snapshot never attempts a session: the response carries
+          // no session_error at all ("no information", not "recovered").
+          if (payload?.thread_id) {
+            return snapshotFor(cmd, null);
+          }
+        }
+        return undefined;
+      });
+
+      await store.selectThread(approvalThread.id);
+      expect(store.getState().selectedThread?.sessionError).toBe(reason);
+
+      // Reconnect rebuilds views from list summaries — no open_thread ran,
+      // so the standing session failure must stay visible.
+      await store.reconnect();
+      expect(store.getState().selectedThread?.sessionError).toBe(reason);
+
+      // Stream-gap recovery applies thread snapshots that carry no
+      // session_error; that absence must not erase the explanation either.
+      const baseline = transport.sentCommands.length;
+      store._handleEvent({
+        protocol_version: 1,
+        event_id: "evt_fixture000000361",
+        operation_id: null,
+        thread_id: null,
+        turn_id: null,
+        sequence: 70 as Sequence,
+        occurred_at: Date.now(),
+        body: {
+          kind: "stream.gap",
+          from: 65,
+        },
+      });
+      await vi.waitFor(() => {
+        const kinds = transport.sentCommands.slice(baseline).map((c) => c.kind);
+        expect(kinds.filter((k) => k === "request_snapshot").length).toBeGreaterThanOrEqual(2);
+      });
+      expect(store.getState().selectedThread?.sessionError).toBe(reason);
+
+      // Only a fresh open_thread that establishes the session clears it.
+      openSessionError = null;
+      await store.selectThread(approvalThread.id);
+      expect(store.getState().selectedThread?.sessionError).toBeNull();
+    });
+
+    it("recovery refetches journal history before layering the thread snapshot (ADR 0020)", async () => {
+      const transport = new InMemoryTransport();
+      const store = createApplicationStore(transport);
+      await store.init();
+      await store.selectThread(approvalThread.id);
+
+      const baseline = transport.sentCommands.length;
+      store._handleEvent({
+        protocol_version: 1,
+        event_id: "evt_fixture000000371",
+        operation_id: null,
+        thread_id: null,
+        turn_id: null,
+        sequence: 80 as Sequence,
+        occurred_at: Date.now(),
+        body: {
+          kind: "stream.gap",
+          from: 75,
+        },
+      });
+      await vi.waitFor(() => {
+        const kinds = transport.sentCommands.slice(baseline).map((c) => c.kind);
+        expect(kinds).toContain("get_history");
+        expect(kinds).toContain("request_snapshot");
+      });
+
+      // Same ordering as openThread: journal history lands first, then the
+      // snapshot layers pending permissions on top of it.
+      const kinds = transport.sentCommands.slice(baseline).map((c) => c.kind);
+      expect(kinds.lastIndexOf("get_history")).toBeLessThan(
+        kinds.lastIndexOf("request_snapshot"),
+      );
+    });
+
+    it("memory-mode updates keep every env mapping's secret ref (multi-credential bindings)", async () => {
+      const transport = new InMemoryTransport();
+      const store = createApplicationStore(transport);
+      await store.init();
+
+      const agent = await store.onboardAgent({
+        name: "Multi Mapping Agent",
+        provider: "acp",
+        program: "/opt/bin/agent-multi",
+        envKeys: ["ANTHROPIC_API_KEY", "OPENAI_API_KEY"],
+        secretRefs: ["vault://sec-alpha", "vault://sec-beta"],
+        label: "Multi Binding",
+      });
+
+      const baseline = transport.sentCommands.length;
+      await store.setAgentMemoryMode(agent.id, "long_term");
+
+      const cmd = transport.sentCommands
+        .slice(baseline)
+        .find((c) => c.kind === "configure_agent");
+      expect(cmd).toBeDefined();
+      const payload = cmd!.payload as ConfigureAgentCommand;
+      expect(payload.binding).not.toBeNull();
+      expect(payload.binding!.env_keys).toEqual([
+        "ANTHROPIC_API_KEY",
+        "OPENAI_API_KEY",
+      ]);
+      // env_keys and secret_refs are positionally paired; sending only the
+      // first ref would silently strip the second credential on update.
+      expect(payload.binding!.secret_refs).toEqual([
+        "vault://sec-alpha",
+        "vault://sec-beta",
+      ]);
     });
 
     it("filters threads via search_threads command", async () => {

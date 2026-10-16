@@ -1,31 +1,23 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useI18n } from "../i18n";
 import {
   localizeMemoryKind,
   localizeMemoryScope,
+  localizeMemorySource,
   localizeMemoryState,
 } from "../i18n/localizeEnums";
 import type { MemoryRecordDto } from "../ipc/dto/MemoryRecordDto";
 import type { AgentProfile } from "../stores/applicationStore";
 import styles from "./memoryPane.module.css";
 
-
-function localizeMemorySource(
-  source: string,
-  t: ReturnType<typeof useI18n>["t"],
-): string {
-  if (source === "explicit") return t.memoryPane.sourceExplicit;
-  if (source === "inferred") return t.memoryPane.sourceInferred;
-  return source;
-}
-
-
-
 export interface MemoryPaneProps {
   readonly memories: readonly MemoryRecordDto[];
   readonly isLoading?: boolean;
   readonly activeAgent?: AgentProfile | null;
   readonly onSetAgentMemoryMode?: (agentId: string, mode: "off" | "session" | "long_term") => void;
+  readonly selectedMemoryId?: string | null;
+  readonly onSelectMemory?: (memory: MemoryRecordDto) => void;
+  readonly onClearMemorySelection?: () => void;
   readonly onProposeMemory?: (params: {
     content: string;
     scope_kind: string;
@@ -44,6 +36,9 @@ export function MemoryPane({
   isLoading = false,
   activeAgent,
   onSetAgentMemoryMode,
+  selectedMemoryId = null,
+  onSelectMemory,
+  onClearMemorySelection,
   onProposeMemory,
   onConfirmMemory,
   onRejectMemory,
@@ -66,31 +61,60 @@ export function MemoryPane({
   // Correction state: memoryId -> draft content
   const [editingMemoryId, setEditingMemoryId] = useState<string | null>(null);
   const [editContent, setEditContent] = useState("");
+  const [focusedMemoryId, setFocusedMemoryId] = useState<string | null>(null);
+  const [operationError, setOperationError] = useState(false);
+  const rowRefs = useRef(new Map<string, HTMLTableRowElement>());
 
   const filteredMemories = memories.filter((m) => {
     if (stateFilter !== "all" && m.state !== stateFilter) return false;
     if (scopeFilter !== "all" && m.scope_kind !== scopeFilter) return false;
     return true;
   });
+  const rovingMemoryId =
+    filteredMemories.find((memory) => memory.memory_id === focusedMemoryId)?.memory_id ??
+    filteredMemories.find((memory) => memory.memory_id === selectedMemoryId)?.memory_id ??
+    filteredMemories[0]?.memory_id;
+
+  const runMemoryOperation = async (operation: () => Promise<unknown>) => {
+    setOperationError(false);
+    try {
+      await operation();
+      return true;
+    } catch {
+      setOperationError(true);
+      return false;
+    }
+  };
 
   const handlePropose = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newContent.trim() || !onProposeMemory) return;
     setIsSubmitting(true);
     try {
-      await onProposeMemory({
-        content: newContent.trim(),
-        scope_kind: newScopeKind,
-        scope_target: newScopeKind === "global" ? null : (newScopeTarget.trim() || null),
-        kind: newKind,
-        source: newIsExplicit ? "explicit" : "inferred",
-      });
-      setNewContent("");
-      setNewScopeTarget("");
-      setShowAddForm(false);
+      const succeeded = await runMemoryOperation(() =>
+        onProposeMemory({
+          content: newContent.trim(),
+          scope_kind: newScopeKind,
+          scope_target: newScopeKind === "global" ? null : (newScopeTarget.trim() || null),
+          kind: newKind,
+          source: newIsExplicit ? "explicit" : "inferred",
+        }),
+      );
+      if (succeeded) {
+        setNewContent("");
+        setNewScopeTarget("");
+        setShowAddForm(false);
+      }
     } finally {
       setIsSubmitting(false);
     }
+  };
+
+  const focusMemoryRow = (index: number) => {
+    const target = filteredMemories[index];
+    if (!target) return;
+    setFocusedMemoryId(target.memory_id);
+    rowRefs.current.get(target.memory_id)?.focus();
   };
 
   const handleStartCorrect = (mem: MemoryRecordDto) => {
@@ -100,15 +124,15 @@ export function MemoryPane({
 
   const handleSaveCorrect = async (memoryId: string) => {
     if (!editContent.trim() || !onCorrectMemory) return;
-    try {
-      await onCorrectMemory({
+    const succeeded = await runMemoryOperation(() =>
+      onCorrectMemory({
         memory_id: memoryId,
         content: editContent.trim(),
-      });
+      }),
+    );
+    if (succeeded) {
       setEditingMemoryId(null);
       setEditContent("");
-    } catch {
-      // Error handled by caller
     }
   };
 
@@ -128,7 +152,21 @@ export function MemoryPane({
           <select
             className={styles.select}
             value={stateFilter}
-            onChange={(e) => setStateFilter(e.target.value)}
+            onChange={(e) => {
+              const nextFilter = e.target.value;
+              setStateFilter(nextFilter);
+              if (
+                selectedMemoryId &&
+                !memories.some(
+                  (memory) =>
+                    memory.memory_id === selectedMemoryId &&
+                    (nextFilter === "all" || memory.state === nextFilter) &&
+                    (scopeFilter === "all" || memory.scope_kind === scopeFilter),
+                )
+              ) {
+                onClearMemorySelection?.();
+              }
+            }}
             aria-label={t.memoryPane.filterStateAria}
             data-testid="memory-state-filter"
           >
@@ -144,7 +182,21 @@ export function MemoryPane({
           <select
             className={styles.select}
             value={scopeFilter}
-            onChange={(e) => setScopeFilter(e.target.value)}
+            onChange={(e) => {
+              const nextFilter = e.target.value;
+              setScopeFilter(nextFilter);
+              if (
+                selectedMemoryId &&
+                !memories.some(
+                  (memory) =>
+                    memory.memory_id === selectedMemoryId &&
+                    (stateFilter === "all" || memory.state === stateFilter) &&
+                    (nextFilter === "all" || memory.scope_kind === nextFilter),
+                )
+              ) {
+                onClearMemorySelection?.();
+              }
+            }}
             aria-label={t.memoryPane.filterScopeAria}
             data-testid="memory-scope-filter"
           >
@@ -167,6 +219,12 @@ export function MemoryPane({
         </div>
       </header>
 
+      {operationError ? (
+        <p className={styles.operationError} role="alert" data-testid="memory-operation-error">
+          {t.memoryPane.operationFailed}
+        </p>
+      ) : null}
+
       {/* Agent Memory Mode Setting */}
       {activeAgent ? (
         <div className={styles.agentModeBar} data-testid="agent-memory-mode-bar">
@@ -174,12 +232,15 @@ export function MemoryPane({
           <select
             className={styles.select}
             value={activeAgent.memory_mode ?? "session"}
-            onChange={(e) =>
-              onSetAgentMemoryMode?.(
-                activeAgent.id,
-                e.target.value as "off" | "session" | "long_term",
-              )
-            }
+            onChange={(e) => {
+              const nextMode = e.target.value as "off" | "session" | "long_term";
+              // Surface transport/validation failures in the shared
+              // operation-error banner; the select stays on the old value
+              // because the mode only changes in the store on success.
+              void runMemoryOperation(async () => {
+                await onSetAgentMemoryMode?.(activeAgent.id, nextMode);
+              });
+            }}
             aria-label={t.memoryPane.agentModeAria}
             data-testid="agent-memory-mode-select"
           >
@@ -291,7 +352,8 @@ export function MemoryPane({
       ) : null}
 
       {/* Memory Cards List */}
-      <div className={styles.cardList} data-testid="memory-card-list">
+      {/* Dense memory table (redesign — replaces card waterfall) */}
+      <div className={styles.tableWrap} data-testid="memory-card-list">
         {filteredMemories.length === 0 ? (
           <p className={styles.emptyMessage} data-testid="memory-empty">
             {memories.length === 0
@@ -299,131 +361,208 @@ export function MemoryPane({
               : t.memoryPane.emptyFiltered}
           </p>
         ) : (
-          filteredMemories.map((mem) => {
-            const isEditing = editingMemoryId === mem.memory_id;
-            return (
-              <article
-                key={mem.memory_id}
-                className={styles.card}
-                data-testid={`memory-card-${mem.memory_id}`}
-              >
-                <div className={styles.cardHeader}>
-                  <div className={styles.idAndBadges}>
-                    <span className={styles.mono}>{mem.memory_id}</span>
-                    <span
-                      className={`${styles.badge} ${
-                        mem.state === "confirmed"
-                          ? styles.badgeConfirmed
-                          : mem.state === "candidate"
-                            ? styles.badgeCandidate
-                            : mem.state === "rejected"
-                              ? styles.badgeRejected
-                              : mem.state === "superseded"
-                                ? styles.badgeSuperseded
-                                : styles.badgeForgotten
-                      }`}
-                      data-testid="memory-state-badge"
-                    >
-                      {localizeMemoryState(mem.state, t)}
-                    </span>
-                    <span className={styles.badge}>{localizeMemoryKind(mem.kind, t)}</span>
-                    <span className={styles.stats}>{mem.confidence}% {t.contextPanel.confidence}</span>
-                  </div>
-                  <span className={styles.stats}>
-                    {new Date(mem.updated_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
-                  </span>
-                </div>
-
-                {isEditing ? (
-                  <div className={styles.editColumn}>
-                    <textarea
-                      className={styles.textarea}
-                      value={editContent}
-                      onChange={(e) => setEditContent(e.target.value)}
-                      data-testid="memory-edit-input"
-                    />
-                    <div className={styles.editActions}>
-                      <button
-                        type="button"
-                        className={styles.btnAction}
-                        onClick={() => setEditingMemoryId(null)}
+          <table className={styles.table} role="grid" aria-label={t.memoryPane.title}>
+            <thead>
+              <tr>
+                <th scope="col">{t.memoryPane.colContent}</th>
+                <th scope="col">{t.memoryPane.colKind}</th>
+                <th scope="col">{t.memoryPane.colScope}</th>
+                <th scope="col">{t.memoryPane.sourceLabel}</th>
+                <th scope="col">{t.memoryPane.colConfidence}</th>
+                <th scope="col">{t.memoryPane.colState}</th>
+                <th scope="col">{t.memoryPane.colUpdated}</th>
+                <th scope="col">{t.memoryPane.colActions}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filteredMemories.map((mem, index) => {
+                const isEditing = editingMemoryId === mem.memory_id;
+                return (
+                  <tr
+                    key={mem.memory_id}
+                    ref={(node) => {
+                      if (node) rowRefs.current.set(mem.memory_id, node);
+                      else rowRefs.current.delete(mem.memory_id);
+                    }}
+                    className={`${styles.row}${selectedMemoryId === mem.memory_id ? ` ${styles.rowSelected}` : ""}`}
+                    data-testid={`memory-card-${mem.memory_id}`}
+                    data-state={mem.state}
+                    aria-selected={selectedMemoryId === mem.memory_id}
+                    tabIndex={rovingMemoryId === mem.memory_id ? 0 : -1}
+                    onFocus={(event) => {
+                      if (event.target === event.currentTarget) setFocusedMemoryId(mem.memory_id);
+                    }}
+                    onClick={() => {
+                      setFocusedMemoryId(mem.memory_id);
+                      onSelectMemory?.(mem);
+                    }}
+                    onKeyDown={(event) => {
+                      if (event.target !== event.currentTarget) return;
+                      if (event.key === "Enter" || event.key === " ") {
+                        event.preventDefault();
+                        onSelectMemory?.(mem);
+                      } else if (event.key === "ArrowDown") {
+                        event.preventDefault();
+                        focusMemoryRow(Math.min(index + 1, filteredMemories.length - 1));
+                      } else if (event.key === "ArrowUp") {
+                        event.preventDefault();
+                        focusMemoryRow(Math.max(index - 1, 0));
+                      } else if (event.key === "Home") {
+                        event.preventDefault();
+                        focusMemoryRow(0);
+                      } else if (event.key === "End") {
+                        event.preventDefault();
+                        focusMemoryRow(filteredMemories.length - 1);
+                      }
+                    }}
+                  >
+                    <td className={styles.cellContent}>
+                      {isEditing ? (
+                        <div className={styles.editColumn}>
+                          <textarea
+                            className={styles.textarea}
+                            value={editContent}
+                            onChange={(e) => setEditContent(e.target.value)}
+                            data-testid="memory-edit-input"
+                          />
+                          <div className={styles.editActions}>
+                            <button
+                              type="button"
+                              className={styles.btnAction}
+                              onClick={() => setEditingMemoryId(null)}
+                            >
+                              {t.memoryPane.cancel}
+                            </button>
+                            <button
+                              type="button"
+                              className={styles.primaryButton}
+                              onClick={() => handleSaveCorrect(mem.memory_id)}
+                              data-testid="memory-save-correct-btn"
+                            >
+                              {t.memoryPane.save}
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <div
+                          className={styles.content}
+                          data-testid="memory-card-content"
+                        >
+                          {mem.content}
+                        </div>
+                      )}
+                    </td>
+                    <td>
+                        <span className={styles.kindText}>
+                          {localizeMemoryKind(mem.kind, t)}
+                        </span>
+                    </td>
+                    <td>
+                      <span>
+                        {localizeMemoryScope(mem.scope_kind, t)}
+                        {mem.scope_target ? (
+                          <span className={styles.mono}>
+                            {" "}
+                            ({mem.scope_target})
+                          </span>
+                        ) : null}
+                      </span>
+                    </td>
+                    <td data-testid="memory-source-label">{localizeMemorySource(mem.source, t)}</td>
+                    <td className={styles.cellNumeric}>
+                      {mem.confidence}%
+                    </td>
+                    <td>
+                      <span
+                        className={`${styles.badge} ${
+                          mem.state === "confirmed"
+                            ? styles.badgeConfirmed
+                            : mem.state === "candidate"
+                              ? styles.badgeCandidate
+                              : mem.state === "rejected"
+                                ? styles.badgeRejected
+                                : mem.state === "superseded"
+                                  ? styles.badgeSuperseded
+                                  : styles.badgeForgotten
+                        }`}
+                        data-testid="memory-state-badge"
                       >
-                        {t.memoryPane.cancel}
-                      </button>
-                      <button
-                        type="button"
-                        className={styles.primaryButton}
-                        onClick={() => handleSaveCorrect(mem.memory_id)}
-                        data-testid="memory-save-correct-btn"
-                      >
-                        {t.memoryPane.save}
-                      </button>
-                    </div>
-                  </div>
-                ) : (
-                  <div className={styles.content} data-testid="memory-card-content">
-                    {mem.content}
-                  </div>
-                )}
-
-                <div className={styles.metaRow}>
-                  <span>{t.memoryPane.scopeLabel}: <strong>{localizeMemoryScope(mem.scope_kind, t)}</strong>{mem.scope_target ? ` (${mem.scope_target})` : ""}</span>
-                  <span data-testid="memory-source-label">{t.memoryPane.sourceLabel}: <strong>{localizeMemorySource(mem.source, t)}</strong></span>
-                  {mem.provenance_thread_id ? (
-                    <span>{t.memoryPane.originLabel}: <span className={styles.mono}>{mem.provenance_thread_id}</span></span>
-                  ) : null}
-                  {mem.superseded_by ? (
-                    <span>{t.memoryPane.supersededByLabel}: <span className={styles.mono}>{mem.superseded_by}</span></span>
-                  ) : null}
-                </div>
-
-                {/* Actions per state */}
-                <div className={styles.cardActions}>
-                  {mem.state === "candidate" ? (
-                    <>
-                      <button
-                        type="button"
-                        className={`${styles.btnAction} ${styles.btnConfirm}`}
-                        onClick={() => onConfirmMemory?.(mem.memory_id)}
-                        data-testid="memory-confirm-btn"
-                      >
-                        ✓ {t.memoryPane.confirm}
-                      </button>
-                      <button
-                        type="button"
-                        className={`${styles.btnAction} ${styles.btnReject}`}
-                        onClick={() => onRejectMemory?.(mem.memory_id)}
-                        data-testid="memory-reject-btn"
-                      >
-                        × {t.memoryPane.reject}
-                      </button>
-                    </>
-                  ) : null}
-
-                  {mem.state === "confirmed" && !isEditing ? (
-                    <>
-                      <button
-                        type="button"
-                        className={styles.btnAction}
-                        onClick={() => handleStartCorrect(mem)}
-                        data-testid="memory-correct-btn"
-                      >
-                        ✎ {t.memoryPane.correct}
-                      </button>
-                      <button
-                        type="button"
-                        className={styles.btnAction}
-                        onClick={() => onForgetMemory?.(mem.memory_id)}
-                        data-testid="memory-forget-btn"
-                      >
-                        🗑 {t.memoryPane.forget}
-                      </button>
-                    </>
-                  ) : null}
-                </div>
-              </article>
-            );
-          })
+                        {localizeMemoryState(mem.state, t)}
+                      </span>
+                    </td>
+                    <td className={styles.cellMuted}>
+                      {new Date(mem.updated_at).toLocaleString([], {
+                        month: "2-digit",
+                        day: "2-digit",
+                        hour: "2-digit",
+                        minute: "2-digit",
+                      })}
+                    </td>
+                    <td className={styles.cellActions}>
+                      {mem.state === "candidate" ? (
+                        <>
+                          <button
+                            type="button"
+                            className={`${styles.btnAction} ${styles.btnConfirm}`}
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              if (onConfirmMemory) {
+                                void runMemoryOperation(() => onConfirmMemory(mem.memory_id));
+                              }
+                            }}
+                            data-testid="memory-confirm-btn"
+                          >
+                            {t.memoryPane.confirm}
+                          </button>
+                          <button
+                            type="button"
+                            className={`${styles.btnAction} ${styles.btnReject}`}
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              if (onRejectMemory) {
+                                void runMemoryOperation(() => onRejectMemory(mem.memory_id));
+                              }
+                            }}
+                            data-testid="memory-reject-btn"
+                          >
+                            {t.memoryPane.reject}
+                          </button>
+                        </>
+                      ) : null}
+                      {mem.state === "confirmed" && !isEditing ? (
+                        <>
+                          <button
+                            type="button"
+                            className={styles.btnAction}
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              handleStartCorrect(mem);
+                            }}
+                            data-testid="memory-correct-btn"
+                          >
+                            {t.memoryPane.correct}
+                          </button>
+                          <button
+                            type="button"
+                            className={styles.btnAction}
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              if (onForgetMemory) {
+                                void runMemoryOperation(() => onForgetMemory(mem.memory_id));
+                              }
+                            }}
+                            data-testid="memory-forget-btn"
+                          >
+                            {t.memoryPane.forget}
+                          </button>
+                        </>
+                      ) : null}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
         )}
       </div>
     </section>

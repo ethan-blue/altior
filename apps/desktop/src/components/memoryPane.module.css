@@ -28,13 +28,13 @@
 
 .title {
   margin: 0;
-  font-size: var(--font-size-title, 1.25rem);
+  font-size: var(--font-size-title);
   font-weight: 600;
 }
 
 .stats {
   color: var(--color-muted);
-  font-size: var(--font-size-small, 0.85rem);
+  font-size: var(--font-size-small);
 }
 
 .controls {
@@ -49,9 +49,9 @@
   background: var(--color-surface);
   color: var(--color-text);
   border: 1px solid var(--color-control-border);
-  border-radius: var(--radius-sm, 4px);
+  border-radius: var(--radius-sm);
   padding: var(--spacing-4) var(--spacing-8);
-  font-size: var(--font-size-small, 0.85rem);
+  font-size: var(--font-size-small);
 }
 
 .select:focus,
@@ -64,7 +64,7 @@
   background: var(--color-accent);
   color: var(--color-accent-foreground);
   border: none;
-  border-radius: var(--radius-sm, 4px);
+  border-radius: var(--radius-sm);
   padding: var(--spacing-6) var(--spacing-12);
   font-weight: 500;
   cursor: pointer;
@@ -74,6 +74,15 @@
   filter: brightness(0.95);
 }
 
+.operationError {
+  margin: 0;
+  padding: var(--spacing-8) var(--spacing-12);
+  color: var(--color-danger);
+  background: var(--color-danger-surface);
+  border-left: calc(var(--divider-width) * 3) solid var(--color-danger);
+  font-size: var(--font-size-small);
+}
+
 .agentModeBar {
   display: flex;
   align-items: center;
@@ -81,8 +90,8 @@
   padding: var(--spacing-8) var(--spacing-12);
   background: var(--color-surface);
   border: 1px solid var(--color-border);
-  border-radius: var(--radius-md, 6px);
-  font-size: var(--font-size-small, 0.85rem);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-small);
 }
 
 .agentModeLabel {
@@ -92,7 +101,7 @@
 .formCard {
   background: var(--color-surface);
   border: 1px solid var(--color-border);
-  border-radius: var(--radius-md, 6px);
+  border-radius: var(--radius-sm);
   padding: var(--spacing-12);
   display: flex;
   flex-direction: column;
@@ -111,10 +120,10 @@
   background: var(--color-canvas);
   color: var(--color-text);
   border: 1px solid var(--color-control-border);
-  border-radius: var(--radius-sm, 4px);
+  border-radius: var(--radius-sm);
   padding: var(--spacing-8);
   font-family: inherit;
-  font-size: var(--font-size-small, 0.85rem);
+  font-size: var(--font-size-small);
   resize: vertical;
 }
 
@@ -122,49 +131,23 @@
   outline: 2px solid var(--color-focus);
 }
 
-.cardList {
-  display: flex;
-  flex-direction: column;
-  gap: var(--spacing-12);
-}
-
-.card {
-  background: var(--color-surface);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md, 6px);
-  padding: var(--spacing-12);
-  display: flex;
-  flex-direction: column;
-  gap: var(--spacing-8);
-}
-
-.cardHeader {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--spacing-8);
-}
-
-.idAndBadges {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--spacing-6);
-}
-
 .mono {
-  font-family: var(--font-mono, monospace);
-  font-size: var(--font-size-small, 0.85rem);
+  font-family: var(--font-mono);
+  font-size: var(--font-size-small);
+}
+
+.kindText {
+  color: var(--color-muted);
+  font-size: var(--font-size-ui);
 }
 
 .badge {
   display: inline-block;
-  padding: 1px 6px;
-  border-radius: 3px;
-  font-size: 0.75rem;
+  padding: 1px var(--spacing-4);
+  border-radius: var(--radius-xs);
+  font-size: var(--font-size-small);
   font-weight: 600;
-  text-transform: uppercase;
+  white-space: nowrap;
 }
 
 .badgeCandidate {
@@ -198,33 +181,18 @@
 }
 
 .content {
-  font-size: var(--font-size-normal, 0.95rem);
+  font-size: var(--font-size-normal);
   line-height: 1.45;
   word-break: break-word;
 }
 
-.metaRow {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--spacing-12);
-  font-size: var(--font-size-small, 0.85rem);
-  color: var(--color-muted);
-}
-
-.cardActions {
-  display: flex;
-  align-items: center;
-  gap: var(--spacing-8);
-  margin-top: var(--spacing-4);
-}
-
 .btnAction {
-  background: var(--color-surface);
-  color: var(--color-text);
-  border: 1px solid var(--color-control-border);
-  border-radius: var(--radius-sm, 4px);
-  padding: var(--spacing-4) var(--spacing-8);
-  font-size: var(--font-size-small, 0.85rem);
+  background: transparent;
+  color: var(--color-accent);
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  padding: var(--spacing-4) var(--spacing-6);
+  font-size: var(--font-size-small);
   cursor: pointer;
 }
 
@@ -248,7 +216,7 @@
   padding: var(--spacing-32);
   text-align: center;
   color: var(--color-muted);
-  font-size: var(--font-size-normal, 0.95rem);
+  font-size: var(--font-size-normal);
 }
 
 .formFieldLabel {
@@ -285,4 +253,88 @@
   display: flex;
   gap: 8px;
   justify-content: flex-end;
+}
+
+/* Dense memory table (UI redesign) */
+.tableWrap {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  border-top: 1px solid var(--color-border-subtle);
+}
+
+.table {
+  width: 100%;
+  min-width: 680px;
+  border-collapse: collapse;
+  font: var(--font-size-ui) / var(--line-height-compact) var(--font-ui);
+}
+
+.table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  text-align: left;
+  font-weight: 600;
+  font-size: 11px;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--color-muted);
+  background: var(--color-surface-subtle);
+  border-bottom: 1px solid var(--color-border);
+  padding: var(--spacing-6) var(--spacing-8);
+  white-space: nowrap;
+}
+
+.row {
+  border-bottom: 1px solid var(--color-border-subtle);
+}
+
+.row:hover {
+  background: var(--color-surface-hover);
+}
+
+.row:focus-visible {
+  outline: var(--focus-ring) solid var(--color-focus);
+  outline-offset: calc(-1 * var(--focus-ring));
+}
+
+.rowSelected {
+  background: var(--color-selection);
+}
+
+.row td {
+  padding: var(--spacing-6) var(--spacing-8);
+  vertical-align: top;
+  color: var(--color-text);
+}
+
+.row td:not(.cellContent) {
+  white-space: nowrap;
+}
+
+.cellContent {
+  min-width: 180px;
+  max-width: 420px;
+}
+
+.cellNumeric {
+  font-variant-numeric: tabular-nums;
+  font-family: var(--font-mono);
+  white-space: nowrap;
+}
+
+.cellMuted {
+  color: var(--color-muted);
+  white-space: nowrap;
+  font-size: 12px;
+}
+
+.cellActions {
+  white-space: nowrap;
+}
+
+.cellActions .btnAction {
+  margin-right: var(--spacing-4);
+  margin-bottom: var(--spacing-2);
 }

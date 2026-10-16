@@ -149,6 +149,12 @@ export interface ThreadSummaryView {
   readonly agent: string;
   readonly status: ThreadStatus;
   readonly pinned: boolean;
+  /**
+   * Why the last open_thread could not establish a harness session, from
+   * the Core snapshot (offline readability keeps the thread open). Absent
+   * when no session was attempted or the session came up cleanly.
+   */
+  readonly sessionError?: string | null;
 }
 
 /** Delivery verdict for one dispatched prompt (review A04). */
@@ -520,12 +526,17 @@ export function createApplicationStore(
   const summaryToView = (summary: ThreadSummaryDto): ThreadSummaryView => {
     const status: ThreadStatus =
       summary.active_turn?.state === "active" ? "running" : "completed";
+    // List/search summaries never attempt a harness session, so the API
+    // carries no session_error for them; keep the last open_thread's
+    // explanation until a session-attempting snapshot contradicts it.
+    const carriedSessionError = threadViews.get(summary.thread.id)?.sessionError;
     return {
       id: summary.thread.id,
       title: summary.thread.title,
       agent: agentNameFor(summary.thread.agent_profile_id),
       status,
       pinned: summary.thread.state === "pinned",
+      ...(carriedSessionError ? { sessionError: carriedSessionError } : null),
     };
   };
 
@@ -606,6 +617,7 @@ export function createApplicationStore(
   const applyThreadSnapshot = (
     snapshot: ThreadSnapshotDto,
     threadId: string,
+    options: { sessionAttempted?: boolean } = {},
   ): void => {
     const threadStore = getTimelineStore(threadId);
 
@@ -659,12 +671,20 @@ export function createApplicationStore(
     // the visible list reflect the authoritative thread record (title,
     // agent display name once the profile is known).
     const snapshotThread = snapshot.thread;
+    // Only a snapshot from a path that actually attempted the session
+    // (open_thread) may set or clear session_error. request_snapshot never
+    // attempts one, so its absent error is "no information", not "recovered".
+    const previousSessionError =
+      options.sessionAttempted === true
+        ? null
+        : (threadViews.get(snapshotThread.id)?.sessionError ?? null);
     const refreshed: ThreadSummaryView = {
       id: snapshotThread.id,
       title: snapshotThread.title,
       agent: agentNameFor(snapshotThread.agent_profile_id),
       status: threadViews.get(snapshotThread.id)?.status ?? "completed",
       pinned: snapshotThread.state === "pinned",
+      sessionError: snapshot.session_error ?? previousSessionError,
     };
     threadViews.set(refreshed.id, refreshed);
     updateState((prev) => ({
@@ -910,8 +930,11 @@ export function createApplicationStore(
       await requestSnapshotFromCore();
       const currentSelected = state.selectedThreadId;
       if (currentSelected) {
-        await requestSnapshotFromCore(currentSelected);
+        // Same ordering as openThread (ADR 0020): journal history first,
+        // then layer the snapshot on top, so recovered permissions keep
+        // journal order instead of jumping above older history rows.
         await getHistory(currentSelected);
+        await requestSnapshotFromCore(currentSelected);
       }
     } catch {
       // Retain fallback state on recovery error, avoid retry loop
@@ -1072,7 +1095,7 @@ export function createApplicationStore(
       const res = await transport.command<SnapshotEnvelope>(envelope);
       if (isSnapshotEnvelope(res) && res.data) {
         const snap = res.data as ThreadSnapshotDto;
-        applyThreadSnapshot(snap, threadId);
+        applyThreadSnapshot(snap, threadId, { sessionAttempted: true });
       }
     } catch {
       // Retain existing timeline store
@@ -1509,7 +1532,14 @@ export function createApplicationStore(
               program: agent.program,
               args: agent.args ? [...agent.args] : [],
               env_keys: agent.envKeys ? [...agent.envKeys] : [],
-              secret_refs: agent.secretRef ? [agent.secretRef] : [],
+              // env_keys and secret_refs are positionally paired in the
+              // binding; sending only the first ref would drop the
+              // credentials of every additional mapping on update.
+              secret_refs: agent.secretRefs
+                ? [...agent.secretRefs]
+                : agent.secretRef
+                  ? [agent.secretRef]
+                  : [],
               label: agent.label ?? null,
             }
           : null,

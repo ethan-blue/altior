@@ -42,9 +42,8 @@ export function ContextPanel({ snapshot, status, error }: ContextPanelProps) {
     return (
       <div className={shell.contextPanel} data-testid="context-panel">
         <p
-          className={shell.inspectorEmpty}
+          className={`${shell.inspectorEmpty} ${shell.inspectorError}`}
           data-testid="context-error"
-          style={{ color: "var(--color-danger, #b3362b)" }}
         >
           {error || t.contextPanel.loadFailed}
         </p>
@@ -138,7 +137,7 @@ export function ContextPanel({ snapshot, status, error }: ContextPanelProps) {
                     <span className={shell.memoryKindBadge}>{localizeMemoryKind(mem.kind, t)}</span>
                     <span className={shell.memoryConfidence}>{mem.confidence}%</span>
                   </div>
-                  <dl className={shell.inspectorFields} style={{ marginTop: "var(--spacing-6)" }}>
+                  <dl className={`${shell.inspectorFields} ${shell.memoryDetails}`}>
                     <dt>{t.contextPanel.summary}</dt>
                     <dd data-testid="memory-summary">{customSummary}</dd>
 

@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Workbench shell regions (ADR 0008 §2): activity rail, navigation pane,
  * thread header, composer, inspector, status bar. Five stable regions
  * per docs/UI_ARCHITECTURE.md; panes resize by drag or keyboard within
@@ -8,6 +8,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { TimelineRow } from "../features/timeline/timelineStore";
 import type { ContextSnapshotDto } from "../ipc/dto/ContextSnapshotDto";
 import type { RuntimeDiagnosticsDto } from "../ipc/dto/RuntimeDiagnosticsDto";
+import type { MemoryRecordDto } from "../ipc/dto/MemoryRecordDto";
 import {
   parseCommandLineArgs,
   parseStringList,
@@ -27,6 +28,10 @@ import { ContextPanel, type ContextPanelProps } from "./ContextPanel";
 import { useI18n } from "../i18n";
 import {
   localizeCapabilitySupport,
+  localizeMemoryKind,
+  localizeMemoryScope,
+  localizeMemorySource,
+  localizeMemoryState,
   localizePermissionDecision,
   localizeRuntimeStatus,
   localizeTimelineRowKind,
@@ -693,7 +698,7 @@ export function RuntimeDiagnosticsView({
   if (status === "error") {
     return (
       <div data-testid="diagnostics-error">
-        <p className={shell.inspectorEmpty} role="alert" style={{ color: "var(--color-danger, #b3362b)" }}>
+        <p className={`${shell.inspectorEmpty} ${shell.inspectorError}`} role="alert">
           {error || t.inspector.diagnosticsFailed}
         </p>
       </div>
@@ -707,7 +712,7 @@ export function RuntimeDiagnosticsView({
           {t.inspector.noDiagnostics}
         </p>
         {onRefresh ? (
-          <button type="button" className={shell.btnAction} onClick={onRefresh} style={{ display: "block", margin: "8px auto" }}>
+          <button type="button" className={`${shell.btnAction} ${shell.centeredAction}`} onClick={onRefresh}>
             {t.common.refresh}
           </button>
         ) : null}
@@ -735,11 +740,11 @@ export function RuntimeDiagnosticsView({
         <dt>{t.inspector.diagnosticsSummary}</dt>
         <dd className={shell.mono} data-testid="diag-summary">{diagnostics.summary ?? t.inspector.none}</dd>
       </dl>
-      <p style={{ fontSize: "0.75rem", color: "var(--color-muted)", marginTop: "12px", borderTop: "1px solid var(--color-border)", paddingTop: "8px" }} data-testid="diag-redacted-notice">
+      <p className={shell.diagnosticsNotice} data-testid="diag-redacted-notice">
         {t.inspector.redactedNotice}
       </p>
       {onRefresh ? (
-        <button type="button" className={shell.btnAction} onClick={onRefresh} style={{ marginTop: "8px" }} data-testid="diag-refresh-btn">
+        <button type="button" className={`${shell.btnAction} ${shell.diagnosticsRefresh}`} onClick={onRefresh} data-testid="diag-refresh-btn">
           {t.common.refresh}
         </button>
       ) : null}
@@ -752,6 +757,8 @@ export interface InspectorProps {
   readonly onWidthChange: (width: number) => void;
   readonly onClose: () => void;
   readonly focusedRow: TimelineRow | null;
+  readonly selectedMemory?: MemoryRecordDto | null;
+  readonly memoryMode?: boolean;
   readonly activeAgent?: AgentProfile | null;
   readonly contextSnapshot?: ContextSnapshotDto | null;
   readonly contextSnapshotStatus?: "idle" | "loading" | "loaded" | "not_found" | "error";
@@ -772,6 +779,8 @@ export function Inspector({
   onWidthChange,
   onClose,
   focusedRow,
+  selectedMemory,
+  memoryMode = false,
   activeAgent,
   contextSnapshot,
   contextSnapshotStatus,
@@ -844,9 +853,11 @@ export function Inspector({
                 if (e.key === "ArrowRight") {
                   e.preventDefault();
                   setActiveTab("context");
+                  document.getElementById("inspector-tab-context")?.focus();
                 } else if (e.key === "ArrowLeft") {
                   e.preventDefault();
                   setActiveTab("diagnostics");
+                  document.getElementById("inspector-tab-diagnostics")?.focus();
                 }
               }}
               data-testid="inspector-tab-details"
@@ -866,9 +877,11 @@ export function Inspector({
                 if (e.key === "ArrowRight") {
                   e.preventDefault();
                   setActiveTab("diagnostics");
+                  document.getElementById("inspector-tab-diagnostics")?.focus();
                 } else if (e.key === "ArrowLeft") {
                   e.preventDefault();
                   setActiveTab("details");
+                  document.getElementById("inspector-tab-details")?.focus();
                 }
               }}
               data-testid="inspector-tab-context"
@@ -891,9 +904,11 @@ export function Inspector({
                 if (e.key === "ArrowRight") {
                   e.preventDefault();
                   setActiveTab("details");
+                  document.getElementById("inspector-tab-details")?.focus();
                 } else if (e.key === "ArrowLeft") {
                   e.preventDefault();
                   setActiveTab("context");
+                  document.getElementById("inspector-tab-context")?.focus();
                 }
               }}
               data-testid="inspector-tab-diagnostics"
@@ -901,8 +916,8 @@ export function Inspector({
               {t.inspector.diagnostics}
             </button>
           </div>
-          <button type="button" onClick={onClose} aria-label={t.common.close} data-testid="inspector-close">
-            {t.common.close}
+          <button type="button" className={shell.inspectorClose} onClick={onClose} aria-label={t.common.close} data-testid="inspector-close">
+            <span aria-hidden="true">×</span>
           </button>
         </div>
         <div
@@ -912,7 +927,7 @@ export function Inspector({
           tabIndex={0}
         >
           {activeTab === "details" ? (
-            <InspectorDetails row={focusedRow} activeAgent={activeAgent} />
+            <InspectorDetails row={focusedRow} memory={selectedMemory} memoryMode={memoryMode} activeAgent={activeAgent} />
           ) : activeTab === "context" ? (
             <ContextPanel snapshot={contextSnapshot} status={contextSnapshotStatus} error={contextSnapshotError} />
           ) : (
@@ -931,12 +946,50 @@ export function Inspector({
 
 function InspectorDetails({
   row,
+  memory,
+  memoryMode,
   activeAgent,
 }: {
   readonly row: TimelineRow | null;
+  readonly memory?: MemoryRecordDto | null;
+  readonly memoryMode: boolean;
   readonly activeAgent?: AgentProfile | null;
 }) {
   const { t } = useI18n();
+  if (memory) {
+    return (
+      <dl className={shell.inspectorFields} data-testid="inspector-memory-details">
+        <dt>{t.memoryPane.colContent}</dt>
+        <dd>{memory.content}</dd>
+        <dt>{t.memoryPane.colKind}</dt>
+        <dd>{localizeMemoryKind(memory.kind, t)}</dd>
+        <dt>{t.memoryPane.colScope}</dt>
+        <dd>{memory.scope_target ? `${localizeMemoryScope(memory.scope_kind, t)} · ${memory.scope_target}` : localizeMemoryScope(memory.scope_kind, t)}</dd>
+        <dt>{t.memoryPane.sourceLabel}</dt>
+        <dd>{localizeMemorySource(memory.source, t)}</dd>
+        <dt>{t.memoryPane.colConfidence}</dt>
+        <dd>{memory.confidence}%</dd>
+        <dt>{t.memoryPane.colState}</dt>
+        <dd>{localizeMemoryState(memory.state, t)}</dd>
+        <dt>{t.memoryPane.colUpdated}</dt>
+        <dd>{new Date(memory.updated_at).toLocaleString()}</dd>
+        <dt>{t.memoryPane.memoryIdLabel}</dt>
+        <dd className={shell.mono}>{memory.memory_id}</dd>
+        {memory.provenance_thread_id ? (
+          <>
+            <dt>{t.memoryPane.originLabel}</dt>
+            <dd className={shell.mono}>{memory.provenance_thread_id}</dd>
+          </>
+        ) : null}
+        {memory.superseded_by ? (
+          <>
+            <dt>{t.memoryPane.supersededByLabel}</dt>
+            <dd className={shell.mono}>{memory.superseded_by}</dd>
+          </>
+        ) : null}
+      </dl>
+    );
+  }
   if (!row) {
     return (
       <div className={shell.inspectorEmptyStack} data-testid="inspector-details-empty">
@@ -946,10 +999,10 @@ function InspectorDetails({
           data-testid="inspector-select-row-empty"
           data-empty-kind="select-row"
         >
-          <p className={shell.inspectorEmptyTitle}>{t.inspector.selectRowToInspect}</p>
-          <p className={shell.inspectorEmptyHint}>{t.inspector.selectRowHint}</p>
+          <p className={shell.inspectorEmptyTitle}>{memoryMode ? t.memoryPane.selectMemoryToInspect : t.inspector.selectRowToInspect}</p>
+          <p className={shell.inspectorEmptyHint}>{memoryMode ? t.memoryPane.selectMemoryHint : t.inspector.selectRowHint}</p>
         </div>
-        {activeAgent ? (
+        {!memoryMode && activeAgent ? (
           <section
             className={shell.contextSection}
             aria-label={t.inspector.activeAgentSection}
@@ -1369,7 +1422,7 @@ export function AgentOnboardingModal({
             role="status"
             data-testid="onboarding-notice"
           >
-            ⚠️ {notice}
+            {notice}
           </div>
         ) : null}
 
@@ -1397,9 +1450,7 @@ export function AgentOnboardingModal({
                 required
                 data-testid="agent-provider-input"
               />
-              <span style={{ fontSize: "0.75rem", color: "var(--color-muted)", display: "block", marginTop: "2px" }}>
-                {t.agents.acpHarnessNote}
-              </span>
+              <span className={shell.formHelp}>{t.agents.acpHarnessNote}</span>
             </div>
 
             <label htmlFor="agent-model">{t.onboarding.modelLabel}</label>
@@ -1412,9 +1463,7 @@ export function AgentOnboardingModal({
                 placeholder={t.onboarding.modelPlaceholder}
                 data-testid="agent-model-input"
               />
-              <span style={{ fontSize: "0.75rem", color: "var(--color-muted)", display: "block", marginTop: "2px" }}>
-                {t.agents.modelOptionalNote}
-              </span>
+              <span className={shell.formHelp}>{t.agents.modelOptionalNote}</span>
             </div>
 
             <label htmlFor="agent-program">{t.onboarding.programPathLabel}</label>
@@ -1439,39 +1488,37 @@ export function AgentOnboardingModal({
 
             <label htmlFor="agent-env-keys">{t.onboarding.envSecretsLabel}</label>
             <div>
-              <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+              <div className={shell.mappingRow}>
                 <input
                   id="agent-env-keys"
-                  className={shell.formInput}
+                  className={`${shell.formInput} ${shell.mappingInput}`}
                   value={envKeys}
                   onChange={(e) => setEnvKeys(e.target.value)}
                   placeholder={t.onboarding.envKeysPlaceholder}
                   data-testid="agent-env-keys-input"
-                  style={{ flex: 1 }}
                 />
                 <input
                   id="agent-secret"
-                  className={shell.formInput}
+                  className={`${shell.formInput} ${shell.mappingInput}`}
                   value={secretRef}
                   onChange={(e) => setSecretRef(e.target.value)}
                   placeholder={t.onboarding.secretPointerPlaceholder}
                   data-testid="agent-secret-ref"
-                  style={{ flex: 1 }}
                 />
                 <button
                   type="button"
                   onClick={() => setExtraMappings((prev) => [...prev, { id: `extra-${Date.now()}-${Math.random()}`, envKey: "", secretRef: "" }])}
                   data-testid="add-env-mapping-btn"
-                  style={{ padding: "0 var(--spacing-8)", height: "var(--control-height)", cursor: "pointer" }}
+                  className={shell.mappingAdd}
                 >
                   {t.onboarding.addMapping}
                 </button>
               </div>
 
               {extraMappings.map((row, idx) => (
-                <div key={row.id} style={{ display: "flex", gap: "8px", marginTop: "6px", alignItems: "center" }} data-testid={`env-mapping-row-${idx}`}>
+                <div key={row.id} className={shell.mappingRow} data-testid={`env-mapping-row-${idx}`}>
                   <input
-                    className={shell.formInput}
+                    className={`${shell.formInput} ${shell.mappingInput}`}
                     value={row.envKey}
                     onChange={(e) => {
                       const v = e.target.value;
@@ -1479,10 +1526,9 @@ export function AgentOnboardingModal({
                     }}
                     placeholder={t.onboarding.variableKeyPlaceholder}
                     data-testid={`env-key-input-${idx}`}
-                    style={{ flex: 1 }}
                   />
                   <input
-                    className={shell.formInput}
+                    className={`${shell.formInput} ${shell.mappingInput}`}
                     value={row.secretRef}
                     onChange={(e) => {
                       const v = e.target.value;
@@ -1490,13 +1536,12 @@ export function AgentOnboardingModal({
                     }}
                     placeholder={t.onboarding.secretRefPlaceholder}
                     data-testid={`secret-ref-input-${idx}`}
-                    style={{ flex: 1 }}
                   />
                   <button
                     type="button"
                     onClick={() => setExtraMappings((prev) => prev.filter((r) => r.id !== row.id))}
                     data-testid={`remove-mapping-btn-${idx}`}
-                    style={{ background: "transparent", border: "none", color: "var(--color-danger, #b3362b)", cursor: "pointer", fontSize: "1.2rem", padding: "0 4px" }}
+                    className={shell.mappingRemove}
                     title={t.onboarding.removeMappingAria}
                     aria-label={t.onboarding.removeMappingAria}
                   >
@@ -1517,14 +1562,14 @@ export function AgentOnboardingModal({
             />
 
             <p className={shell.secretNotice}>
-              🔒 {t.onboarding.secretNotice}
+              {t.onboarding.secretNotice}
             </p>
-            <p style={{ fontSize: "0.75rem", color: "var(--color-muted)", marginTop: "4px" }} data-testid="agent-deferred-notice">
-              ℹ️ {t.agents.deferredNotice}
+            <p className={shell.deferredNotice} data-testid="agent-deferred-notice">
+              {t.agents.deferredNotice}
             </p>
           </div>
 
-          <div style={{ marginTop: "0.5rem" }}>
+          <div className={shell.testResultArea}>
             {testResult ? (
               testResult.success ? (
                 <div>
@@ -1532,7 +1577,7 @@ export function AgentOnboardingModal({
                     ✓ {t.onboarding.verifiedWithLatency(testResult.latencyMs ?? 0)}
                   </span>
                   {testResult.capabilities && Object.keys(testResult.capabilities).length > 0 ? (
-                    <div style={{ fontSize: "0.75rem", color: "var(--color-muted)", marginTop: "4px" }} data-testid="tested-capabilities">
+                    <div className={shell.testedCapabilities} data-testid="tested-capabilities">
                       {t.onboarding.capabilitiesSummary(
                         Object.entries(testResult.capabilities)
                           .map(([k, v]) => `${k}: ${localizeCapabilitySupport(String(v), t)}`)
@@ -1693,13 +1738,13 @@ export function SettingsModal({
             <option value="zh-CN">{t.settings.langZh}</option>
           </select>
 
-          <div className={shell.secretNotice} style={{ marginTop: "var(--spacing-8)" }}>
+          <div className={`${shell.secretNotice} ${shell.settingsNotice}`}>
             {t.settings.deviceNotice}
           </div>
         </div>
 
-        <div style={{ marginTop: "16px", borderTop: "1px solid var(--color-border)", paddingTop: "12px" }} data-testid="settings-diagnostics-section">
-          <h3 style={{ fontSize: "0.875rem", marginBottom: "8px" }}>{t.inspector.diagnostics}</h3>
+        <div className={shell.settingsDiagnostics} data-testid="settings-diagnostics-section">
+          <h3 className={shell.settingsDiagnosticsTitle}>{t.inspector.diagnostics}</h3>
           <RuntimeDiagnosticsView
             diagnostics={diagnostics}
             status={diagnosticsStatus}

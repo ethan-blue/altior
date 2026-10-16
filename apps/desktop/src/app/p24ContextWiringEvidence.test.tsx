@@ -128,7 +128,7 @@ describe("P2.4 Context & Memory Product Wiring Evidence (TASKS.md §A14)", () =>
 
     // Initially empty Personal Vault
     expect(screen.getByTestId("memory-empty")).toBeTruthy();
-    expect(screen.getByTestId("memory-empty").textContent).toContain("Personal Vault is empty");
+    expect(screen.getByTestId("memory-empty").textContent).toContain("No memories yet.");
   });
 
   it("3. Memory lifecycle journey: Propose -> Confirm -> Correct -> Forget", async () => {
@@ -185,7 +185,137 @@ describe("P2.4 Context & Memory Product Wiring Evidence (TASKS.md §A14)", () =>
     });
   });
 
-  it("4. Configures Agent memory mode through UI", async () => {
+  it("4. Keyboard-selects a memory row and shows localized Inspector details", async () => {
+    render(<App transport={transport} />);
+
+    fireEvent.click(screen.getByTestId("rail-memory"));
+    await waitFor(() => expect(screen.getByTestId("memory-pane")).toBeTruthy());
+
+    fireEvent.click(screen.getByTestId("memory-add-button"));
+    fireEvent.change(screen.getByTestId("memory-content-input"), {
+      target: { value: "User prefers a compact desktop workbench" },
+    });
+    fireEvent.click(screen.getByTestId("memory-submit-btn"));
+
+    const row = await screen.findByRole("row", {
+      name: /User prefers a compact desktop workbench/,
+    });
+    expect(row).toHaveAttribute("aria-selected", "false");
+    expect(row).toHaveAttribute("tabindex", "0");
+    fireEvent.focus(row);
+
+    fireEvent.click(screen.getByTestId("memory-add-button"));
+    fireEvent.change(screen.getByTestId("memory-content-input"), {
+      target: { value: "User keeps provenance visible" },
+    });
+    fireEvent.click(screen.getByTestId("memory-submit-btn"));
+    const firstRow = await screen.findByRole("row", {
+      name: /User keeps provenance visible/,
+    });
+    expect(firstRow).toHaveAttribute("tabindex", "-1");
+    fireEvent.keyDown(row, { key: "ArrowUp" });
+    expect(firstRow).toHaveFocus();
+    expect(firstRow).toHaveAttribute("tabindex", "0");
+    expect(row).toHaveAttribute("tabindex", "-1");
+    fireEvent.keyDown(firstRow, { key: "End" });
+    expect(row).toHaveFocus();
+
+    const correct = screen.getAllByTestId("memory-correct-btn")[1]!;
+    fireEvent.keyDown(correct, { key: "Enter" });
+    expect(row).toHaveAttribute("aria-selected", "false");
+
+    fireEvent.keyDown(row, { key: "Enter" });
+
+    await waitFor(() => {
+      expect(row).toHaveAttribute("aria-selected", "true");
+      const details = screen.getByTestId("inspector-memory-details");
+      expect(details).toHaveTextContent("Fact");
+      expect(details).toHaveTextContent("Global");
+      expect(details).toHaveTextContent("Explicit");
+      expect(details).toHaveTextContent("Confirmed");
+      expect(details).toHaveTextContent("100%");
+    });
+
+    fireEvent.click(correct);
+    const editInput = screen.getByTestId("memory-edit-input");
+    expect(fireEvent.keyDown(editInput, { key: " " })).toBe(true);
+    expect(fireEvent.keyDown(editInput, { key: "Enter" })).toBe(true);
+    fireEvent.change(editInput, {
+      target: { value: "User prefers a compact workbench with provenance" },
+    });
+    fireEvent.click(screen.getByTestId("memory-save-correct-btn"));
+
+    await waitFor(() => {
+      const details = screen.getByTestId("inspector-memory-details");
+      expect(details).toHaveTextContent("Superseded");
+      expect(details).toHaveTextContent(/mem_/);
+    });
+  });
+
+  it("5. Selecting a thread from Memory returns to the thread workbench", async () => {
+    render(<App transport={transport} />);
+
+    fireEvent.click(screen.getByTestId("rail-memory"));
+    await waitFor(() => expect(screen.getByTestId("memory-pane")).toBeTruthy());
+
+    fireEvent.click(screen.getByTestId("thread-thr_fixture000000001"));
+
+    await waitFor(() => {
+      expect(screen.queryByTestId("memory-pane")).toBeNull();
+      expect(screen.getByText("用三条要点概括 P0.2 IPC 契约。")).toBeTruthy();
+    });
+  });
+
+  it("6. Clears a hidden memory selection when filters change", async () => {
+    render(<App transport={transport} />);
+
+    fireEvent.click(screen.getByTestId("rail-memory"));
+    fireEvent.click(screen.getByTestId("memory-add-button"));
+    fireEvent.change(screen.getByTestId("memory-content-input"), {
+      target: { value: "User prefers visible selection state" },
+    });
+    fireEvent.click(screen.getByTestId("memory-submit-btn"));
+
+    const row = await screen.findByRole("row", {
+      name: /User prefers visible selection state/,
+    });
+    fireEvent.click(row);
+    expect(screen.getByTestId("inspector-memory-details")).toBeTruthy();
+
+    fireEvent.change(screen.getByTestId("memory-state-filter"), {
+      target: { value: "candidate" },
+    });
+
+    await waitFor(() => {
+      expect(screen.queryByTestId("inspector-memory-details")).toBeNull();
+      expect(screen.getByText("No memory selected")).toBeTruthy();
+    });
+  });
+
+  it("7. Surfaces memory command failures without exposing transport details", async () => {
+    transport.setCommandHandler((cmd) => {
+      if (cmd.kind === "propose_memory") {
+        throw new Error("provider-secret-token-should-not-render");
+      }
+      return undefined;
+    });
+    render(<App transport={transport} />);
+
+    fireEvent.click(screen.getByTestId("rail-memory"));
+    fireEvent.click(screen.getByTestId("memory-add-button"));
+    fireEvent.change(screen.getByTestId("memory-content-input"), {
+      target: { value: "A valid durable preference" },
+    });
+    fireEvent.click(screen.getByTestId("memory-submit-btn"));
+
+    const alert = await screen.findByTestId("memory-operation-error");
+    expect(alert).toHaveAttribute("role", "alert");
+    expect(alert).toHaveTextContent("The memory operation failed");
+    expect(alert).not.toHaveTextContent("provider-secret-token-should-not-render");
+    expect(screen.getByTestId("memory-propose-form")).toBeTruthy();
+  });
+
+  it("8. Configures Agent memory mode through UI", async () => {
     render(<App transport={transport} />);
 
     fireEvent.click(screen.getByTestId("rail-memory"));
@@ -202,7 +332,33 @@ describe("P2.4 Context & Memory Product Wiring Evidence (TASKS.md §A14)", () =>
     });
   });
 
-  it("5. Turn selection loads Context snapshot into Inspector with explainability", async () => {
+  it("8b. Surfaces agent memory mode update failures in the operation banner", async () => {
+    transport.setCommandHandler((cmd) => {
+      if (cmd.kind === "configure_agent") {
+        throw new Error("provider-secret-token-should-not-render");
+      }
+      return undefined;
+    });
+    render(<App transport={transport} />);
+
+    fireEvent.click(screen.getByTestId("rail-memory"));
+    await waitFor(() => expect(screen.getByTestId("agent-memory-mode-select")).toBeTruthy());
+
+    const select = screen.getByTestId("agent-memory-mode-select") as HTMLSelectElement;
+    expect(select.value).toBe("session");
+
+    fireEvent.change(select, { target: { value: "long_term" } });
+
+    const alert = await screen.findByTestId("memory-operation-error");
+    expect(alert).toHaveAttribute("role", "alert");
+    expect(alert).toHaveTextContent("The memory operation failed");
+    expect(alert).not.toHaveTextContent("provider-secret-token-should-not-render");
+    // The store adopts the new mode only after Core confirms, so the select
+    // stays on the old value instead of silently diverging from Core.
+    await waitFor(() => expect(select.value).toBe("session"));
+  });
+
+  it("9. Turn selection loads Context snapshot into Inspector with explainability", async () => {
     render(
       <App
         transport={transport}
@@ -243,7 +399,7 @@ describe("P2.4 Context & Memory Product Wiring Evidence (TASKS.md §A14)", () =>
     });
   });
 
-  it("6. Eliminates race conditions: discards delayed responses from prior turn selections", async () => {
+  it("10. Eliminates race conditions: discards delayed responses from prior turn selections", async () => {
     let resolveTurn1: ((snap: ContextSnapshotDto | null) => void) | null = null;
     const pendingTurn1Promise = new Promise<ContextSnapshotDto | null>((resolve) => {
       resolveTurn1 = resolve;
