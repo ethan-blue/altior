@@ -1048,6 +1048,7 @@ where
                 agent_profile: profile_dto,
                 turns: turn_dtos,
                 pending_permissions: perm_dtos,
+                session_error: open_res.session_error,
             })
         })();
 
@@ -1191,13 +1192,21 @@ where
                 .map_err(CoreAppError::Entity)?;
             let memory_mode = MemoryMode::try_from_str(payload.memory_mode.as_str())
                 .map_err(CoreAppError::Entity)?;
+            // `created_at` is immutable: updating an existing profile must
+            // carry its original creation stamp or the storage upsert
+            // rejects the row. The wire payload carries no created_at, so
+            // the daemon resolves it from the stored profile.
+            let profile_created_at = match app.get_agent_profile(&profile_id)? {
+                Some(existing) => existing.created_at,
+                None => now,
+            };
             let profile = AgentProfile {
                 id: profile_id.clone(),
                 display_name,
                 preferred_harness,
                 memory_mode,
-                created_at: now,
-                updated_at: now,
+                created_at: profile_created_at,
+                updated_at: profile_created_at.max(now),
             };
 
             let binding = if let Some(b_dto) = payload.binding {
@@ -1253,6 +1262,10 @@ where
                     );
                 }
 
+                let binding_created_at = match app.get_harness_binding(&binding_id)? {
+                    Some(existing) => existing.created_at,
+                    None => now,
+                };
                 let b = AcpHarnessBinding::new(
                     binding_id,
                     binding_agent_id,
@@ -1261,7 +1274,7 @@ where
                     args,
                     env_keys,
                     secret_refs,
-                    now,
+                    binding_created_at,
                 )
                 .map_err(CoreAppError::Entity)?;
                 Some(b)
@@ -2288,7 +2301,6 @@ fn is_control_command(kind: CommandKind) -> bool {
     )
 }
 
-
 /// Default page size for an unscoped `request_snapshot` thread list.
 const REQUEST_SNAPSHOT_THREAD_LIST_LIMIT: u32 = 20;
 
@@ -2368,6 +2380,9 @@ fn assemble_thread_snapshot<H: HarnessRuntimePort>(
         agent_profile: profile_dto,
         turns: turn_dtos,
         pending_permissions: perm_dtos,
+        // Gap recovery re-projects storage only; no session is attempted,
+        // so there is no session failure to report.
+        session_error: None,
     })
 }
 

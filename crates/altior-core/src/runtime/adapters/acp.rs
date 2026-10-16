@@ -23,6 +23,7 @@ use altior_domain::{
 };
 use altior_protocol::{CapabilitySet, CapabilitySupport};
 
+use crate::runtime::diagnostics::BoundedDiagnosticsSummary;
 use crate::runtime::ports::HarnessRuntimePort;
 use crate::runtime::state::{
     BindingProbeOutcome, HarnessError, HarnessEvent, HarnessPromptRequest, HarnessSessionId,
@@ -193,11 +194,18 @@ impl HarnessRuntimePort for AcpHarnessAdapter {
     ) -> Result<BindingProbeOutcome, HarnessError> {
         let child = match self.spawn_child(binding, None) {
             Ok(child) => child,
-            Err(_err) => {
+            Err(err) => {
+                // The probe exists to tell the user WHY a binding does not
+                // work; swallowing the failure reason would reduce it to a
+                // bare ok=false. The summary is redacted and bounded before
+                // it leaves the runtime.
                 return Ok(BindingProbeOutcome {
                     ok: false,
                     capabilities: CapabilitySet::new(),
-                    diagnostics: None,
+                    diagnostics: Some(BoundedDiagnosticsSummary::from_raw(&format!(
+                        "spawn failed for program {}: {err}",
+                        binding.command.as_str()
+                    ))),
                 });
             }
         };
@@ -215,10 +223,13 @@ impl HarnessRuntimePort for AcpHarnessAdapter {
                     diagnostics: None,
                 })
             }
-            Err(_err) => Ok(BindingProbeOutcome {
+            Err(err) => Ok(BindingProbeOutcome {
                 ok: false,
                 capabilities: CapabilitySet::new(),
-                diagnostics: None,
+                diagnostics: Some(BoundedDiagnosticsSummary::from_raw(&format!(
+                    "ACP initialize handshake failed for program {}: {err}",
+                    binding.command.as_str()
+                ))),
             }),
         }
     }
@@ -669,10 +680,8 @@ mod tests {
 
     #[test]
     fn permission_event_ids_for_uuid_uppercase_hyphen_rpc_are_distinct_and_valid() {
-        let uuid_upper =
-            RpcId::Text("550E8400-E29B-41D4-A716-446655440000".to_owned());
-        let uuid_upper_other =
-            RpcId::Text("550E8400-E29B-41D4-A716-446655440001".to_owned());
+        let uuid_upper = RpcId::Text("550E8400-E29B-41D4-A716-446655440000".to_owned());
+        let uuid_upper_other = RpcId::Text("550E8400-E29B-41D4-A716-446655440001".to_owned());
         let uppercase = RpcId::Text("PERM-REQ-ALPHA".to_owned());
         let numeric = RpcId::Number(42);
 

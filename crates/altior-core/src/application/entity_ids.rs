@@ -119,6 +119,13 @@ impl EntityIdAllocator {
     /// body and never pasted into the identifier string, so UUID /
     /// uppercase / hyphen forms cannot collapse onto a shared fallback
     /// (ADR 0019).
+    ///
+    /// # Panics
+    ///
+    /// Panics if the derived identifier fails domain validation. The
+    /// formatted body is always 32 lowercase hex characters after the
+    /// `evt_` prefix, so this is unreachable for the current domain
+    /// identifier rules.
     #[must_use]
     pub fn event_id_from_correlation(namespace: &str, correlation: &str) -> EventId {
         use std::hash::{Hash, Hasher};

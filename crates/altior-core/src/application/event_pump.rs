@@ -273,7 +273,10 @@ fn map_tool_call(
     let payload_bytes = serde_json::to_vec(&payload)
         .map_err(|e| CoreAppError::Other(e.to_string()))?
         .try_into()?;
-    Ok(ctx.into_domain_event(DomainEventKind::Other("tool.call".to_string()), payload_bytes))
+    Ok(ctx.into_domain_event(
+        DomainEventKind::Other("tool.call".to_string()),
+        payload_bytes,
+    ))
 }
 
 fn map_turn_completed(
