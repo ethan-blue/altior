@@ -68,7 +68,8 @@ impl fmt::Display for BucketId {
 /// policy, not physics; production tunes them per deployment.
 #[derive(Clone, Debug)]
 pub struct RelayPolicy {
-    /// Largest single payload accepted by `push`.
+    /// Largest single payload accepted by `push`. ADR 0025 threat 7
+    /// bounds an envelope at 1 MiB.
     pub max_payload_bytes: usize,
     /// Largest number of retained entries per bucket, fetched or
     /// not. Fetch alone never frees depth — compaction does.
@@ -76,17 +77,40 @@ pub struct RelayPolicy {
     /// Entries older than this many logical ticks are reclaimed by
     /// [`Relay::sweep_expired`], fetched or not.
     pub max_age_ticks: u64,
+    /// Largest push id (addressing metadata) accepted by `push`.
+    /// ADR 0025 threat 7 bounds metadata at 4 KiB.
+    pub max_push_id_bytes: usize,
+    /// Largest sum of retained payload bytes per bucket. ADR 0025
+    /// threat 7 sets the per-vault queue quota at 50 MiB.
+    pub max_bucket_bytes: usize,
 }
 
 impl RelayPolicy {
     /// A permissive default for tests: 1 MiB payloads, 512-deep
-    /// buckets, 1000-tick retention.
+    /// buckets, 1000-tick retention, 4 KiB ids, 64 MiB byte quota.
     #[must_use]
     pub fn permissive() -> Self {
         Self {
             max_payload_bytes: 1024 * 1024,
             max_bucket_depth: 512,
             max_age_ticks: 1000,
+            max_push_id_bytes: 4 * 1024,
+            max_bucket_bytes: 64 * 1024 * 1024,
+        }
+    }
+
+    /// The ADR 0025 production constants: 1 MiB envelopes, 4 KiB
+    /// metadata, 50 MiB per-bucket quota, 14-day retention. Ticks are
+    /// the transport's logical clock — with a 1-second server tick,
+    /// `max_age_ticks = 86_400 * 14`.
+    #[must_use]
+    pub fn production() -> Self {
+        Self {
+            max_payload_bytes: 1024 * 1024,
+            max_bucket_depth: 4096,
+            max_age_ticks: 86_400 * 14,
+            max_push_id_bytes: 4 * 1024,
+            max_bucket_bytes: 50 * 1024 * 1024,
         }
     }
 }
@@ -205,6 +229,12 @@ impl Bucket {
         self.entries.iter().find(|entry| entry.id == id)
     }
 
+    /// Sum of retained payload bytes; the byte quota's denominator.
+    /// Depth is bounded by policy, so the scan is bounded.
+    fn retained_bytes(&self) -> usize {
+        self.entries.iter().map(|entry| entry.payload.len()).sum()
+    }
+
     fn frontier(&self) -> u64 {
         self.entries
             .back()
@@ -273,7 +303,22 @@ impl Relay {
                 limit_bytes: self.policy.max_payload_bytes,
             });
         }
+        if id.len() > self.policy.max_push_id_bytes {
+            return Err(RelayError::PushIdTooLarge {
+                size_bytes: id.len(),
+                limit_bytes: self.policy.max_push_id_bytes,
+            });
+        }
         let slot = self.buckets.entry(bucket.clone()).or_default();
+        if slot.find_by_id(id).is_none()
+            && slot.retained_bytes() + payload.len() > self.policy.max_bucket_bytes
+        {
+            return Err(RelayError::BucketQuotaExceeded {
+                bucket: bucket.to_string(),
+                incoming_bytes: payload.len(),
+                limit_bytes: self.policy.max_bucket_bytes,
+            });
+        }
         if slot.entries.len() >= self.policy.max_bucket_depth && slot.find_by_id(id).is_none() {
             return Err(RelayError::BucketFull {
                 depth: self.policy.max_bucket_depth,
@@ -420,7 +465,41 @@ impl Relay {
             last_seq: slot.entries.back().map_or(slot.compacted_up_to, |e| e.seq),
         }
     }
+
+    /// Every byte the relay currently holds, for the ADR 0025 suite-3
+    /// zero-knowledge audit: (bucket, push id, payload) per retained
+    /// entry, plus every id ever still retained. The relay is
+    /// content-agnostic by construction; this exists so a test can prove
+    /// it — production deployments never call it.
+    #[must_use]
+    pub fn retained_frames(&self) -> Vec<RetainedFrame> {
+        let mut frames = Vec::new();
+        let mut buckets: Vec<(&BucketId, &Bucket)> = self.buckets.iter().collect();
+        buckets.sort_by(|a, b| a.0.as_str().cmp(b.0.as_str()));
+        for (bucket, slot) in buckets {
+            for entry in &slot.entries {
+                frames.push(RetainedFrame {
+                    bucket: bucket.clone(),
+                    id: entry.id.clone(),
+                    payload: entry.payload.clone(),
+                });
+            }
+        }
+        frames
+    }
 }
+
+/// One relay-held frame, exposed for the zero-knowledge audit.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RetainedFrame {
+    /// The bucket (recipient inbox) holding it.
+    pub bucket: BucketId,
+    /// The sender's push id (addressing metadata).
+    pub id: String,
+    /// The opaque payload bytes.
+    pub payload: Vec<u8>,
+}
+
 
 /// Removes entries at or below `boundary` (which must be a prefix —
 /// sequence numbers are assigned in push order) and folds them into
