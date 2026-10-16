@@ -338,7 +338,9 @@ impl SessionV2 {
     /// Panics if the internal chain is `None` — structurally impossible
     /// after the constructor, so the panic marks a programming error.
     pub fn seal(&mut self, plaintext: &[u8]) -> Result<Vec<u8>, CryptoError> {
-        let block = self.counter_block.ok_or(CryptoError::CounterBlockExhausted)?;
+        let block = self
+            .counter_block
+            .ok_or(CryptoError::CounterBlockExhausted)?;
         let counter = self.next_counter;
         if counter >= block.end {
             return Err(CryptoError::CounterBlockExhausted);
@@ -423,17 +425,17 @@ impl SessionV2 {
             cursor += len;
             chunk
         };
-        let wire_epoch_seq = u32::from_be_bytes(
-            take(envelope, EPOCH_SEQ_LEN).try_into().expect("4 bytes"),
-        );
+        let wire_epoch_seq =
+            u32::from_be_bytes(take(envelope, EPOCH_SEQ_LEN).try_into().expect("4 bytes"));
         let mut wire_epoch = [0; EPOCH_LEN];
         wire_epoch.copy_from_slice(&take(envelope, EPOCH_LEN));
         let turn_no = u64::from_be_bytes(take(envelope, TURN_LEN).try_into().expect("8 bytes"));
         let counter = u64::from_be_bytes(take(envelope, COUNTER_LEN).try_into().expect("8 bytes"));
         let mut wire_eph = [0; EPH_LEN];
         wire_eph.copy_from_slice(&take(envelope, EPH_LEN));
-        let nonce_bytes: [u8; NONCE_LEN] =
-            take(envelope, NONCE_LEN).try_into().expect("12 nonce bytes");
+        let nonce_bytes: [u8; NONCE_LEN] = take(envelope, NONCE_LEN)
+            .try_into()
+            .expect("12 nonce bytes");
 
         if wire_epoch_seq != self.epoch_seq || wire_epoch != *self.epoch.as_bytes() {
             return Err(CryptoError::EpochMismatch {

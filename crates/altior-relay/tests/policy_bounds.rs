@@ -2,7 +2,7 @@
 //! depth, and byte-quota bounds all refuse whole, leaving the bucket
 //! untouched.
 
-use altior_relay::{BucketId, Relay, RelayError, RelayPolicy, PushOutcome};
+use altior_relay::{BucketId, PushOutcome, Relay, RelayError, RelayPolicy};
 
 #[test]
 fn test_relay_enforces_adr_0025_resource_bounds() {
@@ -27,13 +27,19 @@ fn test_relay_enforces_adr_0025_resource_bounds() {
     let big = [0u8; 65];
     assert!(matches!(
         relay.push(&bucket, "ok-id", &big),
-        Err(RelayError::PushTooLarge { size_bytes: 65, limit_bytes: 64 })
+        Err(RelayError::PushTooLarge {
+            size_bytes: 65,
+            limit_bytes: 64
+        })
     ));
 
     // Metadata bound.
     assert!(matches!(
         relay.push(&bucket, "nine-byte", &[0u8; 8]),
-        Err(RelayError::PushIdTooLarge { size_bytes: 9, limit_bytes: 8 })
+        Err(RelayError::PushIdTooLarge {
+            size_bytes: 9,
+            limit_bytes: 8
+        })
     ));
 
     // Byte quota: 64-byte payloads; the third push would exceed 128.

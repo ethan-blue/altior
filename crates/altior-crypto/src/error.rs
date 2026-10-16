@@ -167,10 +167,9 @@ impl fmt::Display for CryptoError {
                 f,
                 "envelope epoch sequence {found_seq} does not match the expected {expected_seq}"
             ),
-            Self::TurnMismatch { current, found } => write!(
-                f,
-                "envelope turn {found} is not the current turn {current}"
-            ),
+            Self::TurnMismatch { current, found } => {
+                write!(f, "envelope turn {found} is not the current turn {current}")
+            }
             Self::TurnNotOpen => write!(f, "open_turn is an outbound operation"),
         }
     }

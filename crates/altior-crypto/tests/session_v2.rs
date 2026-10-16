@@ -65,8 +65,13 @@ fn roundtrips_turn_zero_and_a_ratcheted_turn() {
         &mut FixedLease::new(),
     )
     .unwrap();
-    let mut inb = SessionV2::inbound(&bob_keys(), &alice_keys().public_identity(), test_epoch(), 1)
-        .unwrap();
+    let mut inb = SessionV2::inbound(
+        &bob_keys(),
+        &alice_keys().public_identity(),
+        test_epoch(),
+        1,
+    )
+    .unwrap();
 
     // Turn 0: the static-static root key.
     let m0 = out.seal(b"turn zero payload").unwrap();
@@ -109,8 +114,13 @@ fn tampered_or_foreign_envelopes_fail_closed() {
         &mut FixedLease::new(),
     )
     .unwrap();
-    let mut inb = SessionV2::inbound(&bob_keys(), &alice_keys().public_identity(), test_epoch(), 1)
-        .unwrap();
+    let mut inb = SessionV2::inbound(
+        &bob_keys(),
+        &alice_keys().public_identity(),
+        test_epoch(),
+        1,
+    )
+    .unwrap();
     out.open_turn(TURN_SEED_1).unwrap();
     let envelope = out.seal(b"secret batch").unwrap();
 
@@ -154,7 +164,10 @@ fn tampered_or_foreign_envelopes_fail_closed() {
     let foreign_envelope = foreign.seal(b"other epoch").unwrap();
     assert!(matches!(
         inb.open(&foreign_envelope),
-        Err(altior_crypto::CryptoError::EpochMismatch { expected_seq: 1, found_seq: 2 })
+        Err(altior_crypto::CryptoError::EpochMismatch {
+            expected_seq: 1,
+            found_seq: 2
+        })
     ));
 
     // A skipped turn fails closed (no blind key-chain jumps).
@@ -194,14 +207,21 @@ fn counter_blocks_are_exhausted_then_renewed_never_rewound() {
         Err(altior_crypto::CryptoError::CounterBlockRewind { .. })
     ));
 
-    let next = CounterBlock { start: 65, end: 129 };
+    let next = CounterBlock {
+        start: 65,
+        end: 129,
+    };
     out.set_counter_block(next).unwrap();
     out.seal(b"renewed").unwrap();
 
     // An empty or inverted block is refused outright.
-    assert!(out
-        .set_counter_block(CounterBlock { start: 200, end: 200 })
-        .is_err());
+    assert!(
+        out.set_counter_block(CounterBlock {
+            start: 200,
+            end: 200
+        })
+        .is_err()
+    );
 }
 
 #[test]
@@ -245,8 +265,13 @@ fn turn_hygiene_zero_seed_and_inbound_rejected() {
         Err(altior_crypto::CryptoError::EphemeralSeedAllZero)
     ));
 
-    let mut inb = SessionV2::inbound(&bob_keys(), &alice_keys().public_identity(), test_epoch(), 1)
-        .unwrap();
+    let mut inb = SessionV2::inbound(
+        &bob_keys(),
+        &alice_keys().public_identity(),
+        test_epoch(),
+        1,
+    )
+    .unwrap();
     assert!(matches!(
         inb.open_turn(TURN_SEED_1),
         Err(altior_crypto::CryptoError::TurnNotOpen)

@@ -88,8 +88,14 @@ fn test_relay_zero_knowledge_audit() {
     // different canary, as real turns would carry real memories and
     // prompts.
     let batches: [&[&str]; 3] = [
-        &["my recovery phrase is never written down", "turn text: today I wrote about the garden"],
-        &["记住：深色主题与中文界面是我的偏好", "vault://recovery-key-0001"],
+        &[
+            "my recovery phrase is never written down",
+            "turn text: today I wrote about the garden",
+        ],
+        &[
+            "记住：深色主题与中文界面是我的偏好",
+            "vault://recovery-key-0001",
+        ],
         &[
             "thread title: quarterly reflection notes",
             "sk-canary-never-a-real-key-000000",
@@ -106,7 +112,9 @@ fn test_relay_zero_knowledge_audit() {
             let envelope = out.seal(line.as_bytes()).unwrap();
             let id = format!("env-{delivered:04}");
             delivered += 1;
-            relay.push(&alice_bucket, &id, &envelope).expect("relay accepts the envelope");
+            relay
+                .push(&alice_bucket, &id, &envelope)
+                .expect("relay accepts the envelope");
         }
     }
 
@@ -118,7 +126,9 @@ fn test_relay_zero_knowledge_audit() {
     };
     assert_eq!(items.len(), delivered);
     for item in &items {
-        let plaintext = inb.open(&item.payload).expect("receiver opens the envelope");
+        let plaintext = inb
+            .open(&item.payload)
+            .expect("receiver opens the envelope");
         assert_ne!(plaintext, Vec::<u8>::new());
     }
 
@@ -149,7 +159,8 @@ fn test_relay_zero_knowledge_audit() {
         assert_eq!(frame.payload[0], 2, "only sealed v2 envelopes transit");
         for canary in CANARIES {
             assert_ne!(
-                &frame.payload[81..], canary.as_bytes(),
+                &frame.payload[81..],
+                canary.as_bytes(),
                 "payload is the plaintext, not ciphertext"
             );
         }

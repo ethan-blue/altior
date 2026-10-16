@@ -500,7 +500,6 @@ pub struct RetainedFrame {
     pub payload: Vec<u8>,
 }
 
-
 /// Removes entries at or below `boundary` (which must be a prefix —
 /// sequence numbers are assigned in push order) and folds them into
 /// the checkpoint counts.

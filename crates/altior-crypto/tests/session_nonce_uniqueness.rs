@@ -46,11 +46,8 @@ impl CounterLease for DurableLease {
 
 #[test]
 fn test_session_reconstruction_nonce_uniqueness() {
-    let alice = DeviceKeys::from_seed(
-        ALICE_SEED,
-        DeviceId::new("alice-uniqueness").unwrap(),
-    )
-    .unwrap();
+    let alice =
+        DeviceKeys::from_seed(ALICE_SEED, DeviceId::new("alice-uniqueness").unwrap()).unwrap();
     let bob = bob_identity();
     let epoch = SessionEpoch::from_bytes(EPOCH_BYTES).unwrap();
     let mut lease = DurableLease::new();
@@ -59,7 +56,8 @@ fn test_session_reconstruction_nonce_uniqueness() {
     // of a nonce under a key. Session reconstruction with static keys and
     // the same epoch reuses the key, so uniqueness here is exactly the
     // F31 property.
-    let mut used_counters: HashSet<u64> = HashSet::with_capacity(usize::try_from(SESSIONS * ENVELOPES_PER_SESSION).unwrap());
+    let mut used_counters: HashSet<u64> =
+        HashSet::with_capacity(usize::try_from(SESSIONS * ENVELOPES_PER_SESSION).unwrap());
     // And the raw 12-byte nonces off the wire, independent of any
     // reasoning about which key they rode under.
     let mut used_nonces: HashSet<[u8; 12]> = HashSet::new();
@@ -67,19 +65,20 @@ fn test_session_reconstruction_nonce_uniqueness() {
     for session_no in 0..SESSIONS {
         // Simulated kill: the previous session is dropped (its in-memory
         // counter state is lost); only the durable lease survives.
-        drop(SessionV2::outbound(
-            &alice, &bob, epoch.clone(), 1, &mut lease,
-        ).expect("session reconstruction"));
+        drop(
+            SessionV2::outbound(&alice, &bob, epoch.clone(), 1, &mut lease)
+                .expect("session reconstruction"),
+        );
 
-        let mut session = SessionV2::outbound(
-            &alice, &bob, epoch.clone(), 1, &mut lease,
-        )
-        .expect("session reconstruction");
+        let mut session = SessionV2::outbound(&alice, &bob, epoch.clone(), 1, &mut lease)
+            .expect("session reconstruction");
         assert_eq!(session.turn_no(), 0);
 
         for n in 0..ENVELOPES_PER_SESSION {
             let plaintext = format!("kill {session_no} envelope {n}").into_bytes();
-            let envelope = session.seal(&plaintext).expect("seal within a leased block");
+            let envelope = session
+                .seal(&plaintext)
+                .expect("seal within a leased block");
             assert_eq!(envelope[0], 2, "v2 version byte");
 
             let counter = u64::from_be_bytes(envelope[29..37].try_into().unwrap());
