@@ -29,6 +29,51 @@ Write-Host "Running cargo test --workspace..."
 cargo test --workspace
 Assert-StepSuccess "cargo test workspace"
 
+Write-Host "Checking TS DTO export drift (protocol dto-export regeneration)..."
+function Get-DtoContentMap {
+    param([string]$Dir)
+    $map = @{}
+    Get-ChildItem $Dir -Filter *.ts | ForEach-Object {
+        $map[$_.Name] = (Get-Content $_.FullName -Raw) -replace "`r`n", "`n"
+    }
+    return $map
+}
+$dtoDir = "apps/desktop/src/ipc/dto"
+$beforeDto = Get-DtoContentMap $dtoDir
+cargo test -p altior-protocol --features dto-export
+Assert-StepSuccess "protocol dto-export"
+$afterDto = Get-DtoContentMap $dtoDir
+$driftedFiles = @()
+foreach ($name in $beforeDto.Keys) {
+    if (-not $afterDto.ContainsKey($name) -or $afterDto[$name] -ne $beforeDto[$name]) {
+        $driftedFiles += $name
+    }
+}
+foreach ($name in $afterDto.Keys) {
+    if (-not $beforeDto.ContainsKey($name)) {
+        $driftedFiles += $name
+    }
+}
+if ($driftedFiles.Count -gt 0) {
+    Write-Host ""
+    Write-Host "TS DTO drift detected: $($driftedFiles -join ', ')" -ForegroundColor Red
+    Write-Host "Rust DTO definitions changed without matching TS exports." -ForegroundColor Red
+    Write-Host "Run 'cargo test -p altior-protocol --features dto-export', review the diff, and commit the regenerated files." -ForegroundColor Red
+    exit 1
+}
+Write-Host "TS DTO exports are in sync with Rust definitions."
+
+# The regeneration rewrote every export with its own line endings; restore
+# files whose only delta is CR churn so the gate leaves the working tree
+# clean. Files with real content changes are preserved.
+$churnedFiles = git diff --name-only -- $dtoDir
+foreach ($rel in $churnedFiles) {
+    git diff --ignore-cr-at-eol --quiet -- $rel
+    if ($LASTEXITCODE -eq 0) {
+        git checkout -- $rel
+    }
+}
+
 Write-Host "==================================================" -ForegroundColor Cyan
 Write-Host "  Altior Quality Gate: 2. Tauri Shell Crate" -ForegroundColor Cyan
 Write-Host "==================================================" -ForegroundColor Cyan
@@ -49,15 +94,19 @@ cmd.exe /c "npm --prefix apps/desktop run gate"
 Assert-StepSuccess "Desktop Frontend (npm run gate)"
 
 Write-Host "==================================================" -ForegroundColor Cyan
-Write-Host "  Altior Quality Gate: 4. Real ACP Opt-in Check" -ForegroundColor Cyan
+Write-Host "  Altior Quality Gate: 4. ACP Loopback + Real Opt-in" -ForegroundColor Cyan
 Write-Host "==================================================" -ForegroundColor Cyan
+
+Write-Host "Running deterministic ACP loopback smoke (real subprocess, in-repo stub)..."
+cargo test -p altior-acp --test loopback_smoke -- --nocapture
+Assert-StepSuccess "ACP loopback smoke tests"
 
 if ($env:ALTIOR_ACP_SMOKE_AGENTS) {
     Write-Host "Running opt-in real ACP smoke tests against $env:ALTIOR_ACP_SMOKE_AGENTS..."
     cargo test -p altior-acp --test smoke -- --nocapture
     Assert-StepSuccess "Real ACP smoke tests"
 } else {
-    Write-Host "[SKIPPED] Real ACP external agent smoke test (ALTIOR_ACP_SMOKE_AGENTS is not set; opt-in required for live model testing)" -ForegroundColor Yellow
+    Write-Host "[OPT-IN SKIPPED] Real external ACP agent smoke (ALTIOR_ACP_SMOKE_AGENTS is not set; live model testing stays opt-in). The deterministic loopback above covers the same journey against a real subprocess." -ForegroundColor Yellow
 }
 
 Write-Host ""
