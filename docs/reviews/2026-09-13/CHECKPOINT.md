@@ -419,3 +419,90 @@ Next task and first concrete action:
 - Status: DONE-VERIFIED。
 - Next: 待用户审阅工作树并决定提交切分；「七、待做」中剩余项均为外部阻塞
   （真实第三方 ACP 凭证）或依赖分支合并决策（UI 重设计后续阶段）。
+
+---
+
+## 2026-10-16 第五轮切片（授权提交 + P3 启动，分支 feat/p3-sync-foundation）
+
+### 切片 17 — v0.1 工作树落账：7 个 Conventional Commits（DONE-VERIFIED）
+- 用户明确授权提交切分。切片 16 及之前 4 个会话的全部未提交变更（约 150 文件）
+  按层切分提交至 `ui/toolcall-timeline`（未 push）：
+  `d3cab2e` feat(protocol) session_error 契约 → `63c34fe` fix(core) A18 三修复
+  → `724fbc8` feat(acp) 回环桩 → `52e11e5` chore(gate) 门禁脚本 →
+  `b9e349b` feat(desktop) UI 重设计大块 → `9606d62` docs → `69e58aa`
+  chore(task-pack) 用户当日工具。CRLF 噪声文件在提交时自动坍缩为空 diff，
+  只有真实内容入库。提交前秘密扫描（tight 模式）干净。工作树清零，stash 未动。
+- Status: DONE-VERIFIED。
+
+### 切片 18 — 工具链漂移修复：clippy 1.99 + 门禁脚本 UTF-8（DONE-VERIFIED）
+- **clippy 1.99**（`fd66247`）: rustc 1.99.0 将 `clippy::assert_is_empty` 收入
+  pedantic（三个 crate 的 Cargo.toml 自选 pedantic=warn，被门禁 `-D warnings`
+  升为错误）。此前门禁"绿"依赖 clippy 缓存（切片 16 零 Rust 改动），本次
+  commit 触碰文件使缓存失效而暴露——登记为工具链漂移教训：跨会话的"绿"
+  必须在缓存失效路径下复验。修复 29 处（21 正形式 `assert_eq!(x, [])`、
+  8 负形式 `assert_ne!`），机械变换，断言语义不变。
+- **门禁脚本 UTF-8**（`be87bac`）: `Get-DtoContentMap` 未指定编码，Windows
+  PowerShell 5.1 按 ANSI(GBK) 解码无 BOM 文件，多字节字符吞掉相邻 CR 使
+  CRLF 归一化失效，干净 checkout 上全量 dto 误报漂移。补 `-Encoding UTF8`。
+- 分支: `feat/p3-sync-foundation`（自 ui/toolcall-timeline 栈上切出，避免
+  storage 冲突；两分支按序合并）。落账后统一门禁复跑 exit 0。
+- Status: DONE-VERIFIED。
+
+### 切片 19 — ADR 0027：P3 同步协议设计（DONE-VERIFIED，`aff68a5`）
+- 逐条映射 ADR 0025 的 11 项威胁 → 机制 → crate → 验收测试；三大层：
+  会话加固（epoch + 计数器租约 + turn ratchet + 零共享密钥检查）、设备生命周期
+  （登记/撤销证书/密钥轮换）、同步引擎（pull-before-push + ack 前沿 + 墓碑
+  不可回收）。信封 v2 新版本不重写 v1；sync_gate 屏障保持关闭。
+- Status: DONE-VERIFIED。
+
+### 切片 20 — P3.2 加密会话加固 + ADR 0025 套件 2（DONE-VERIFIED，`f2e36d7`）
+- `SessionV2`（session_v2.rs，信封 v2）: 128-bit `SessionEpoch`（HKDF info +
+  AAD 绑定）；`CounterLease` 租约端口（计数器块 [start,end) 耗尽即停，安装
+  回退块/零起点块 typed 拒绝——F31 修复）；turn ratchet（每轮换批新 X25519
+  ephemeral 链入 HKDF-Extract，静态密钥泄露不回溯历史轮）；epoch_seq 单调
+  回滚拒绝；全零共享密钥拒绝（威胁 2）。
+- **两阶段提交**（测试驱出的真修复）: 接收端 turn 推进原实现在 AEAD 之前用
+  未认证的 turn 头改链状态；改为"候选链 → AEAD → 认证通过才提交"，伪造/损坏
+  turn 头不再毒化接收端（ADR 0011 "never act on unauthenticated counters"）。
+- 计数器从 1 起（租约零起点拒绝），与 ReplayWindow 的 0-不接受规则对齐。
+- **套件 2** `test_session_reconstruction_nonce_uniqueness`: 1000 次进程杀死
+  模拟重建 × 100 信封 = 100,000 信封，计数器与线上 nonce 双集合零重复
+  （9.02s）。测试文件另有 6 个行为测试（roundtrip/双 turn ratchet/单比特
+  翻转全表/epoch 不匹配/turn 跳过/租约耗尽与回退/低序点/turn 卫生）。
+- 门禁: `cargo test -p altior-crypto` 全绿（12 lib + 6 v2 + 1 套件 2），
+  clippy -D warnings 干净。
+- Status: DONE-VERIFIED。
+
+### 切片 21 — P3.3 中继加固 + ADR 0025 套件 3（DONE-VERIFIED，`0687b08`）
+- `RelayPolicy` 增 `max_push_id_bytes`（4 KiB 元数据帽）与 `max_bucket_bytes`
+  （50 MiB 桶配额，背压不驱逐）+ `production()` 预设（14 天 tick 映射注记）。
+  拒绝整体生效、桶不动。dedupe 有界性按 ADR 0012 既有结构（仅 retained 条目）
+  维持并登记。`retained_frames()` 审计钩子（生产不调用）。
+- **套件 3** `test_relay_zero_knowledge_audit`: 三轮 v2 会话（含中英记忆、
+  secret 引用、恢复短语 6 个 canary）过中继，逐帧 + 全量字节两层面断言零
+  明文。`policy_bounds` 测试覆盖四大限额与拒绝后桶不变性。
+- 门禁: altior-relay 16 测试全绿，clippy 干净。
+- Status: DONE-VERIFIED。
+
+### 切片 22 — P3.4 Vault 领域契约（DONE-VERIFIED，`1c69a9e` + fmt `383686e`）
+- `altior-domain/src/vault.rs`: `VaultDeviceRecord`（配对自配对拒绝、单向
+  Active→Revoked、证书绑定记录设备与时间序、EpochSeq checked 递增）、
+  `RevocationCertificate`/`RecoverySignature`（不透明有界字节，验证归 crypto）、
+  `MemoryTombstone`+`TombstoneDigest`（全零保留值拒绝）、`AckFrontier`
+  （compaction_floor = 已记录设备游标最小值；无记录 → None 钉死压缩；回滚
+  声明不降前沿）。纯规则无依赖，入库 7 个内联测试。
+- 计数器租约的 SQLite 实现与存储迁移**顺延至切片 23**（P3.5 一起做）。
+- **统一门禁**（2026-10-16，`powershell -ExecutionPolicy Bypass -File
+  scripts/quality-gate.ps1`）: exit 0，ALL ALTIOR QUALITY GATES PASSED
+  CLEANLY——Rust+Tauri 690 测试、Vitest 298、对比度 24/24、视觉 6/6 全
+  0 diff、DTO 漂移 in sync、loopback 2 用例。所有 P3 提交保持不 push。
+- Status: DONE-VERIFIED。
+
+### 切片 23 — P3.5 同步引擎 + 套件 1/4（IN-PROGRESS → 下一切片，未开始代码）
+- 计划: `altior-core::sync` 引擎（pull-before-push、ack 前沿压缩门、per-device
+  子游标）+ SQLite `CounterLease` 实现（新迁移 v9）+ 套件 1
+  （`test_three_device_offline_convergence`）+ 套件 4
+  （`test_stale_device_tombstone_non_resurrection`）。
+- 首个具体动作: 读 `crates/altior-storage/src/migrations.rs` 迁移模式与
+  `crates/altior-core/src/sync_gate.rs`，落 sync 状态表迁移。
+- Status: IN-PROGRESS（设计已定于 ADR 0027 §5–8；代码未动）。
