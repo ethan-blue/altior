@@ -23,4 +23,11 @@ turns: Array<TurnDto>,
 /**
  * Currently pending permission requests.
  */
-pending_permissions: Array<PermissionDto>, };
+pending_permissions: Array<PermissionDto>,
+/**
+ * Why no harness session could be established during this open, if a
+ * session was attempted and failed. Optional for protocol v1
+ * compatibility: absent means either no session was attempted or the
+ * session came up cleanly.
+ */
+session_error?: string | null, };
