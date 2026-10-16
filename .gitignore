@@ -12,5 +12,8 @@ dist/
 node_modules/
 
 .alma-snapshots
+/.alma/
+/.zcode/
+/.zcodeignore
 cargo_check.txt
 apps/desktop/release-package/
