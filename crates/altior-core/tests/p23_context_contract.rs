@@ -604,7 +604,7 @@ fn off_mode_has_zero_retrieval_and_pure_passthrough() {
         .unwrap()
         .expect("snapshot exists");
     assert!(snap.passthrough);
-    assert!(snap.memories.is_empty());
+    assert_eq!(snap.memories, []);
     assert_eq!(snap.rendered_prompt, None);
 }
 
@@ -854,7 +854,7 @@ fn forget_lifecycle_preserves_past_audit_and_excludes_future_injection() {
         .unwrap()
         .expect("snapshot 2 exists");
     assert!(snap_2.passthrough);
-    assert!(snap_2.memories.is_empty());
+    assert_eq!(snap_2.memories, []);
 
     // Historical audit invariant: Snapshot 1 remains completely intact in SQLite
     let snap_1_recheck = app

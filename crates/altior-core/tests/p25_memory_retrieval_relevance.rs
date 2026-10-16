@@ -154,7 +154,7 @@ fn test_p25_mixed_cjk_code_symbols_retrieval() {
     let hits_rust = store
         .search_memories(&q_rust, None, MemorySearchLimit::default_limit(), now)
         .unwrap();
-    assert!(!hits_rust.is_empty());
+    assert_ne!(hits_rust, Vec::new());
     assert_eq!(hits_rust[0].record.memory_id, rec_rust.memory_id);
 
     // Search "C++"

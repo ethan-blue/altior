@@ -184,7 +184,7 @@ fn request_snapshot_scoped_returns_thread_snapshot_envelope() {
         .expect("payload is ThreadSnapshotDto, the same envelope open_thread uses");
     assert_eq!(detail.thread.id, thread_id);
     assert_eq!(detail.thread.title, "Snapshot Detail Thread");
-    assert!(detail.pending_permissions.is_empty());
+    assert_eq!(detail.pending_permissions, []);
 }
 
 #[test]

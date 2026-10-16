@@ -367,8 +367,8 @@ fn empty_context_is_byte_identical_passthrough() {
         .expect("snapshot lookup")
         .expect("snapshot exists");
     assert!(snapshot.passthrough);
-    assert!(snapshot.memories.is_empty());
-    assert!(snapshot.identity.is_empty());
+    assert_eq!(snapshot.memories, []);
+    assert_eq!(snapshot.identity, []);
     assert_eq!(snapshot.budget.memory_tokens, 0);
     assert_eq!(snapshot.budget.identity_tokens, 0);
 }

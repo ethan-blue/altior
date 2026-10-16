@@ -182,7 +182,7 @@ mod tests {
         let payload = r#"{"kind":"subscribe"}"#;
         let frame = encode_frame(payload).unwrap();
         let mut decoder = FrameDecoder::new();
-        assert!(decoder.feed(&frame[..3]).unwrap().is_empty());
+        assert_eq!(decoder.feed(&frame[..3]).unwrap(), [] as [Vec<u8>; 0]);
         assert_eq!(decoder.pending_bytes(), 3);
         let delivered = decoder.feed(&frame[3..]).unwrap();
         assert_eq!(delivered, vec![payload.as_bytes().to_vec()]);

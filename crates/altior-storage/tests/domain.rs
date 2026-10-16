@@ -1793,7 +1793,7 @@ fn threadless_domain_event_journals_but_does_not_project() {
     assert_eq!(store.domain_journal_len().expect("count"), 1);
     let limit = ThreadListLimit::try_new(10).expect("limit");
     let threads = store.thread_list(None, None, limit).expect("list");
-    assert!(threads.is_empty());
+    assert_eq!(threads, []);
 }
 
 // ── AgentProfile CRUD & Pagination ─────────────────────────────────
@@ -1971,7 +1971,7 @@ fn agent_profile_pagination_with_timestamp_ties() {
         agent_profile_id: page3[0].id.clone(),
     };
     let page4 = store.agent_profiles(Some(&cursor3), limit).expect("page 4");
-    assert!(page4.is_empty());
+    assert_eq!(page4, []);
 }
 
 #[test]
@@ -2642,7 +2642,7 @@ fn permission_queries_by_turn_and_thread_with_stable_tie_pagination() {
     let turn_page3 = store
         .permissions_for_turn(&trn, Some(&cursor2), limit)
         .expect("turn page 3");
-    assert!(turn_page3.is_empty());
+    assert_eq!(turn_page3, []);
 
     // Test permissions_for_thread pagination
     let thr_page1 = store
@@ -3050,7 +3050,7 @@ fn empty_database_orphan_projections_are_cleaned_up_on_open() {
         .expect("query marker");
     assert_eq!(marker_seq, 0);
     assert_eq!(marker_ver, altior_storage::DOMAIN_PROJECTION_VERSION);
-    assert!(!marker_digest.is_empty());
+    assert_ne!(marker_digest, "");
 }
 
 #[test]
@@ -4545,9 +4545,9 @@ fn harness_binding_v4_schema_migration_defaults_empty_vectors() {
 
     assert_eq!(legacy_binding.label.as_str(), "Legacy Binding");
     assert_eq!(legacy_binding.command.as_str(), "/usr/bin/legacy-agent");
-    assert!(legacy_binding.args.is_empty());
-    assert!(legacy_binding.env_keys.is_empty());
-    assert!(legacy_binding.secret_refs.is_empty());
+    assert_eq!(legacy_binding.args, []);
+    assert_eq!(legacy_binding.env_keys, []);
+    assert_eq!(legacy_binding.secret_refs, []);
 
     // Create a new binding with non-empty parameters in migrated DB
     let new_hnb_id = binding_id("v5newbinding01");

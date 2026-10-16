@@ -443,7 +443,7 @@ fn history_pages_walk_toward_the_past_without_overlap() {
 
     // Page 2: everything strictly older than the cursor.
     let page2 = daemon.get_history(&thr, Some(cursor1.seq), 50);
-    assert!(!page2.entries.is_empty());
+    assert_ne!(page2.entries, Vec::new());
     assert!(
         !page2.has_more,
         "no entries older than the journal head remain"
@@ -469,6 +469,6 @@ fn history_pages_walk_toward_the_past_without_overlap() {
 
     // Paging past the head yields an empty page.
     let empty = daemon.get_history(&thr, Some(1), 50);
-    assert!(empty.entries.is_empty());
+    assert_eq!(empty.entries, []);
     assert!(!empty.has_more);
 }

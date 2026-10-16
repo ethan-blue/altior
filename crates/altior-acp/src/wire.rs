@@ -303,7 +303,7 @@ mod tests {
     #[test]
     fn lines_reassemble_across_chunk_boundaries() {
         let mut decoder = LineDecoder::new();
-        assert!(decoder.feed(b"{\"a\":").unwrap().is_empty());
+        assert_eq!(decoder.feed(b"{\"a\":").unwrap(), [] as [String; 0]);
         let lines = decoder.feed(b"1}\n{\"b\":2}\n").unwrap();
         assert_eq!(lines, ["{\"a\":1}", "{\"b\":2}"]);
         assert_eq!(decoder.pending_bytes(), 0);

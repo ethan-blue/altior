@@ -444,8 +444,8 @@ fn memory_ranking_deterministic_scoring_explanations_and_limits() {
     assert!((exp_a.confidence_score - 1.0).abs() < 1e-6);
     assert!((exp_a.explicitness_bonus - 0.2).abs() < 1e-6);
     assert!(exp_a.recency_score > 0.9);
-    assert!(!exp_a.matched_terms.is_empty());
-    assert!(!exp_a.why_selected.is_empty());
+    assert_ne!(exp_a.matched_terms, Vec::<String>::new());
+    assert_ne!(exp_a.why_selected, "");
 
     let exp_b = &hits[1].explanation;
     assert!((exp_b.scope_weight - 1.0).abs() < 1e-6); // Global matches project filter with 1.0
