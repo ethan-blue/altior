@@ -529,3 +529,25 @@ Next task and first concrete action:
 - Status: DONE-VERIFIED。
 - Next: P3 剩余为产品接线（设备配对 UI、同步诊断面板、Desktop 会话）与
   blob 平面；均等用户决策后另起切片。
+
+
+### 切片 24 — 威胁 10 闭环：ack 回流 + 墓碑压缩门控（DONE-VERIFIED，2026-10-17）
+- **引擎 half**（同提交）: `EventBody::Ack`——每个 flush 广播本节点的
+  per-origin 已应用前沿（普通签名日志事件，去重/加密/换轮一路复用）；节点
+  折叠为 per-peer 台账，`gc_frontiers()` = 对每个 origin 取**全体直连 peer**
+  的最小值，无 ack 台账的 peer 按 0 计（成员变化自动重钉门控，与领域
+  `AckFrontier` 语义一致）。墓碑标记升级为 `TombstoneMark`
+  （digest + forget 事件的 origin/origin_seq）。
+- **storage half**: `vault_device` CRUD（domain 新增 `restore()` 构造器，
+  撤销状态可跨持久化重建）；墓碑行携带 origin/origin_seq（v9 未发布，
+  同分支原地扩展）；`observe_ack_cursor` 只进不退（回滚声明不是 ack）；
+  `compact_tombstones(floors)` 只删严格低于该 origin ack 地板的行——
+  测试证明：地板之下保留、覆盖地板回收、无地板钉死。
+- **p38** `ack_frontiers_gate_tombstone_compaction`: 遗忘分发前 A 的门控
+  低于 forget seq（关）；两轮 settle 后三节点门控全部 ≥ forget seq（开）；
+  新配对未 ack 的 peer 把门控钉回 0。三方无复活、digest 一致。
+- 门禁: exit 0，ALL ALTIOR QUALITY GATES PASSED CLEANLY——Rust+Tauri **699**
+  测试（+4）、Vitest 298、对比度 24/24、视觉 6/6 全 0 diff。存储 121 测试。
+- Status: DONE-VERIFIED。
+- Next: 引擎态持久化接线（applied 日志/outbox 走 v9 表）与 blob 平面为
+  下两个工程切片；产品层（配对 UI/诊断面板）等用户决策。
