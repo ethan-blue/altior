@@ -498,11 +498,34 @@ Next task and first concrete action:
   0 diff、DTO 漂移 in sync、loopback 2 用例。所有 P3 提交保持不 push。
 - Status: DONE-VERIFIED。
 
-### 切片 23 — P3.5 同步引擎 + 套件 1/4（IN-PROGRESS → 下一切片，未开始代码）
-- 计划: `altior-core::sync` 引擎（pull-before-push、ack 前沿压缩门、per-device
-  子游标）+ SQLite `CounterLease` 实现（新迁移 v9）+ 套件 1
-  （`test_three_device_offline_convergence`）+ 套件 4
-  （`test_stale_device_tombstone_non_resurrection`）。
-- 首个具体动作: 读 `crates/altior-storage/src/migrations.rs` 迁移模式与
-  `crates/altior-core/src/sync_gate.rs`，落 sync 状态表迁移。
-- Status: IN-PROGRESS（设计已定于 ADR 0027 §5–8；代码未动）。
+### 切片 23 — P3.5 同步引擎落地 + ADR 0025 套件 1/4 全绿（DONE-VERIFIED）
+- **crypto 事件签名**（并入 f9d1a12）: `DeviceKeys::sign` +
+  `DeviceKeys::verify_signature`（verify_strict，配对签名的一般化）。
+- **storage v9**（`f9d1a12`）: 迁移 v9 四表（sync_counter_lease /
+  vault_device / sync_ack_cursor / memory_tombstone，全部在 sync gate 后）+
+  `SqliteCounterLease`（事务化租约，F31 持久半场）+ 3 测试（重开后不回绕、
+  500 信封跨重建零重复、设备表往返）。版本钉定测试 8→9（journal/domain/
+  memory/p14 四文件）。
+- **同步引擎**（`93d264f`）: `altior-core::sync`——Ed25519 签名事件
+  （event_id 去重）、文档 grow-only 条目集、记忆 propose/forget + 永久墓碑、
+  pull-before-push flush。测试驱出两个真修复: ① poll 在 has_more=false 时
+  先 break 后处理，丢掉最后一页还推进游标（已修：处理完再断）；② 空 outbox
+  的 flush 也推进 ratchet turn，接收端正确地按跳号拒绝（已修：turn=批次，
+  空批不换轮）。引擎内简化（grow-only vs Automerge、outbox 不修剪、内存态）
+  均在模块文档具名登记。
+- **套件 1** `test_three_device_offline_convergence`（p36）: 三设备配对，
+  C 离线期间 A/B 并发编辑 + 遗忘 M1 + 新增 M2，C 回归 pull-before-push 后
+  贡献 M3——三方 digest 全等，墓碑/双编辑/M2/M3 全员一致，零抑制。
+- **套件 4** `test_stale_device_tombstone_non_resurrection`（p37）: C 带旧
+  状态重连并重提议 M1——pull 先应用墓碑，peer 各抑制 1 次，新鲜 M4 正常
+  通过；三方 digest 全等。
+- **边界与门禁**: 依赖边界钉定测试按 ADR 0027 更新（core +crypto+relay，
+  storage +crypto，dc89004）。dto-export 写入遇 Windows ERROR 1224（索引器
+  映射瞬态）加有界重试（8b64d52，~500ms 上限，其余错误照旧诚实失败）。
+  统一门禁 **exit 0，ALL ALTIOR QUALITY GATES PASSED CLEANLY**——Rust+Tauri
+  **695** 测试、Vitest 298、对比度 24/24、视觉 6/6 全 0 diff、DTO in sync、
+  loopback 2 用例。ADR 0025 四套件状态: **1 ✅ 2 ✅ 3 ✅ 4 ✅**（独立密码学
+  审查与 SYNC_ENABLED 翻转仍按 ADR 0025 保留给用户）。
+- Status: DONE-VERIFIED。
+- Next: P3 剩余为产品接线（设备配对 UI、同步诊断面板、Desktop 会话）与
+  blob 平面；均等用户决策后另起切片。
