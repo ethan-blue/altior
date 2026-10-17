@@ -714,7 +714,7 @@ fn migration_v5_to_v6_creates_memory_tables_and_preserves_journal() {
     // Now open with Store::open, which should auto-migrate from v5 to latest (v8)
     {
         let mut store = Store::open(&db_path).expect("open and migrate to v7");
-        assert_eq!(store.schema_version().expect("schema_version"), 8);
+        assert_eq!(store.schema_version().expect("schema_version"), 9);
 
         // Verify we can write and search memories on the migrated database
         let draft = fixture_draft("Memory created after v5 to v6 migration");
@@ -1018,7 +1018,7 @@ fn migration_v7_to_v8_upgrades_memory_fts_to_trigram_and_preserves_data() {
     // 2. Open with Store::open: must migrate from v7 to v8
     {
         let store = Store::open(&db_path).expect("open and migrate to v8");
-        assert_eq!(store.schema_version().expect("schema_version"), 8);
+        assert_eq!(store.schema_version().expect("schema_version"), 9);
 
         // Verify that Chinese substring search (which previously failed on v6/v7) now succeeds!
         let q = SearchQuery::try_from("乌龙茶").expect("query");

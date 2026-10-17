@@ -118,6 +118,38 @@ impl DeviceKeys {
     pub(crate) fn signing(&self) -> &SigningKey {
         &self.signing
     }
+
+    /// Signs arbitrary bytes with the device's Ed25519 identity key —
+    /// the generic form of the pairing-transcript signature, used by the
+    /// sync engine to authenticate replicated journal events (ADR 0027
+    /// §6). Production keys live in `SecretStore`; tests use seeds.
+    #[must_use]
+    pub fn sign(&self, message: &[u8]) -> [u8; 64] {
+        use ed25519_dalek::Signer;
+        self.signing.sign(message).to_bytes()
+    }
+
+    /// Verifies an event signature against a device identity, with the
+    /// same strictness as pairing verification: substituted keys or
+    /// malleable signatures fail as one opaque error.
+    ///
+    /// # Errors
+    ///
+    /// [`crate::CryptoError::SignatureInvalid`] for any verification
+    /// failure — no oracle about which check tripped.
+    pub fn verify_signature(
+        identity: &DeviceIdentity,
+        message: &[u8],
+        signature: &[u8; 64],
+    ) -> Result<(), crate::CryptoError> {
+        use ed25519_dalek::Signature;
+        let verifying_key = ed25519_dalek::VerifyingKey::from_bytes(&identity.ed25519_public())
+            .map_err(|_| crate::CryptoError::SignatureInvalid)?;
+        let signature = Signature::from_bytes(signature);
+        verifying_key
+            .verify_strict(message, &signature)
+            .map_err(|_| crate::CryptoError::SignatureInvalid)
+    }
 }
 
 /// The public half of a device: routing id plus both public keys. What

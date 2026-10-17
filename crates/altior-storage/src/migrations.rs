@@ -51,6 +51,10 @@ pub(crate) const MIGRATIONS: &[Migration] = &[
         version: 8,
         sql: SCHEMA_V8,
     },
+    Migration {
+        version: 9,
+        sql: SCHEMA_V9,
+    },
 ];
 
 /// The highest schema version this build understands.
@@ -493,4 +497,50 @@ END;
 INSERT INTO memory_fts (memory_id, content)
 SELECT memory_id, content FROM memory
 WHERE state = 'confirmed' AND superseded_by IS NULL;
+";
+
+
+/// The version-9 schema: Personal Vault sync state (ADR 0027 §5–6).
+/// Created behind the ADR 0025 sync gate — the tables are written only
+/// by sync code, so a v9 file behaves identically to a v8 file until
+/// synchronization is enabled.
+///
+/// - `sync_counter_lease`: durable send-counter reservations, the F31
+///   fix — a restarted process continues from the committed ledger
+///   instead of rewinding into used counters.
+/// - `vault_device`: paired-device records and their epoch sequences.
+/// - `sync_ack_cursor`: per-(device, peer) applied frontiers; the
+///   minimum across peers gates compaction of tombstones.
+/// - `memory_tombstone`: permanent forget records; never garbage-
+///   collected below the ack frontier, never resurrected by stale
+///   devices.
+const SCHEMA_V9: &str = r"
+CREATE TABLE sync_counter_lease (
+    lease_key TEXT NOT NULL,
+    next_counter INTEGER NOT NULL,
+    PRIMARY KEY (lease_key)
+);
+
+CREATE TABLE vault_device (
+    device_id TEXT PRIMARY KEY,
+    added_at INTEGER NOT NULL,
+    added_by TEXT NOT NULL,
+    epoch_seq INTEGER NOT NULL,
+    status TEXT NOT NULL,
+    revoked_at INTEGER,
+    cert_signature BLOB
+);
+
+CREATE TABLE sync_ack_cursor (
+    device_id TEXT NOT NULL,
+    peer_id TEXT NOT NULL,
+    cursor INTEGER NOT NULL,
+    PRIMARY KEY (device_id, peer_id)
+);
+
+CREATE TABLE memory_tombstone (
+    memory_id TEXT PRIMARY KEY,
+    forgotten_at INTEGER NOT NULL,
+    digest BLOB NOT NULL
+);
 ";

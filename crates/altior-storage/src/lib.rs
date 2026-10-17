@@ -17,6 +17,7 @@ pub mod error;
 pub mod identity;
 pub mod memory;
 mod migrations;
+pub mod sync_state;
 
 pub use migrations::latest_schema_version;
 
@@ -279,6 +280,12 @@ impl Store {
         let conn =
             Connection::open(path).map_err(|error| StorageError::from_sqlite("open", error))?;
         Self::open_inner(conn)
+    }
+
+    /// Mutable access to the underlying connection, for the sync-state
+    /// modules that own their SQL (counter leases, device registry).
+    pub fn conn_mut(&mut self) -> &mut Connection {
+        &mut self.conn
     }
 
     /// Opens a private in-memory database (deterministic tests, no fs).
