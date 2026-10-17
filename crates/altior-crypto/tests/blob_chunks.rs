@@ -9,7 +9,7 @@ const VAULT_KEY: [u8; 32] = [42; 32];
 
 /// Deterministic pseudo-plaintext spanning several chunks.
 fn fixture_bytes(len: usize) -> Vec<u8> {
-    (0..len).map(|i| (i % 251) as u8).collect()
+    (0..len).map(|i| u8::try_from(i % 251).unwrap_or(0)).collect()
 }
 
 #[test]
@@ -24,7 +24,7 @@ fn roundtrips_multi_chunk_blobs() {
         let plaintext = fixture_bytes(len);
         let (chunks, manifest) = split_and_encrypt(&VAULT_KEY, &plaintext);
         assert_eq!(manifest.total_size, len as u64);
-        assert!(chunks.len() >= 1);
+        assert!(!chunks.is_empty());
         assert_eq!(chunks.len(), manifest.entries.len());
 
         let map: ChunkMap = chunks
