@@ -172,7 +172,7 @@ i18n、sessionError 仅被 open_thread 置/清；Vitest 291→298。详见 CHECK
 > **进展（2026-10-17，分支 `feat/p3-sync-foundation`，ADR 0027 为设计依据）**：
 > **ADR 0025 四个验收套件全部实现并通过**：套件 1（三设备收敛）✅、
 > 套件 2（nonce 唯一性）✅、套件 3（中继零知识审计）✅、套件 4（墓碑不复活）✅。
-> 同步引擎（签名日志 + pull-before-push + 墓碑抑制 + **ack 回流压缩门控**）、
+> 同步引擎（签名日志 + pull-before-push + 墓碑抑制 + ack 回流压缩门控 + **重启安全持久化**）、
 > 存储 v9（计数器租约等四表 + SqliteCounterLease + 墓碑 GC 门）已落地；全门禁绿（Rust+Tauri **699** / Vitest 298）。
 > `SYNC_ENABLED` 屏障保持关闭——翻它还需独立密码学审查（ADR 0025），且永远
 > 不是 UI 开关。P3 剩余：设备配对 UI、同步诊断面板、Desktop 会话接线、blob 平面。

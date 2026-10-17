@@ -551,3 +551,35 @@ Next task and first concrete action:
 - Status: DONE-VERIFIED。
 - Next: 引擎态持久化接线（applied 日志/outbox 走 v9 表）与 blob 平面为
   下两个工程切片；产品层（配对 UI/诊断面板）等用户决策。
+
+
+### 切片 25 — 引擎态持久化接线：重启安全的 SyncNode（DONE-VERIFIED，2026-10-17）
+- **SyncStatePort 端口**（sync/persist.rs）: applied 日志/fetch 游标/墓碑三类
+  持久化 + `MemorySyncStatePort`（进程内默认，行为与原引擎等价）+
+  `StoreSyncStatePort`（走 storage 类型化 API，引擎零 SQL）。`SyncNode::durable`
+  构造时载入日志并经正常 apply 路径重放，重建 memories/documents/tombstones/
+  peer_acks 全部投影；origin 序列从重放日志推导（永不回绕——重启后 event id
+  与中继历史撞车由结构上排除）。
+- **v9 扩表**（未发布同分支原地扩展）: sync_journal（applied_order 单调）+
+  sync_fetch_cursor；storage 增类型无关 API（append/list journal、fetch 游标
+  只进不退）。
+- **测试驱出的三个真修复**:
+  ① poll 最后一页先 break 后处理（丢页+游标虚进）——切片 23 已修，本切片
+  回归覆盖；
+  ② flush 的 ack 事件走 apply 不走 admit——从未进日志，重启后 origin seq
+  回退与中继撞车（p39 捕获，已修：ack 入日志）；
+  ③ 重配对后新旧配对信封同桶、turn 号重叠但密钥链不同——AEAD 必败。修复
+  落在 ADR 0027 §4.4 本来的设计上：pair() 携带 epoch_seq（重配对递增），
+  poll 对**更旧 epoch** 的桶内残留信封跳过（内容在重配对前已应用），更新
+  epoch 或认证失败一律 fail closed。三套件同步改造（pair 携带 1）。
+- **p39** `durable_node_survives_restart_without_loss`: 重启后重放恢复记忆/
+  文档/去重基；跨重启继续收敛，digest 一致，无复活无重复。
+- 门禁: exit 0，ALL ALTIOR QUALITY GATES PASSED CLEANLY——Rust+Tauri **700**
+  测试、Vitest 298、对比度 24/24、视觉 6/6 全 0 diff。core 127 测试、
+  storage 121 测试。
+- 已登记未做: 会话密钥材料（chain_ikm）的持久化属 OS Secret Store 职责
+  （SQLite 存密钥违反 AGENTS.md 不变量），当前重启后经 pair() 重建会话；
+  turn 链状态的 SecretStore 持久化留待配对流程切片。
+- Status: DONE-VERIFIED。
+- Next: blob 平面（内容寻址加密块，需先补 ADR 0027 附录或新 ADR）；产品层
+  等用户决策。
