@@ -26,7 +26,7 @@ fn roundtrips_multi_chunk_blobs() {
         let plaintext = fixture_bytes(len);
         let (chunks, manifest) = split_and_encrypt(&VAULT_KEY, &plaintext);
         assert_eq!(manifest.total_size, len as u64);
-        assert!(!chunks.is_empty());
+        assert_ne!(chunks, Vec::<altior_crypto::ChunkCiphertext>::new());
         assert_eq!(chunks.len(), manifest.entries.len());
 
         let map: ChunkMap = chunks
