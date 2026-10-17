@@ -58,23 +58,24 @@ fn test_stale_device_tombstone_non_resurrection() {
     {
         let mut ab = MemLease::new();
         let mut ba = MemLease::new();
-        SyncNode::pair(&mut a, &mut b, &epoch, &mut ab, &mut ba).unwrap();
+        SyncNode::pair(&mut a, &mut b, &epoch, 1, &mut ab, &mut ba).unwrap();
     }
     {
         let mut ac = MemLease::new();
         let mut ca = MemLease::new();
-        SyncNode::pair(&mut a, &mut c, &epoch, &mut ac, &mut ca).unwrap();
+        SyncNode::pair(&mut a, &mut c, &epoch, 1, &mut ac, &mut ca).unwrap();
     }
     {
         let mut bc = MemLease::new();
         let mut cb = MemLease::new();
-        SyncNode::pair(&mut b, &mut c, &epoch, &mut bc, &mut cb).unwrap();
+        SyncNode::pair(&mut b, &mut c, &epoch, 1, &mut bc, &mut cb).unwrap();
     }
 
     // Warm-up: Memory 1 ("dormant-state note") is everywhere before C
     // goes dormant.
     a.propose_memory("mem_000000000001d", "dormant-state note")
-        .unwrap_or_else(|| panic!("warm-up"));
+        .expect("propose failed")
+        .expect("warm-up");
     a.flush(&mut relay, TURN_SEED_A).unwrap();
     b.poll(&mut relay).unwrap();
     c.poll(&mut relay).unwrap();
@@ -91,18 +92,18 @@ fn test_stale_device_tombstone_non_resurrection() {
     // ── C, still holding its old state, re-proposes Memory 1 ─────────
     // C has not seen the tombstone, so the proposal is accepted locally
     // (this is the stale-database state ADR 0025 describes).
-    let stale = c.propose_memory(
-        "mem_000000000001d",
-        "STALE: resurrecting from my 30-day-old copy",
-    );
-    assert!(
-        stale.is_some(),
-        "C should not know yet; the stale write is queued"
-    );
+    let stale = c
+        .propose_memory(
+            "mem_000000000001d",
+            "STALE: resurrecting from my 30-day-old copy",
+        )
+        .expect("propose failed")
+        .expect("C should not know yet; the stale write is queued");
 
     // C also queues a fresh, legitimate memory before reconnecting.
     c.propose_memory("mem_000000000004c", "fresh memory from the returned device")
-        .unwrap_or_else(|| panic!("M4"));
+        .expect("propose failed")
+        .expect("M4");
 
     // ── C reconnects: pull-before-push ──────────────────────────────
     // flush polls first: C applies the forget, removing its own stale

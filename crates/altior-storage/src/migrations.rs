@@ -544,4 +544,26 @@ CREATE TABLE memory_tombstone (
     forgotten_at INTEGER NOT NULL,
     digest BLOB NOT NULL
 );
+
+-- The engine's applied journal, the durable dedup and replay basis: a
+-- restarted node reloads these (in sequence order) and replays them
+-- through the apply path, rebuilding every projection, instead of
+-- depending on relay retention.
+CREATE TABLE sync_journal (
+    event_id TEXT PRIMARY KEY,
+    origin TEXT NOT NULL,
+    origin_seq INTEGER NOT NULL,
+    applied_order INTEGER NOT NULL UNIQUE,
+    signature BLOB NOT NULL,
+    body_json TEXT NOT NULL
+);
+
+CREATE INDEX sync_journal_origin ON sync_journal(origin, origin_seq);
+
+-- The receiver's relay fetch position per peer bucket, so a restart
+-- resumes catch-up instead of re-reading retained history.
+CREATE TABLE sync_fetch_cursor (
+    peer_id TEXT PRIMARY KEY,
+    cursor INTEGER NOT NULL
+);
 ";

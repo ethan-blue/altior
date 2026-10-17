@@ -28,10 +28,14 @@
 //! persists through `altior-storage` v9 tables). None of these weaken
 //! the security properties the suites assert.
 
+pub mod persist;
+
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use altior_crypto::{CounterLease, DeviceIdentity, DeviceKeys, SessionEpoch, SessionV2};
+
 use altior_relay::{BucketId, Relay, RelayPolicy};
+use persist::{MemorySyncStatePort, SyncStatePort};
 use serde::{Deserialize, Serialize};
 
 /// One replicated journal event: routing identity plus a signed body.
@@ -100,6 +104,9 @@ pub enum SyncError {
     Serialization(serde_json::Error),
     /// An internal invariant broke (programming error, fail closed).
     Invariant(String),
+    /// The durable state port failed; the node fails closed rather
+    /// than continue with unrecorded state.
+    State(std::io::Error),
 }
 
 impl std::fmt::Display for SyncError {
@@ -110,6 +117,7 @@ impl std::fmt::Display for SyncError {
             Self::Relay(source) => write!(f, "relay failure: {source}"),
             Self::Serialization(source) => write!(f, "journal serialization failed: {source}"),
             Self::Invariant(what) => write!(f, "sync invariant broken: {what}"),
+            Self::State(source) => write!(f, "durable state failure: {source}"),
         }
     }
 }
@@ -155,6 +163,13 @@ struct PeerChannels {
     fetch_cursor: u64,
 }
 
+/// The durability mode behind a node: pure in-memory, or backed by a
+/// [`SyncStatePort`] whose applied journal survives restarts.
+enum SyncNodeState {
+    Volatile,
+    Durable(Box<dyn SyncStatePort>),
+}
+
 /// One paired device's sync engine state.
 pub struct SyncNode {
     // Debug is manual: key material and session states are redacted.
@@ -178,6 +193,11 @@ pub struct SyncNode {
     peer_acks: BTreeMap<String, BTreeMap<String, u64>>,
     /// Fan-out bookkeeping: event ids already delivered to a peer.
     sent_to: HashMap<String, BTreeSet<String>>,
+    /// Durability backing; `Volatile` behaves like the original engine.
+    state: SyncNodeState,
+    /// Fetch cursors loaded from the port at construction, applied
+    /// when the peer's channel appears at `pair`.
+    loaded_cursors: BTreeMap<String, u64>,
     next_seq: u64,
     suppressed_resurrections: u64,
 }
@@ -217,7 +237,59 @@ impl SyncNode {
             sent_to: HashMap::new(),
             next_seq: 1,
             suppressed_resurrections: 0,
+            state: SyncNodeState::Volatile,
+            loaded_cursors: BTreeMap::new(),
         }
+    }
+
+    /// A durable node: the port is loaded at construction and the
+    /// applied journal is replayed through the normal apply path,
+    /// rebuilding memories, documents, tombstones, and peer acks.
+    ///
+    /// # Errors
+    ///
+    /// [`SyncError::State`] when the port cannot be read;
+    /// [`SyncError::Serialization`] when a stored body fails to decode.
+    pub fn durable(
+        keys: DeviceKeys,
+        label: impl Into<String>,
+        mut port: Box<dyn SyncStatePort>,
+    ) -> Result<Self, SyncError> {
+        let mut node = Self::new(keys, label);
+        for event in port.load_applied()? {
+            node.apply(event)?;
+        }
+        // The origin sequence must never rewind: event ids are unique
+        // per device forever, so a restart continues past the highest
+        // sequence in its own reloaded journal.
+        node.next_seq = node
+            .applied
+            .values()
+            .filter(|event| event.origin == node.label)
+            .map(|event| event.origin_seq)
+            .max()
+            .unwrap_or(0)
+            + 1;
+        node.tombstones = port.load_tombstones()?;
+        node.loaded_cursors = port.load_fetch_cursors()?;
+        node.state = SyncNodeState::Durable(port);
+        Ok(node)
+    }
+
+    /// Records an event durably (durable mode) and applies it. The
+    /// port's id dedup is authoritative across restarts.
+    fn admit(&mut self, event: JournalEvent) -> Result<(), SyncError> {
+        if self.applied.contains_key(&event.event_id) {
+            return Ok(());
+        }
+        let fresh = match &mut self.state {
+            SyncNodeState::Volatile => true,
+            SyncNodeState::Durable(port) => port.record_applied(&event)?,
+        };
+        if fresh || !self.applied.contains_key(&event.event_id) {
+            self.apply(event)?;
+        }
+        Ok(())
     }
 
     /// The node's device label.
@@ -237,27 +309,32 @@ impl SyncNode {
         a: &mut SyncNode,
         b: &mut SyncNode,
         epoch: &SessionEpoch,
+        epoch_seq: u32,
         a_to_b: &mut dyn CounterLease,
         b_to_a: &mut dyn CounterLease,
     ) -> Result<(), SyncError> {
         let identity_a = a.keys.public_identity();
         let identity_b = b.keys.public_identity();
-        let outbound_a = SessionV2::outbound(&a.keys, &identity_b, epoch.clone(), 1, a_to_b)
+        let outbound_a =
+            SessionV2::outbound(&a.keys, &identity_b, epoch.clone(), epoch_seq, a_to_b)
+                .map_err(SyncError::Session)?;
+        let inbound_b = SessionV2::inbound(&b.keys, &identity_a, epoch.clone(), epoch_seq)
             .map_err(SyncError::Session)?;
-        let inbound_b = SessionV2::inbound(&b.keys, &identity_a, epoch.clone(), 1)
-            .map_err(SyncError::Session)?;
-        let outbound_b = SessionV2::outbound(&b.keys, &identity_a, epoch.clone(), 1, b_to_a)
-            .map_err(SyncError::Session)?;
-        let inbound_a = SessionV2::inbound(&a.keys, &identity_b, epoch.clone(), 1)
+        let outbound_b =
+            SessionV2::outbound(&b.keys, &identity_a, epoch.clone(), epoch_seq, b_to_a)
+                .map_err(SyncError::Session)?;
+        let inbound_a = SessionV2::inbound(&a.keys, &identity_b, epoch.clone(), epoch_seq)
             .map_err(SyncError::Session)?;
 
+        let b_seed = a.loaded_cursors.get(&b.label).copied().unwrap_or(0);
+        let a_seed = b.loaded_cursors.get(&a.label).copied().unwrap_or(0);
         a.peers.insert(
             b.label.clone(),
             PeerChannels {
                 identity: identity_b,
                 outbound: outbound_a,
                 inbound: inbound_a,
-                fetch_cursor: 0,
+                fetch_cursor: b_seed,
             },
         );
         b.peers.insert(
@@ -266,7 +343,7 @@ impl SyncNode {
                 identity: identity_a,
                 outbound: outbound_b,
                 inbound: inbound_b,
-                fetch_cursor: 0,
+                fetch_cursor: a_seed,
             },
         );
         Ok(())
@@ -274,31 +351,35 @@ impl SyncNode {
 
     /// Appends an entry to a document's grow-only set. Returns the
     /// event id.
-    pub fn append_document(&mut self, doc_id: &str, entry: &str) -> String {
+    pub fn append_document(&mut self, doc_id: &str, entry: &str) -> Result<String, SyncError> {
         let event = self.create(EventBody::DocumentAppend {
             doc_id: doc_id.to_owned(),
             entry: entry.to_owned(),
         });
         let id = event.event_id.clone();
-        self.apply(event);
-        id
+        self.admit(event)?;
+        Ok(id)
     }
 
     /// Proposes a memory. A proposal for a locally-tombstoned memory is
     /// refused at creation (the resurrection defense applies to the
     /// origin too).
-    pub fn propose_memory(&mut self, memory_id: &str, content: &str) -> Option<String> {
+    pub fn propose_memory(
+        &mut self,
+        memory_id: &str,
+        content: &str,
+    ) -> Result<Option<String>, SyncError> {
         if self.tombstones.contains_key(memory_id) {
             self.suppressed_resurrections += 1;
-            return None;
+            return Ok(None);
         }
         let event = self.create(EventBody::MemoryProposed {
             memory_id: memory_id.to_owned(),
             content: content.to_owned(),
         });
         let id = event.event_id.clone();
-        self.apply(event);
-        Some(id)
+        self.admit(event)?;
+        Ok(Some(id))
     }
 
     /// Forgets a memory permanently and locally. Returns the event id.
@@ -307,15 +388,15 @@ impl SyncNode {
         memory_id: &str,
         forgotten_at_millis: u64,
         digest: [u8; 32],
-    ) -> String {
+    ) -> Result<String, SyncError> {
         let event = self.create(EventBody::MemoryForgotten {
             memory_id: memory_id.to_owned(),
             forgotten_at_millis,
             digest,
         });
         let id = event.event_id.clone();
-        self.apply(event);
-        id
+        self.admit(event)?;
+        Ok(id)
     }
 
     /// Pulls every pending envelope from all peer buckets, verifies and
@@ -349,6 +430,9 @@ impl SyncNode {
                             .get_mut(&peer)
                             .expect("peer just read")
                             .fetch_cursor = next_cursor;
+                        if let SyncNodeState::Durable(port) = &mut self.state {
+                            port.record_fetch_cursor(&peer, next_cursor)?;
+                        }
                         if items.is_empty() && !has_more {
                             break;
                         }
@@ -364,10 +448,21 @@ impl SyncNode {
                 for item in items {
                     let plaintext = {
                         let channels = self.peers.get_mut(&peer).expect("peer just read");
-                        channels
-                            .inbound
-                            .open(&item.payload)
-                            .map_err(SyncError::Session)?
+                        match channels.inbound.open(&item.payload) {
+                            Ok(plaintext) => plaintext,
+                            // Pre-re-pair mail in the bucket: its epoch is
+                            // older than the live pairing, its content was
+                            // applied before the re-pair. Skip it; a NEWER
+                            // epoch or an authentication failure fails the
+                            // poll (fail closed).
+                            Err(altior_crypto::CryptoError::EpochMismatch {
+                                found_seq,
+                                expected_seq,
+                            }) if found_seq < expected_seq => {
+                                continue;
+                            }
+                            Err(other) => return Err(SyncError::Session(other)),
+                        }
                     };
                     let wire: WireEvent =
                         serde_json::from_slice(&plaintext).map_err(SyncError::Serialization)?;
@@ -400,7 +495,7 @@ impl SyncNode {
                         signature,
                         body: wire.body,
                     };
-                    self.apply(journal);
+                    self.admit(journal)?;
                     applied_count += 1;
                 }
             }
@@ -424,11 +519,14 @@ impl SyncNode {
     pub fn flush(&mut self, relay: &mut Relay, turn_seed: [u8; 32]) -> Result<usize, SyncError> {
         self.poll(relay)?;
         // Broadcast the durable acknowledgement frontier with every
-        // batch, so peers can raise their compaction gates.
+        // batch, so peers can raise their compaction gates. Routed
+        // through admit: the ack is journaled like any other event, or
+        // a restarted node would rewind its origin sequence and collide
+        // event ids on the relay.
         let ack = self.create(EventBody::Ack {
             frontiers: self.applied_frontier(),
         });
-        self.apply(ack);
+        self.admit(ack)?;
         let peer_labels: Vec<String> = self.peers.keys().cloned().collect();
         let mut pushed = 0;
         for peer in &peer_labels {
@@ -528,6 +626,12 @@ impl SyncNode {
         &self.memories
     }
 
+    /// The document entry sets.
+    #[must_use]
+    pub fn documents(&self) -> &BTreeMap<String, BTreeSet<String>> {
+        &self.documents
+    }
+
     /// The tombstone set.
     #[must_use]
     pub fn tombstones(&self) -> &BTreeMap<String, TombstoneMark> {
@@ -619,7 +723,7 @@ impl SyncNode {
     /// Applies an event to visible state, enforcing the tombstone
     /// contract (threat 10): a proposal for a forgotten memory is
     /// suppressed and counted, never applied.
-    fn apply(&mut self, event: JournalEvent) {
+    fn apply(&mut self, event: JournalEvent) -> Result<(), SyncError> {
         match &event.body {
             EventBody::DocumentAppend { doc_id, entry } => {
                 self.documents
@@ -631,21 +735,29 @@ impl SyncNode {
                 if self.tombstones.contains_key(memory_id) {
                     self.suppressed_resurrections += 1;
                     self.applied.insert(event.event_id.clone(), event);
-                    return;
+                    return Ok(());
                 }
                 self.memories.insert(memory_id.clone(), content.clone());
             }
             EventBody::MemoryForgotten {
-                memory_id, digest, ..
+                memory_id,
+                digest,
+                forgotten_at_millis,
+                ..
             } => {
-                self.tombstones.insert(
-                    memory_id.clone(),
-                    TombstoneMark {
-                        digest: *digest,
-                        origin: event.origin.clone(),
-                        origin_seq: event.origin_seq,
-                    },
-                );
+                let mark = TombstoneMark {
+                    digest: *digest,
+                    origin: event.origin.clone(),
+                    origin_seq: event.origin_seq,
+                };
+                if let SyncNodeState::Durable(port) = &mut self.state {
+                    port.record_tombstone(memory_id, &mark, *forgotten_at_millis)
+                        .map_err(|error| match error {
+                            SyncError::State(source) => SyncError::State(source),
+                            other => SyncError::Invariant(other.to_string()),
+                        })?;
+                }
+                self.tombstones.insert(memory_id.clone(), mark);
                 self.memories.remove(memory_id);
             }
             EventBody::Ack { frontiers } => {
@@ -659,6 +771,7 @@ impl SyncNode {
             }
         }
         self.applied.insert(event.event_id.clone(), event);
+        Ok(())
     }
 }
 

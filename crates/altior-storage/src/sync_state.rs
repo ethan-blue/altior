@@ -128,6 +128,21 @@ pub struct PersistedTombstone {
     pub digest: Vec<u8>,
 }
 
+/// A stored journal event row.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct StoredSyncEvent {
+    /// The event id.
+    pub event_id: String,
+    /// The origin (device label).
+    pub origin: String,
+    /// The per-origin sequence.
+    pub origin_seq: u64,
+    /// The Ed25519 signature bytes.
+    pub signature: Vec<u8>,
+    /// The serialized event body.
+    pub body_json: String,
+}
+
 impl Store {
     /// Inserts or updates a paired-device record from the domain model.
     ///
@@ -297,6 +312,69 @@ impl Store {
         Ok(())
     }
 
+    /// Appends one applied sync event to the durable journal.
+    /// Returns `false` when the event id already exists (the durable
+    /// dedup basis across restarts). `applied_order` is assigned
+    /// internally as MAX+1, so load order equals insertion order.
+    ///
+    /// # Errors
+    ///
+    /// [`StorageError::Sqlite`] on write failure.
+    pub fn append_sync_journal_event(
+        &self,
+        event_id: &str,
+        origin: &str,
+        origin_seq: u64,
+        signature: &[u8],
+        body_json: &str,
+    ) -> Result<bool, StorageError> {
+        let origin_seq =
+            i64::try_from(origin_seq).map_err(|error| StorageError::InvalidDomainEvent {
+                detail: format!("origin_seq: {error}"),
+            })?;
+        let inserted = self
+            .conn()
+            .execute(
+                "INSERT OR IGNORE INTO sync_journal
+                    (event_id, origin, origin_seq, applied_order, signature, body_json)
+                 SELECT ?1, ?2, ?3, COALESCE(MAX(applied_order), 0) + 1, ?4, ?5 FROM sync_journal",
+                rusqlite::params![event_id, origin, origin_seq, signature, body_json],
+            )
+            .map_err(|error| StorageError::from_sqlite("append sync journal", error))?;
+        Ok(inserted == 1)
+    }
+
+    /// Loads the applied journal in application order.
+    ///
+    /// # Errors
+    ///
+    /// [`StorageError::Sqlite`] on read failure.
+    pub fn list_sync_journal_events(&self) -> Result<Vec<StoredSyncEvent>, StorageError> {
+        let mut statement = self
+            .conn()
+            .prepare(
+                "SELECT event_id, origin, origin_seq, signature, body_json
+                 FROM sync_journal ORDER BY applied_order",
+            )
+            .map_err(|error| StorageError::from_sqlite("list sync journal", error))?;
+        let rows = statement
+            .query_map([], |row| {
+                Ok(StoredSyncEvent {
+                    event_id: row.get(0)?,
+                    origin: row.get(1)?,
+                    origin_seq: row.get::<_, i64>(2).unwrap_or(0).cast_unsigned(),
+                    signature: row.get(3)?,
+                    body_json: row.get(4)?,
+                })
+            })
+            .map_err(|error| StorageError::from_sqlite("query sync journal", error))?;
+        let mut out = Vec::new();
+        for row in rows {
+            out.push(row.map_err(|error| StorageError::from_sqlite("sync journal row", error))?);
+        }
+        Ok(out)
+    }
+
     /// Every persisted tombstone.
     ///
     /// # Errors
@@ -384,6 +462,51 @@ impl Store {
             )
             .map_err(|error| StorageError::from_sqlite("observe ack cursor", error))?;
         Ok(())
+    }
+
+    /// Persists the receiver's relay fetch position for one peer bucket.
+    /// Forward-only: a lower value is ignored.
+    ///
+    /// # Errors
+    ///
+    /// [`StorageError::Sqlite`] on write failure.
+    pub fn record_sync_fetch_cursor(&self, peer: &str, cursor: u64) -> Result<(), StorageError> {
+        let cursor = i64::try_from(cursor).map_err(|error| StorageError::InvalidDomainEvent {
+            detail: format!("fetch cursor: {error}"),
+        })?;
+        self.conn()
+            .execute(
+                "INSERT INTO sync_fetch_cursor (peer_id, cursor) VALUES (?1, ?2)
+                 ON CONFLICT(peer_id) DO UPDATE SET cursor = MAX(cursor, ?2)",
+                rusqlite::params![peer, cursor],
+            )
+            .map_err(|error| StorageError::from_sqlite("record fetch cursor", error))?;
+        Ok(())
+    }
+
+    /// Loads the receiver's relay fetch positions per peer bucket.
+    ///
+    /// # Errors
+    ///
+    /// [`StorageError::Sqlite`] on read failure.
+    pub fn list_sync_fetch_cursors(&self) -> Result<Vec<(String, u64)>, StorageError> {
+        let mut statement = self
+            .conn()
+            .prepare("SELECT peer_id, cursor FROM sync_fetch_cursor ORDER BY peer_id")
+            .map_err(|error| StorageError::from_sqlite("list fetch cursors", error))?;
+        let rows = statement
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, i64>(1)?.cast_unsigned(),
+                ))
+            })
+            .map_err(|error| StorageError::from_sqlite("query fetch cursors", error))?;
+        let mut out = Vec::new();
+        for row in rows {
+            out.push(row.map_err(|error| StorageError::from_sqlite("fetch cursor row", error))?);
+        }
+        Ok(out)
     }
 
     /// The acknowledged floor across all of this device's peers — the

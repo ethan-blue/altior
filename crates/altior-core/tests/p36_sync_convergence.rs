@@ -63,23 +63,24 @@ fn test_three_device_offline_convergence() {
     {
         let mut ab = MemLease::new();
         let mut ba = MemLease::new();
-        SyncNode::pair(&mut a, &mut b, &epoch, &mut ab, &mut ba).unwrap();
+        SyncNode::pair(&mut a, &mut b, &epoch, 1, &mut ab, &mut ba).unwrap();
     }
     {
         let mut ac = MemLease::new();
         let mut ca = MemLease::new();
-        SyncNode::pair(&mut a, &mut c, &epoch, &mut ac, &mut ca).unwrap();
+        SyncNode::pair(&mut a, &mut c, &epoch, 1, &mut ac, &mut ca).unwrap();
     }
     {
         let mut bc = MemLease::new();
         let mut cb = MemLease::new();
-        SyncNode::pair(&mut b, &mut c, &epoch, &mut bc, &mut cb).unwrap();
+        SyncNode::pair(&mut b, &mut c, &epoch, 1, &mut bc, &mut cb).unwrap();
     }
 
     // Warm-up round: Memory 1 exists on all three devices before C goes
     // dark. Every flush polls first, so one pass settles the triangle.
     a.propose_memory("mem_000000000001a", "the shared note")
-        .unwrap_or_else(|| panic!("warm-up proposal"));
+        .expect("propose failed")
+        .expect("warm-up proposal");
     a.flush(&mut relay, TURN_SEED_A).unwrap();
     b.poll(&mut relay).unwrap();
     c.poll(&mut relay).unwrap();
@@ -97,11 +98,12 @@ fn test_three_device_offline_convergence() {
     // A: document edit + forget Memory 1. B: concurrent document edit +
     // Memory 2. The edits are concurrent — neither device has seen the
     // other when it writes.
-    a.append_document("doc-1", "alpha edit by a");
+    a.append_document("doc-1", "alpha edit by a").unwrap();
     a.forget_memory("mem_000000000001a", 1_700_000_050_000, [5; 32]);
-    b.append_document("doc-1", "beta edit by b");
+    b.append_document("doc-1", "beta edit by b").unwrap();
     b.propose_memory("mem_000000000002b", "memory two, added during dormancy")
-        .unwrap_or_else(|| panic!("M2 proposal"));
+        .expect("propose failed")
+        .expect("M2 proposal");
 
     a.flush(&mut relay, TURN_SEED_A).unwrap();
     b.flush(&mut relay, TURN_SEED_B).unwrap();
@@ -118,7 +120,8 @@ fn test_three_device_offline_convergence() {
     // tombstone and both document edits before anything of its own
     // leaves. C also contributes Memory 3.
     c.propose_memory("mem_000000000003c", "memory three, written after rejoining")
-        .unwrap_or_else(|| panic!("M3 proposal"));
+        .expect("propose failed")
+        .expect("M3 proposal");
     c.flush(&mut relay, TURN_SEED_C).unwrap();
     a.poll(&mut relay).unwrap();
     b.poll(&mut relay).unwrap();

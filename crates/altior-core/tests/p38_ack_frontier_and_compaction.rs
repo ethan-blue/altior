@@ -58,22 +58,25 @@ fn ack_frontiers_gate_tombstone_compaction() {
 
     {
         let (mut ab, mut ba) = (MemLease::new(), MemLease::new());
-        SyncNode::pair(&mut a, &mut b, &epoch, &mut ab, &mut ba).unwrap();
+        SyncNode::pair(&mut a, &mut b, &epoch, 1, &mut ab, &mut ba).unwrap();
     }
     {
         let (mut ac, mut ca) = (MemLease::new(), MemLease::new());
-        SyncNode::pair(&mut a, &mut c, &epoch, &mut ac, &mut ca).unwrap();
+        SyncNode::pair(&mut a, &mut c, &epoch, 1, &mut ac, &mut ca).unwrap();
     }
     {
         let (mut bc, mut cb) = (MemLease::new(), MemLease::new());
-        SyncNode::pair(&mut b, &mut c, &epoch, &mut bc, &mut cb).unwrap();
+        SyncNode::pair(&mut b, &mut c, &epoch, 1, &mut bc, &mut cb).unwrap();
     }
 
     // Memory 1 everywhere, then A forgets it.
     a.propose_memory("mem_gate0000000001", "to be forgotten")
-        .unwrap_or_else(|| panic!("warm-up"));
+        .expect("propose failed")
+        .expect("warm-up");
     settle(&mut [&mut a, &mut b, &mut c], &mut relay, &seeds);
-    let forget_id = a.forget_memory("mem_gate0000000001", 1_700_200_000_000, [15; 32]);
+    let forget_id = a
+        .forget_memory("mem_gate0000000001", 1_700_200_000_000, [15; 32])
+        .unwrap();
     let forget_seq: u64 = forget_id
         .rsplit(':')
         .next()
@@ -112,7 +115,7 @@ fn ack_frontiers_gate_tombstone_compaction() {
     let mut d = node(4, "gate-d");
     {
         let (mut ad, mut da) = (MemLease::new(), MemLease::new());
-        SyncNode::pair(&mut a, &mut d, &epoch, &mut ad, &mut da).unwrap();
+        SyncNode::pair(&mut a, &mut d, &epoch, 1, &mut ad, &mut da).unwrap();
     }
     assert_eq!(
         a.gc_frontiers().get("gate-a").copied(),
