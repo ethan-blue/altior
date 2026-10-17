@@ -9,7 +9,9 @@ const VAULT_KEY: [u8; 32] = [42; 32];
 
 /// Deterministic pseudo-plaintext spanning several chunks.
 fn fixture_bytes(len: usize) -> Vec<u8> {
-    (0..len).map(|i| u8::try_from(i % 251).unwrap_or(0)).collect()
+    (0..len)
+        .map(|i| u8::try_from(i % 251).unwrap_or(0))
+        .collect()
 }
 
 #[test]
