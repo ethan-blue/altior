@@ -240,7 +240,6 @@ pub struct OpenThreadCommand {
     pub history_limit: Option<u32>,
 }
 
-
 /// Payload for requesting a gap-recovery snapshot (`request_snapshot`).
 ///
 /// ADR 0006: after `stream.gap` or a Core restart, Desktop re-derives visible
@@ -989,7 +988,6 @@ impl CommandEnvelope {
             issued_at,
         }
     }
-
 
     /// Builds a `request_snapshot` command (ADR 0006 gap recovery).
     ///

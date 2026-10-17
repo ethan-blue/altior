@@ -115,7 +115,7 @@ export function ToolBlock({ text, status, onToggle }: ToolBlockProps) {
   return (
     <div className={styles.toolOutputContainer} data-testid="tool-output-block">
       <div className={styles.toolHeader}>
-        <div style={{ display: "flex", alignItems: "center", gap: "var(--spacing-8)" }}>
+        <div className={styles.toolHeading}>
           <span>{t.markdown.toolExecution}</span>
           {status ? (
             <span className={`${styles.toolStatusBadge} ${statusClass}`} data-testid="tool-status-badge">
@@ -173,7 +173,7 @@ function parseInline(text: string, openImageLabel: string): ReactNode[] {
       const isSafe = url.startsWith("https://") || url.startsWith("http://");
       nodes.push(
         <span key={match.index} className={styles.remoteImageNotice}>
-          <span>🖼️ [{alt}]</span>
+          <span>[{alt}]</span>
           {isSafe ? (
             <a
               href={url}

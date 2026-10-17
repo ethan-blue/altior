@@ -166,11 +166,10 @@ describe("Commercial UI Phase 1: Timeline Card Redesign & Approval Security Card
         />,
       );
 
-      // Security risk awareness badge in header
+      // A single security strip communicates risk without duplicating header chrome.
       const riskBadge = container.querySelector("[class*='riskBadge']");
-      expect(riskBadge).not.toBeNull();
+      expect(riskBadge).toBeNull();
 
-      // Security risk notice banner in card body
       const riskNotice = container.querySelector("[class*='riskNotice']");
       expect(riskNotice).not.toBeNull();
 
@@ -259,6 +258,48 @@ describe("Commercial UI Phase 1: Timeline Card Redesign & Approval Security Card
       onDecision.mockClear();
       fireEvent.click(screen.getByTestId("deny"));
       expect(onDecision).toHaveBeenCalledWith("perm-kb", "denied");
+    });
+
+    it("ignores y/d/n keys that originate on an inner control (button focus)", () => {
+      const store = createTimelineStore([
+        {
+          id: "perm-inner",
+          kind: "permission",
+          text: "rm -rf /tmp/cache",
+          status: null,
+          permission: {
+            requestedAction: "rm -rf /tmp/cache",
+            scope: "fs:/tmp/cache",
+            decision: null,
+          },
+          streaming: false,
+        },
+      ]);
+
+      const onDecision = vi.fn();
+      const { container } = render(
+        <TimelineRowView
+          store={store}
+          rowId="perm-inner"
+          index={0}
+          focused={true}
+          onFocus={vi.fn()}
+          onPermissionDecision={onDecision}
+        />,
+      );
+
+      const row = container.querySelector<HTMLElement>("[data-row-kind='permission']")!;
+      const denyButton = screen.getByTestId("deny");
+
+      // With focus on the inner Deny button, a stray "y" (muscle memory from
+      // other rows) must not bubble into an approval.
+      denyButton.focus();
+      fireEvent.keyDown(denyButton, { key: "y" });
+      expect(onDecision).not.toHaveBeenCalled();
+
+      // The same key on the row container itself still decides.
+      fireEvent.keyDown(row, { key: "y" });
+      expect(onDecision).toHaveBeenCalledWith("perm-inner", "approved");
     });
 
     it("displays submitting state and submission error properly", async () => {

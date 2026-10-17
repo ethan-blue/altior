@@ -30,6 +30,10 @@ impl Error for SyncDisabled {}
 ///
 /// Today this always returns [`SyncDisabled`]. Flip [`SYNC_ENABLED`] only after
 /// ADR 0025 review evidence lands — never via Desktop UI or env vars.
+///
+/// # Errors
+///
+/// Returns [`SyncDisabled`] while [`SYNC_ENABLED`] is `false`.
 pub fn ensure_sync_allowed() -> Result<(), SyncDisabled> {
     if SYNC_ENABLED {
         Ok(())
@@ -38,16 +42,19 @@ pub fn ensure_sync_allowed() -> Result<(), SyncDisabled> {
     }
 }
 
+// Compile-time latch: the production build must not compile with sync
+// enabled before ADR 0025 acceptance evidence lands.
+const _: () = assert!(
+    !SYNC_ENABLED,
+    "SYNC_ENABLED must stay false until ADR 0025 acceptance suites pass"
+);
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn production_sync_remains_hard_disabled() {
-        assert!(
-            !SYNC_ENABLED,
-            "SYNC_ENABLED must stay false until ADR 0025 acceptance suites pass"
-        );
         assert_eq!(ensure_sync_allowed(), Err(SyncDisabled));
     }
 

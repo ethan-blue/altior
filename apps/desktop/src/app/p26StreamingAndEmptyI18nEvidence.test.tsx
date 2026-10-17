@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { CodeBlock, ToolBlock } from "../components/SafeMarkdown";
 import { I18nProvider } from "../i18n";
 import { getDictionary } from "../i18n";
+import { localizeTransportStatus } from "../i18n/localizeEnums";
 
 afterEach(() => {
   cleanup();
@@ -47,5 +48,24 @@ describe("p26 streaming markdown + workbench empty i18n", () => {
     expect(zh.selectConversation).toContain("选择");
     expect(en.coreDisconnected).toMatch(/disconnected|Local service/i);
     expect(en.noConversations).toContain("No conversations yet");
+  });
+
+  it("header IPC status pill dictionary localizes connecting and transport states", () => {
+    const zhDict = getDictionary("zh-CN");
+    const enDict = getDictionary("en");
+    expect(enDict.statusBar.ipcConnecting).toMatch(/^IPC connecting/);
+    expect(zhDict.statusBar.ipcConnecting).toMatch(/^IPC 连接中/);
+
+    // The parenthesised fallback state composes ipcState with the shared
+    // localizeTransportStatus vocabulary (exactly how the pill renders it).
+    const zhState = (status: string) =>
+      zhDict.statusBar.ipcState(localizeTransportStatus(status, zhDict));
+    expect(enDict.statusBar.ipcState("disconnected")).toMatch(
+      /^IPC \(disconnected\)$/,
+    );
+    expect(zhState("disconnected")).toMatch(/^IPC（本地服务已断开）$/);
+    expect(zhState("reconnecting")).toContain("正在连接");
+    expect(zhState("unavailable")).toContain("不可用");
+    expect(zhState("closed")).toContain("关闭");
   });
 });

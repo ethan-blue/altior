@@ -4,7 +4,7 @@
  * Verifies:
  * 1. Zero pageerror and console.error exceptions during rendering.
  * 2. Deterministic ready state via [data-fixture-ready="true"] and document.fonts.ready.
- * 3. Load-bearing geometry invariants across all 5 pinned views:
+ * 3. Load-bearing geometry invariants across all 6 pinned views:
  *    - 4-column workbench grid allocation (rail, nav, main, inspector).
  *    - No unintended horizontal scrolling.
  *    - Responsive narrow drawer overlay behavior at 760px.
@@ -38,17 +38,27 @@ const diffDir = resolve(here, "..", "baselines-diff");
 export const PIXEL_MATCH_THRESHOLD = 0.1;
 export const MAX_DIFF_PIXELS_ALLOWED = 50;
 
+// Locale-sensitive rendering (MemoryPane time column, inspector memory date)
+// must not follow the capturing machine's regional settings, or the pinned
+// baselines only match machines with the same timezone/locale. The locale pin
+// also holds the fixture UI language fixed (the app resolves "system" from
+// navigator.language); zh-CN is pinned because the baselines have always been
+// captured on a zh machine and must keep exercising CJK layout.
+export const VISUAL_CONTEXT_DEFAULTS = { locale: "zh-CN", timezoneId: "UTC" };
+
 // Clean up previous diff artifacts if any
 if (fs.existsSync(diffDir)) {
   fs.rmSync(diffDir, { recursive: true, force: true });
 }
 
+// ALTIOR_VISUAL_PORT lets parallel checkouts (scripts/task-pack) avoid port clashes.
+const port = Number(process.env.ALTIOR_VISUAL_PORT) || 4174;
 const server = await createServer({
   root: resolve(here, ".."),
-  server: { port: 4174, strictPort: true },
+  server: { port, strictPort: true },
 });
 await server.listen();
-const address = server.resolvedUrls?.local?.[0] ?? "http://localhost:4174";
+const address = server.resolvedUrls?.local?.[0] ?? `http://localhost:${port}`;
 console.log(`serving ${address} for visual gate`);
 
 let browser;
@@ -58,10 +68,12 @@ const failedViews = [];
 try {
   browser = await chromium.launch();
 
-  async function testView(name, { viewport, drive, assertGeometry }) {
+  async function testView(name, { viewport, init, drive, assertGeometry }) {
     console.log(`Verifying view: ${name} (${viewport.width}x${viewport.height})...`);
-    const context = await browser.newContext({ viewport });
+    const context = await browser.newContext({ viewport, ...VISUAL_CONTEXT_DEFAULTS });
     const page = await context.newPage();
+
+    if (init) await init(page);
 
     page.on("pageerror", (err) => {
       console.error(`[PageError in ${name}]`, err);
@@ -286,12 +298,61 @@ try {
     },
   });
 
+  // 6. Memory Workbench View (1280x800)
+  await testView("memory", {
+    viewport: { width: 1280, height: 800 },
+    init: async (page) => {
+      await page.addInitScript(() => {
+        const fixedNow = 1_700_000_000_000;
+        Date.now = () => fixedNow;
+      });
+    },
+    drive: async (page) => {
+      await page.click("[data-testid='rail-memory']");
+      await page.click("[data-testid='memory-add-button']");
+      await page.fill("[data-testid='memory-content-input']", "User prefers a compact local-first workbench");
+      await page.click("[data-testid='memory-submit-btn']");
+      await page.waitForSelector("[data-testid^='memory-card-'][data-state]");
+      await page.click("[data-testid^='memory-card-'][data-state]");
+      await page.waitForSelector("[data-testid='inspector-memory-details']");
+    },
+    assertGeometry: async (page) => {
+      const memoryInfo = await page.evaluate(() => {
+        const table = document.querySelector("[role='grid']");
+        const selected = document.querySelector("tr[aria-selected='true']");
+        const inspector = document.querySelector("[data-testid='inspector-memory-details']");
+        const wrap = document.querySelector("[data-testid='memory-card-list']");
+        const tableRect = table?.getBoundingClientRect();
+        const inspectorRect = inspector?.getBoundingClientRect();
+        const wrapElement = wrap instanceof HTMLElement ? wrap : null;
+        return {
+          tableWidth: tableRect?.width ?? 0,
+          inspectorWidth: inspectorRect?.width ?? 0,
+          hasSelectedRow: Boolean(selected),
+          hasHorizontalOverflow: wrapElement ? wrapElement.scrollWidth > wrapElement.clientWidth : false,
+          overflowX: wrapElement ? window.getComputedStyle(wrapElement).overflowX : "",
+          pageScrollWidth: document.documentElement.scrollWidth,
+          pageClientWidth: document.documentElement.clientWidth,
+        };
+      });
+      if (memoryInfo.tableWidth < 600) throw new Error(`Memory grid too narrow: ${memoryInfo.tableWidth}`);
+      if (memoryInfo.inspectorWidth < 200) throw new Error(`Memory inspector too narrow: ${memoryInfo.inspectorWidth}`);
+      if (!memoryInfo.hasSelectedRow) throw new Error("Expected a selected memory row");
+      if (memoryInfo.hasHorizontalOverflow && memoryInfo.overflowX !== "auto") {
+        throw new Error(`Memory table overflow is not contained: overflow-x ${memoryInfo.overflowX}`);
+      }
+      if (memoryInfo.pageScrollWidth > memoryInfo.pageClientWidth + 5) {
+        throw new Error("Memory view caused page-level horizontal scrolling");
+      }
+    },
+  });
+
   if (failedViews.length > 0) {
-    console.error(`\n=== Visual & Geometry Gate FAILED: ${failedViews.length}/5 views failed pixel regression ===`);
+    console.error(`\n=== Visual & Geometry Gate FAILED: ${failedViews.length}/6 views failed pixel regression ===`);
     process.exit(1);
   }
 
-  console.log(`\n=== Visual & Geometry Gate: ${passedCount}/5 views passed (pixel regression 100% compliant) ===`);
+  console.log(`\n=== Visual & Geometry Gate: ${passedCount}/6 views passed (pixel regression 100% compliant) ===`);
 } finally {
   if (browser) await browser.close();
   await server.close();

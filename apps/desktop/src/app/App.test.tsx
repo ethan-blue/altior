@@ -187,6 +187,45 @@ describe("App workbench shell", () => {
     ).toContain("Prompt not delivered");
   });
 
+  it("explains a failed harness session next to the composer (A18 residual)", async () => {
+    const reason = "spawn failed for program C:\\fixture\\missing-agent.exe: not found";
+    const transport = new InMemoryTransport();
+    transport.setCommandHandler((cmd) => {
+      if (cmd.kind === "open_thread") {
+        const payload = cmd.payload as { thread_id: string };
+        return {
+          protocol_version: 1,
+          operation_id: cmd.operation_id,
+          thread_id: payload.thread_id,
+          as_of: 1700000000000,
+          data: {
+            thread: {
+              id: payload.thread_id,
+              agent_profile_id: "agp_fixture000000001",
+              title: "Contract fixture walkthrough",
+              state: "open",
+              project_id: null,
+              created_at: 1700000000000,
+              updated_at: 1700000000000,
+            },
+            agent_profile: null,
+            turns: [],
+            pending_permissions: [],
+            session_error: reason,
+          },
+        };
+      }
+      return undefined;
+    });
+    await renderWithThreads(() => transport);
+
+    // The thread still opens (offline readability); the notice explains
+    // why new prompts need a working session.
+    const notice = await screen.findByTestId("session-error-notice");
+    expect(notice.textContent).toContain("could not start");
+    expect(notice.textContent).toContain("missing-agent.exe");
+  });
+
   it("clears the draft once the prompt is admitted (A04)", async () => {
     await renderWithThreads(() => new InMemoryTransport({ autoStreamReplies: false }));
 

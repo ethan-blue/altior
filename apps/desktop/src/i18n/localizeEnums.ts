@@ -55,6 +55,20 @@ export function localizeIdentityKind(
   }
 }
 
+export function localizeMemorySource(
+  source: string,
+  t: TranslationDictionary,
+): string {
+  switch (source) {
+    case "explicit":
+      return t.memoryPane.sourceExplicit;
+    case "inferred":
+      return t.memoryPane.sourceInferred;
+    default:
+      return source;
+  }
+}
+
 export function localizeMemoryState(
   state: string,
   t: TranslationDictionary,
@@ -233,4 +247,29 @@ export function localizeWhySelected(
     .join(t.contextPanel.whyFragBm25)
     .split("bm25 ")
     .join(t.contextPanel.whyFragBm25 + " ");
+}
+
+/**
+ * Compact words for the IPC transport status (header status pill).
+ * Reuses the status-bar vocabulary so both displays speak the same words;
+ * unknown forward-compatible states fall through to the raw value.
+ */
+export function localizeTransportStatus(
+  status: string,
+  t: TranslationDictionary,
+): string {
+  switch (status) {
+    case "disconnected":
+      return t.statusBar.coreDisconnected;
+    case "connecting":
+      return t.statusBar.coreConnecting;
+    case "reconnecting":
+      return t.statusBar.coreReconnecting;
+    case "unavailable":
+      return t.statusBar.coreUnavailable;
+    case "closed":
+      return t.statusBar.coreClosed;
+    default:
+      return status;
+  }
 }

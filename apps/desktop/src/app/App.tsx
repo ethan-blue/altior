@@ -27,6 +27,7 @@ import {
   ThreadsPane,
 } from "../components/shell";
 import { I18nProvider, getDictionary } from "../i18n";
+import { localizeTransportStatus } from "../i18n/localizeEnums";
 import { Timeline } from "../features/timeline/Timeline";
 import type { TimelineRow } from "../features/timeline/timelineStore";
 import type { PermissionDecision } from "../features/timeline/timelineStore";
@@ -75,6 +76,7 @@ export function App({
   const ui = useUiState(uiStore);
 
   const [focusedRowId, setFocusedRowId] = useState<string | null>(null);
+  const [selectedMemoryId, setSelectedMemoryId] = useState<string | null>(null);
   const [narrow, setNarrow] = useState(false);
   const rootRef = useRef<HTMLDivElement | null>(null);
 
@@ -171,6 +173,9 @@ export function App({
   const currentThread = appState.selectedThread;
   const store = currentThread ? appStore.getTimelineStore(currentThread.id) : null;
   const focusedRow = focusedRowId == null || !store ? null : store.getRow(focusedRowId);
+  const selectedMemory = selectedMemoryId == null
+    ? null
+    : appState.memories.find((memory) => memory.memory_id === selectedMemoryId) ?? null;
   const activeAgent =
     appState.agents.find((a) => currentThread && (a.name === currentThread.agent || a.id === currentThread.agent)) ??
     appState.agents.find((a) => a.id === appState.selectedAgentId) ??
@@ -265,7 +270,9 @@ export function App({
   const onSelectThread = useCallback(
     (id: string) => {
       void appStore.selectThread(id);
+      uiStore.setActiveRail("threads");
       uiStore.selectThread(id);
+      setSelectedMemoryId(null);
       setFocusedRowId(null);
     },
     [appStore, uiStore],
@@ -294,6 +301,7 @@ export function App({
     (dest: string) => {
       if (dest === "threads" || dest === "memory") {
         uiStore.setActiveRail(dest);
+        if (dest === "threads") setSelectedMemoryId(null);
       } else if (dest === "agents") {
         appStore.openOnboarding(true);
       } else if (dest === "settings") {
@@ -422,8 +430,10 @@ export function App({
               {appState.negotiated
                 ? `IPC v${appState.negotiated.selected_version}`
                 : appState.connectionStatus === "connecting"
-                  ? "IPC connecting…"
-                  : `IPC (${appState.connectionStatus})`}
+                  ? getDictionary(ui.locale).statusBar.ipcConnecting
+                  : getDictionary(ui.locale).statusBar.ipcState(
+                      localizeTransportStatus(appState.connectionStatus, getDictionary(ui.locale)),
+                    )}
             </span>
           </div>
         </div>
@@ -464,6 +474,12 @@ export function App({
             isLoading={appState.isLoadingMemories}
             activeAgent={activeAgent}
             onSetAgentMemoryMode={appStore.setAgentMemoryMode}
+            selectedMemoryId={selectedMemoryId}
+            onSelectMemory={(memory) => {
+              setSelectedMemoryId(memory.memory_id);
+              uiStore.setInspectorOpen(true);
+            }}
+            onClearMemorySelection={() => setSelectedMemoryId(null)}
             onProposeMemory={appStore.proposeMemory}
             onConfirmMemory={appStore.confirmMemory}
             onRejectMemory={appStore.rejectMemory}
@@ -502,10 +518,9 @@ export function App({
           />
           {currentThreadActiveTurn?.notice ? (
             <p
-              className={styles.emptyState}
+              className={`${styles.emptyState} ${styles.turnNotice}`}
               role="status"
               data-testid="turn-notice"
-              style={{ margin: "0 auto", padding: "4px 16px" }}
             >
               {(() => {
                 const notice = currentThreadActiveTurn.notice;
@@ -516,6 +531,15 @@ export function App({
                 }
                 return notice;
               })()}
+            </p>
+          ) : null}
+          {currentThread.sessionError ? (
+            <p
+              className={`${styles.emptyState} ${styles.turnNotice}`}
+              role="status"
+              data-testid="session-error-notice"
+            >
+              {getDictionary(ui.locale).composer.sessionUnavailable(currentThread.sessionError)}
             </p>
           ) : null}
           <Composer
@@ -555,7 +579,7 @@ export function App({
         </main>
       )}
 
-      {currentThread && ui.inspectorOpen ? (
+      {(currentThread || ui.activeRail === "memory") && ui.inspectorOpen ? (
         <>
           {narrow && (
             <div
@@ -569,7 +593,9 @@ export function App({
               width={ui.inspectorWidth}
               onWidthChange={uiStore.setInspectorWidth}
               onClose={() => uiStore.setInspectorOpen(false)}
-              focusedRow={focusedRow}
+              focusedRow={ui.activeRail === "memory" ? null : focusedRow}
+              selectedMemory={ui.activeRail === "memory" ? selectedMemory : null}
+              memoryMode={ui.activeRail === "memory"}
               activeAgent={activeAgent}
               contextSnapshot={appState.contextSnapshot}
               contextSnapshotStatus={appState.contextSnapshotStatus}

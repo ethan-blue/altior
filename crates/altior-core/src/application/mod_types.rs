@@ -19,6 +19,11 @@ pub struct ThreadOpenResult {
     pub supervisor_state: SupervisorState,
     /// Active harness session ID if currently bound.
     pub session_id: Option<HarnessSessionId>,
+    /// Why no harness session could be established during this open, if a
+    /// session was attempted and failed. The open itself still succeeds so
+    /// offline history reads never block on the harness; the reason travels
+    /// with the snapshot so clients can explain the missing session.
+    pub session_error: Option<String>,
 }
 
 /// Overall status summary of the Core application and runtime subsystems.

@@ -10,7 +10,7 @@ use altior_domain::{
     MemoryScope, MemorySearchLimit, MemorySensitivity, MemorySource, MemoryState, SearchQuery,
     ThreadId, TurnId, UnixMillis,
 };
-use altior_storage::{StorageError, Store, domain_projection_digest};
+use altior_storage::{StorageError, Store, domain_projection_digest, latest_schema_version};
 
 fn t(ms: u64) -> UnixMillis {
     UnixMillis::from_millis(ms)
@@ -803,7 +803,7 @@ PRAGMA user_version = 6;
 ";
 
 #[test]
-fn migration_v6_to_v7_preserves_journal_and_memory_and_enables_v7() {
+fn migration_v6_to_latest_preserves_journal_and_memory() {
     let dir = tempfile::tempdir().expect("tempdir");
     let db_path = dir.path().join("v6_migration_test.db");
 
@@ -867,10 +867,14 @@ fn migration_v6_to_v7_preserves_journal_and_memory_and_enables_v7() {
         assert_eq!(v, 6);
     }
 
-    // 2. Open with Store::open: must migrate from v6 to v7
+    // 2. Open with Store::open: must migrate from v6 to the latest version
+    //    (forward-only; the exact latest version may grow as migrations land)
     {
-        let mut store = Store::open(&db_path).expect("open and migrate to v7");
-        assert_eq!(store.schema_version().expect("schema_version"), 7);
+        let mut store = Store::open(&db_path).expect("open and migrate to latest");
+        assert_eq!(
+            store.schema_version().expect("schema_version"),
+            latest_schema_version()
+        );
 
         // Verify v1 journal row is intact
         assert_eq!(store.journal_len().expect("v1 journal len"), 1);
@@ -909,7 +913,10 @@ fn migration_v6_to_v7_preserves_journal_and_memory_and_enables_v7() {
     // 3. Reopen: verify everything survives restart
     {
         let store = Store::open(&db_path).expect("reopen store");
-        assert_eq!(store.schema_version().expect("schema_version"), 7);
+        assert_eq!(
+            store.schema_version().expect("schema_version"),
+            latest_schema_version()
+        );
         assert_eq!(store.journal_len().expect("v1 journal len"), 1);
         assert_eq!(store.count_identity_documents().expect("doc count"), 1);
         assert!(

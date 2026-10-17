@@ -1,4 +1,4 @@
-﻿export type SupportedLocale = "zh-CN" | "en";
+export type SupportedLocale = "zh-CN" | "en";
 export type LocaleSource = "system" | SupportedLocale;
 
 export interface TranslationDictionary {
@@ -78,13 +78,14 @@ export interface TranslationDictionary {
     /** Ready-state chip after cancel_turn failed while the turn is still live. */
     readonly statusCancelFailed: string;
     readonly cancelFailed: (reason: string) => string;
+    /** Thread-level notice when the last open could not establish a harness session. */
+    readonly sessionUnavailable: (reason: string) => string;
   };
   readonly permission: {
     readonly approve: string;
     readonly deny: string;
     readonly recording: string;
     readonly failed: string;
-    readonly securityGate: string;
     readonly riskNotice: string;
     readonly requestedAction: string;
     readonly scope: string;
@@ -274,6 +275,17 @@ export interface TranslationDictionary {
     readonly emptyFiltered: string;
     readonly originLabel: string;
     readonly supersededByLabel: string;
+    readonly colContent: string;
+    readonly colKind: string;
+    readonly colScope: string;
+    readonly colConfidence: string;
+    readonly colState: string;
+    readonly colUpdated: string;
+    readonly colActions: string;
+    readonly selectMemoryToInspect: string;
+    readonly selectMemoryHint: string;
+    readonly memoryIdLabel: string;
+    readonly operationFailed: string;
   };
   readonly agents: {
     readonly deferredNotice: string;
@@ -295,6 +307,9 @@ export interface TranslationDictionary {
     readonly coreConnecting: string;
     readonly coreReconnecting: string;
     readonly coreUnavailable: string;
+    readonly coreClosed: string;
+    readonly ipcConnecting: string;
+    readonly ipcState: (state: string) => string;
     readonly streamReplaying: string;
     readonly streamReady: string;
     readonly threadLine: (status: string) => string;

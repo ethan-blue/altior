@@ -41,17 +41,17 @@ describe("p33 permission card UX polish", () => {
       /\.buttonGroup\s*\{[^}]*gap:\s*var\(--spacing-12\)/s,
     );
     expect(css).toMatch(
-      /\.riskNotice\s*\{[^}]*padding:\s*var\(--spacing-8\)\s+var\(--spacing-12\)/s,
+      /\.riskNotice\s*\{[^}]*border-bottom:\s*var\(--divider-width\) solid var\(--color-warning\)/s,
     );
   });
 
-  it("focused permission row keeps warning border with focus shadow (security chrome)", () => {
+  it("permission row keeps a single warning strip and standard focus ring", () => {
     const css = readFileSync(cssPath, "utf8");
-    expect(css).toContain(
-      '.row[data-row-kind="permission"].focused .card',
+    expect(css).toMatch(
+      /\.row\[data-row-kind="permission"\] \.card\s*\{[^}]*border-left:\s*calc\(var\(--divider-width\) \* 3\) solid var\(--color-warning\)/s,
     );
-    expect(css).toContain("border-color: var(--color-warning)");
-    expect(css).toContain("0 0 0 var(--focus-ring) var(--color-focus)");
+    expect(css).toContain('.row[data-row-kind="permission"].focused .card');
+    expect(css).not.toContain("0 0 0 var(--focus-ring) var(--color-focus)");
   });
 
   it("permission row className has no undefined kind fragment", () => {

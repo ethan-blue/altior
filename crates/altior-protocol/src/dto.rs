@@ -550,6 +550,13 @@ pub struct ThreadSnapshotDto {
     pub turns: Vec<TurnDto>,
     /// Currently pending permission requests.
     pub pending_permissions: Vec<PermissionDto>,
+    /// Why no harness session could be established during this open, if a
+    /// session was attempted and failed. Optional for protocol v1
+    /// compatibility: absent means either no session was attempted or the
+    /// session came up cleanly.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "dto-export", ts(as = "Option<String>"))]
+    pub session_error: Option<String>,
 }
 
 /// Paginated response for thread listing and search.

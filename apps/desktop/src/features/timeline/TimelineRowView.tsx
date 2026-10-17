@@ -71,6 +71,7 @@ export const TimelineRowView = memo(function TimelineRowView({
       aria-label={t.timeline.entryAria(getKindLabel(row.kind))}
       onMouseDown={() => onFocus(rowId)}
       onKeyDown={(event) => {
+        if (event.target !== event.currentTarget) return;
         if (row.kind !== "permission" || row.permission?.decision != null) return;
         if (event.key === "y" || event.key === "Y") {
           event.preventDefault();
@@ -96,12 +97,7 @@ export const TimelineRowView = memo(function TimelineRowView({
           </div>
 
           <div className={rowStyles.headerMeta}>
-            {row.kind === "permission" ? (
-              <span className={rowStyles.riskBadge}>
-                <ShieldAlertIcon />
-                <span>{t.permission.securityGate}</span>
-              </span>
-            ) : row.kind === "error" ? (
+            {row.kind === "error" ? (
               <span className={rowStyles.errorTag}>
                 {t.timeline.executionError}
               </span>
@@ -378,12 +374,8 @@ function RoleIcon({ kind }: { readonly kind: Row["kind"] }) {
     case "assistant-message":
       return (
         <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-          <path
-            d="M8 1.5L9.5 6L14 8L9.5 10L8 14.5L6.5 10L2 8L6.5 6L8 1.5Z"
-            stroke="currentColor"
-            strokeWidth="1.5"
-            strokeLinejoin="round"
-          />
+          <circle cx="8" cy="8" r="5.5" stroke="currentColor" strokeWidth="1.5" />
+          <path d="M5.5 6.5H10.5M5.5 9.5H9" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
         </svg>
       );
     case "tool":
@@ -444,20 +436,6 @@ function RoleIcon({ kind }: { readonly kind: Row["kind"] }) {
   }
 }
 
-function ShieldAlertIcon() {
-  return (
-    <svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-      <path
-        d="M8 1.5L2.5 3.8V7.5C2.5 11 5 13.8 8 14.5C11 13.8 13.5 11 13.5 7.5V3.8L8 1.5Z"
-        stroke="currentColor"
-        strokeWidth="1.5"
-        strokeLinejoin="round"
-      />
-      <path d="M8 5V8.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-      <circle cx="8" cy="11" r="0.75" fill="currentColor" />
-    </svg>
-  );
-}
 
 export function rowDomId(rowId: string): string {
   return `timeline-row-dom-${rowId}`;

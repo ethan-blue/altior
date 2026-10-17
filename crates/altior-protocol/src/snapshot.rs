@@ -229,6 +229,7 @@ mod tests {
             agent_profile: None,
             turns: Vec::new(),
             pending_permissions: Vec::new(),
+            session_error: None,
         };
         let envelope = SnapshotEnvelope::thread_snapshot(
             &snapshot,

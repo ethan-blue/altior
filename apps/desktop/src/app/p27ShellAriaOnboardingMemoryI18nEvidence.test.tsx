@@ -96,6 +96,43 @@ describe("p27 shell aria + onboarding + memory source i18n", () => {
     );
   });
 
+  it("inspector tab arrow keys move real DOM focus (roving tabindex)", () => {
+    render(
+      <I18nProvider localeSource="zh-CN">
+        <Inspector
+          width={320}
+          onWidthChange={vi.fn()}
+          onClose={vi.fn()}
+          focusedRow={null}
+        />
+      </I18nProvider>,
+    );
+
+    const detailsTab = screen.getByTestId("inspector-tab-details");
+    detailsTab.focus();
+    expect(document.activeElement).toBe(detailsTab);
+
+    // ArrowRight walks to the context tab AND moves focus with it; with the
+    // roving tabindex, focus left on a now-tabIndex=-1 button would let the
+    // next Tab escape the tablist entirely.
+    fireEvent.keyDown(detailsTab, { key: "ArrowRight" });
+    const contextTab = screen.getByTestId("inspector-tab-context");
+    expect(document.activeElement).toBe(contextTab);
+    expect(contextTab).toHaveAttribute("aria-selected", "true");
+    expect(detailsTab).toHaveAttribute("aria-selected", "false");
+
+    fireEvent.keyDown(contextTab, { key: "ArrowRight" });
+    expect(document.activeElement).toBe(screen.getByTestId("inspector-tab-diagnostics"));
+
+    // ArrowLeft wraps back around from details to diagnostics.
+    fireEvent.keyDown(detailsTab, { key: "ArrowLeft" });
+    expect(document.activeElement).toBe(screen.getByTestId("inspector-tab-diagnostics"));
+    expect(screen.getByTestId("inspector-tab-diagnostics")).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+  });
+
   it("onboarding Variable Key / Secret Ref / Primary ACP Binding placeholders are Chinese", () => {
     render(
       <I18nProvider localeSource="zh-CN">
@@ -137,7 +174,7 @@ describe("p27 shell aria + onboarding + memory source i18n", () => {
     );
 
     const source = screen.getByTestId("memory-source-label");
-    expect(source).toHaveTextContent("来源");
+    expect(screen.getByRole("columnheader", { name: "来源" })).toBeTruthy();
     expect(source).toHaveTextContent("显式");
     expect(source).not.toHaveTextContent("explicit");
   });

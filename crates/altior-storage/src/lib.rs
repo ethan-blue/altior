@@ -18,6 +18,8 @@ pub mod identity;
 pub mod memory;
 mod migrations;
 
+pub use migrations::latest_schema_version;
+
 use rusqlite::{Connection, params};
 
 use altior_domain::{

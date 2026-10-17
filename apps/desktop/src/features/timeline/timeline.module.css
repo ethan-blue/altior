@@ -25,56 +25,50 @@
   position: relative;
 }
 
-/* Centered scannable stream container */
+/* Full-width workbench record stream; content keeps a readable line length. */
 .slot {
   position: absolute;
   left: 0;
   right: 0;
   display: flex;
-  justify-content: center;
   padding: 0 var(--spacing-16);
   box-sizing: border-box;
 }
 
-/* Row wrapper: manages roving tabindex, focus geometry and card spacing */
+/* Row wrapper: manages roving tabindex and virtualized focus geometry. */
 .row {
   width: 100%;
-  max-width: 768px;
   box-sizing: border-box;
-  padding: var(--spacing-4) 0;
   cursor: default;
   outline: none;
 }
 
-/* Core conversational card container */
+/* Flat record surface: hierarchy comes from spacing and rules, not cards. */
 .card {
   width: 100%;
   box-sizing: border-box;
   display: flex;
   flex-direction: column;
-  gap: var(--spacing-8);
+  gap: var(--spacing-6);
   padding: var(--spacing-12) var(--spacing-16);
-  border-radius: var(--border-radius);
-  border: var(--divider-width) solid var(--color-border);
-  background: var(--color-surface);
+  border: none;
+  border-bottom: var(--divider-width) solid var(--color-border-subtle);
+  border-radius: 0;
+  background: transparent;
   font: var(--font-size-body) / var(--line-height-normal) var(--font-body);
   color: var(--color-text);
-  transition: border-color var(--motion-fast) var(--easing-standard),
-              box-shadow var(--motion-fast) var(--easing-standard);
+  transition: background-color var(--motion-fast) var(--easing-standard);
 }
 
 /* Row focus state via roving tabindex */
 .row.focused .card {
   outline: var(--focus-ring) solid var(--color-focus);
-  outline-offset: 2px;
-  border-color: var(--color-focus);
+  outline-offset: calc(-1 * var(--focus-ring));
+  background: var(--color-surface-hover);
 }
 
-/* Pending permission: keep warning edge while focused so security chrome stays obvious. */
 .row[data-row-kind="permission"].focused .card {
-  border-color: var(--color-warning);
-  box-shadow: var(--elevation-menu), 0 0 0 var(--focus-ring) var(--color-focus);
-  outline: none;
+  outline-color: var(--color-focus);
 }
 
 /* Card Header: sender role identity & meta status */
@@ -103,8 +97,7 @@
 .kindLabel {
   font: var(--font-size-ui) / var(--line-height-compact) var(--font-ui);
   font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.01em;
 }
 
 .headerMeta {
@@ -153,8 +146,7 @@
 
 /* 1. User message: clear visual anchor with subtle accent edge */
 .row[data-row-kind="user-message"] .card {
-  border-left: calc(var(--divider-width) * 3) solid var(--color-accent);
-  background: var(--color-surface);
+  border-left: calc(var(--divider-width) * 2) solid var(--color-accent);
 }
 
 .row[data-row-kind="user-message"] .roleBadge {
@@ -163,8 +155,7 @@
 
 /* 2. Assistant message: neutral readable card */
 .row[data-row-kind="assistant-message"] .card {
-  border-left: calc(var(--divider-width) * 3) solid var(--color-control-border);
-  background: var(--color-surface);
+  border-left: calc(var(--divider-width) * 2) solid var(--color-border);
 }
 
 .row[data-row-kind="assistant-message"] .roleBadge {
@@ -173,9 +164,8 @@
 
 /* 3. Tool execution card: compact, technical presentation */
 .row[data-row-kind="tool"] .card {
-  background: var(--color-surface);
-  border: var(--divider-width) solid var(--color-border);
-  padding: var(--spacing-8) var(--spacing-12);
+  padding: var(--spacing-8) var(--spacing-16);
+  background: var(--color-surface-subtle);
 }
 
 .row[data-row-kind="tool"] .body {
@@ -185,9 +175,8 @@
 
 /* 4. Unknown event card: preserved diagnostic container */
 .row[data-row-kind="unknown"] .card {
-  background: var(--color-surface);
-  border: var(--divider-width) dashed var(--color-control-border);
-  padding: var(--spacing-8) var(--spacing-12);
+  border-left: calc(var(--divider-width) * 2) dashed var(--color-control-border);
+  padding: var(--spacing-8) var(--spacing-16);
 }
 
 .unknownTag {
@@ -195,7 +184,7 @@
   color: var(--color-muted);
   padding: var(--spacing-2) var(--spacing-6);
   background: var(--color-hover);
-  border-radius: var(--border-radius);
+  border-radius: var(--radius-sm);
 }
 
 .unknownBody {
@@ -209,7 +198,6 @@
 /* 5. Error card: prominent risk and failure visibility */
 .row[data-row-kind="error"] .card {
   background: var(--color-danger-surface);
-  border: var(--divider-width) solid var(--color-danger);
   border-left: calc(var(--divider-width) * 3) solid var(--color-danger);
 }
 
@@ -230,27 +218,12 @@
 
 /* 6. Permission Approval: High-Trust Security Card */
 .row[data-row-kind="permission"] .card {
-  border: var(--divider-width) solid var(--color-warning);
   border-left: calc(var(--divider-width) * 3) solid var(--color-warning);
-  box-shadow: var(--elevation-menu);
-  background: var(--color-surface);
+  background: var(--color-warning-surface);
 }
 
 .row[data-row-kind="permission"] .roleBadge {
   color: var(--color-warning);
-}
-
-.riskBadge {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--spacing-4);
-  font: var(--font-size-ui) / var(--line-height-compact) var(--font-ui);
-  color: var(--color-warning);
-  background: var(--color-warning-surface);
-  padding: var(--spacing-2) var(--spacing-8);
-  border-radius: var(--border-radius);
-  border: var(--divider-width) solid var(--color-warning);
-  font-weight: 500;
 }
 
 .permissionCardContent {
@@ -264,9 +237,9 @@
   display: flex;
   align-items: flex-start;
   gap: var(--spacing-8);
-  padding: var(--spacing-8) var(--spacing-12);
-  background: var(--color-warning-surface);
-  border-radius: var(--border-radius);
+  padding: 0 0 var(--spacing-8);
+  border-bottom: var(--divider-width) solid var(--color-warning);
+  border-radius: 0;
   font: var(--font-size-ui) / var(--line-height-normal) var(--font-ui);
   color: var(--color-text);
 }
@@ -299,7 +272,7 @@
 .codeBox {
   background: var(--color-canvas);
   border: var(--divider-width) solid var(--color-border);
-  border-radius: var(--border-radius);
+  border-radius: var(--radius-sm);
   padding: var(--spacing-6) var(--spacing-8);
   overflow-x: auto;
 }
@@ -360,7 +333,7 @@
   gap: var(--spacing-8);
   min-height: var(--control-height);
   padding: var(--spacing-4) var(--spacing-12);
-  border-radius: var(--border-radius);
+  border-radius: var(--radius-sm);
   font: var(--font-size-ui) / var(--line-height-compact) var(--font-ui);
   font-weight: 500;
   cursor: pointer;
@@ -424,7 +397,7 @@
   font-size: 10px;
   line-height: 1;
   font-weight: 600;
-  border-radius: var(--border-radius);
+  border-radius: var(--radius-sm);
   box-sizing: border-box;
   border: var(--divider-width) solid currentColor;
 }
@@ -480,7 +453,7 @@
   text-transform: uppercase;
   letter-spacing: 0.04em;
   padding: var(--spacing-2) var(--spacing-8);
-  border-radius: var(--border-radius);
+  border-radius: var(--radius-sm);
 }
 
 .decisionChip.approved {
@@ -529,7 +502,7 @@
   color: var(--color-accent);
   padding: var(--spacing-4) var(--spacing-12);
   font: var(--font-size-ui) / var(--line-height-compact) var(--font-ui);
-  border-radius: var(--border-radius);
+  border-radius: var(--radius-sm);
   cursor: pointer;
   box-shadow: var(--elevation-tooltip);
 }
@@ -554,7 +527,7 @@
     padding: 0 var(--spacing-8);
   }
   .card {
-    padding: var(--spacing-8) var(--spacing-12);
+    padding: var(--spacing-8);
   }
   .buttonGroup {
     width: 100%;

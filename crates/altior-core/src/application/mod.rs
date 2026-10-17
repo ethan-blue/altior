@@ -69,6 +69,13 @@ fn hsb_fallback() -> HarnessBindingId {
     HarnessBindingId::from_str("hsb_0000000000000000")
         .expect("static fallback harness binding id is valid")
 }
+
+/// Bounds a harness session failure reason so snapshot payloads stay small
+/// regardless of underlying error verbosity.
+fn bounded_session_error(reason: &str) -> String {
+    const MAX_CHARS: usize = 512;
+    reason.chars().take(MAX_CHARS).collect()
+}
 use crate::runtime::coordinator::AgentRuntimeSupervisor;
 use crate::runtime::ports::{AgentRuntime, HarnessRuntimePort, RuntimeCheckpointPort};
 use crate::runtime::state::{
@@ -587,6 +594,7 @@ where
             .supervisor(thread_id)
             .map_or(SupervisorState::Idle, |s| s.state().clone());
 
+        let mut session_error: Option<String> = None;
         if matches!(
             current_state,
             SupervisorState::Idle | SupervisorState::Closed
@@ -605,9 +613,16 @@ where
             };
 
             if resume_res.is_err() {
-                let _ = self
-                    .supervisor
-                    .create_session(&effective_binding, thread_id, None);
+                // Offline readability wins: the thread still opens with
+                // its history; the harness failure reason travels with
+                // the result so clients can explain the missing session
+                // instead of the cause being silently discarded.
+                if let Err(create_err) =
+                    self.supervisor
+                        .create_session(&effective_binding, thread_id, None)
+                {
+                    session_error = Some(bounded_session_error(&create_err.to_string()));
+                }
             }
         }
 
@@ -623,6 +638,7 @@ where
             turns,
             supervisor_state,
             session_id,
+            session_error,
         })
     }
 
