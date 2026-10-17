@@ -62,6 +62,61 @@ pub enum CryptoError {
     /// The send counter exhausted the 64-bit space; the session must
     /// be rekeyed, never reused.
     CounterExhausted,
+    /// The session epoch is the reserved all-zero value (v2).
+    EpochAllZero,
+    /// The turn-ephemeral seed is the reserved all-zero value (v2).
+    EphemeralSeedAllZero,
+    /// The X25519 shared secret came out all-zero — the peer key is
+    /// low-order or non-contributory (v2, ADR 0027 §4.5).
+    DegenerateSharedSecret,
+    /// The leased counter block ran out; the caller must durably reserve
+    /// the next block and install it (v2). Sealing never reuses.
+    CounterBlockExhausted,
+    /// An installed counter block starts below the session's next
+    /// counter — the caller would cause counter reuse (v2). Fails
+    /// closed.
+    CounterBlockRewind {
+        /// The rejected block's start.
+        block_start: u64,
+        /// The next counter the session would hand out.
+        next_counter: u64,
+    },
+    /// The durable counter lease failed; nothing is sealed (v2).
+    CounterLeaseFailed {
+        /// The underlying storage failure.
+        source: std::io::Error,
+    },
+    /// The envelope names a different epoch or an older epoch sequence
+    /// than this session — a foreign pairing or a rolled-back disk (v2).
+    EpochMismatch {
+        /// The epoch sequence this session expects.
+        expected_seq: u32,
+        /// The epoch sequence the envelope carried.
+        found_seq: u32,
+    },
+    /// The envelope's turn is not the current or the immediately next
+    /// turn — skipped, stale, or forged (v2). Fail closed; re-pair.
+    TurnMismatch {
+        /// The turn this session is at.
+        current: u64,
+        /// The turn the envelope carried.
+        found: u64,
+    },
+    /// `open_turn` was called on a receiving session (v2).
+    TurnNotOpen,
+    /// A manifest chunk was not supplied to reassembly (v3, ADR 0028).
+    BlobChunkMissing {
+        /// The chunk's zero-based index.
+        index: usize,
+        /// The expected chunk blob id.
+        blob_id: [u8; 32],
+    },
+    /// A chunk failed its manifest contract: wrong length, wrong
+    /// content digest, or AEAD tag (ADR 0028). One opaque failure.
+    BlobChunkMismatch {
+        /// The chunk's zero-based index.
+        index: usize,
+    },
 }
 
 impl fmt::Display for CryptoError {
@@ -95,6 +150,48 @@ impl fmt::Display for CryptoError {
             Self::SignatureInvalid => write!(f, "pairing signature did not verify"),
             Self::CounterExhausted => {
                 write!(f, "send counter exhausted; rekey the session")
+            }
+            Self::EpochAllZero => write!(f, "session epoch is the reserved all-zero value"),
+            Self::EphemeralSeedAllZero => {
+                write!(f, "turn ephemeral seed is the reserved all-zero value")
+            }
+            Self::DegenerateSharedSecret => write!(
+                f,
+                "x25519 shared secret is all-zero; peer key is low-order or non-contributory"
+            ),
+            Self::CounterBlockExhausted => write!(
+                f,
+                "leased counter block exhausted; reserve and install the next block"
+            ),
+            Self::CounterBlockRewind {
+                block_start,
+                next_counter,
+            } => write!(
+                f,
+                "counter block starts at {block_start}, below the next counter {next_counter}"
+            ),
+            Self::CounterLeaseFailed { source } => {
+                write!(f, "counter lease failed: {source}")
+            }
+            Self::EpochMismatch {
+                expected_seq,
+                found_seq,
+            } => write!(
+                f,
+                "envelope epoch sequence {found_seq} does not match the expected {expected_seq}"
+            ),
+            Self::TurnMismatch { current, found } => {
+                write!(f, "envelope turn {found} is not the current turn {current}")
+            }
+            Self::TurnNotOpen => write!(f, "open_turn is an outbound operation"),
+            Self::BlobChunkMissing { index, blob_id } => {
+                write!(
+                    f,
+                    "blob chunk {index} ({blob_id:?}) missing from reassembly"
+                )
+            }
+            Self::BlobChunkMismatch { index } => {
+                write!(f, "blob chunk {index} did not match its manifest entry")
             }
         }
     }

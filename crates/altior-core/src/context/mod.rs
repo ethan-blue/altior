@@ -581,9 +581,9 @@ mod tests {
         assert_eq!(res.wire_prompt, raw_prompt);
         assert!(res.snapshot.passthrough);
         assert!(res.snapshot.is_passthrough());
-        assert!(res.snapshot.identity.is_empty());
-        assert!(res.snapshot.memories.is_empty());
-        assert!(res.snapshot.dropped.is_empty());
+        assert_eq!(res.snapshot.identity, []);
+        assert_eq!(res.snapshot.memories, []);
+        assert_eq!(res.snapshot.dropped, []);
         assert_eq!(res.snapshot.rendered_prompt, None);
         assert_eq!(
             res.snapshot.budget.prompt_tokens,

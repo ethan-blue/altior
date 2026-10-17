@@ -72,7 +72,7 @@ fn push_assigns_sequences_and_fetch_pages_in_order() {
     else {
         panic!("expected entries");
     };
-    assert!(items.is_empty());
+    assert_eq!(items, []);
     assert_eq!(next_cursor, 5);
     assert!(!has_more);
 }

@@ -6,6 +6,7 @@ license.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+altior-crypto = { path = "../altior-crypto" }
 altior-domain = { path = "../altior-domain" }
 altior-protocol = { path = "../altior-protocol" }
 rusqlite = { version = "0.37", features = ["bundled"] }

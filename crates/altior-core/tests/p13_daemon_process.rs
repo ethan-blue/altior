@@ -167,7 +167,7 @@ fn execute_daemon_process_e2e_cycle(iteration: usize) {
 
     // 3. Verify discovery metadata and Debug redaction
     assert_eq!(discovery.endpoint, expected_endpoint);
-    assert!(!discovery.instance_id.as_str().is_empty());
+    assert_ne!(discovery.instance_id.as_str(), "");
     assert_eq!(discovery.launch_token.as_str().len(), 32);
 
     let debug_str = format!("{discovery:?}");

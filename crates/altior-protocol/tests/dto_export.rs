@@ -36,65 +36,84 @@ fn dto_export_dir() -> PathBuf {
         .expect("canonicalize dto export dir")
 }
 
+/// Windows ERROR 1224 ("user-mapped section open") is transient
+/// interference from file indexers or scanners briefly holding a memory
+/// section over the generated .ts files. A bounded retry rides it out;
+/// any other error, or a mapper that will not release, fails honestly.
+fn export_retrying<T: TS + 'static>(cfg: &ts_rs::Config) {
+    const MAX_ATTEMPTS: u32 = 25;
+    for attempt in 0..=MAX_ATTEMPTS {
+        match T::export_all(cfg) {
+            Ok(()) => return,
+            Err(ts_rs::ExportError::Io(io))
+                if io.raw_os_error() == Some(1224) && attempt < MAX_ATTEMPTS =>
+            {
+                std::thread::sleep(std::time::Duration::from_millis(20));
+            }
+            Err(other) => panic!("export {}: {other}", std::any::type_name::<T>()),
+        }
+    }
+}
+
 fn export_all_types() {
     let cfg = ts_rs::Config::default();
-    ListMemoriesCommand::export_all(&cfg).expect("export ListMemoriesCommand");
-    ProposeMemoryCommand::export_all(&cfg).expect("export ProposeMemoryCommand");
-    ConfirmMemoryCommand::export_all(&cfg).expect("export ConfirmMemoryCommand");
-    RejectMemoryCommand::export_all(&cfg).expect("export RejectMemoryCommand");
-    CorrectMemoryCommand::export_all(&cfg).expect("export CorrectMemoryCommand");
-    ForgetMemoryCommand::export_all(&cfg).expect("export ForgetMemoryCommand");
-    MemoryCursorDto::export_all(&cfg).expect("export MemoryCursorDto");
-    MemoryRecordDto::export_all(&cfg).expect("export MemoryRecordDto");
-    MemoryListResponseDto::export_all(&cfg).expect("export MemoryListResponseDto");
-    LaunchToken::export_all(&cfg).expect("export LaunchToken");
-    BoundedPayload::export_all(&cfg).expect("export BoundedPayload");
-    CapabilityId::export_all(&cfg).expect("export CapabilityId");
-    CapabilitySupport::export_all(&cfg).expect("export CapabilitySupport");
-    CapabilitySet::export_all(&cfg).expect("export CapabilitySet");
-    CommandKind::export_all(&cfg).expect("export CommandKind");
-    CreateThreadCommand::export_all(&cfg).expect("export CreateThreadCommand");
-    ListThreadsCommand::export_all(&cfg).expect("export ListThreadsCommand");
-    SearchThreadsCommand::export_all(&cfg).expect("export SearchThreadsCommand");
-    OpenThreadCommand::export_all(&cfg).expect("export OpenThreadCommand");
-    GetHistoryCommand::export_all(&cfg).expect("export GetHistoryCommand");
-    ConfigureAgentCommand::export_all(&cfg).expect("export ConfigureAgentCommand");
-    TestHarnessBindingCommand::export_all(&cfg).expect("export TestHarnessBindingCommand");
-    StartTurnCommand::export_all(&cfg).expect("export StartTurnCommand");
-    CancelTurnCommand::export_all(&cfg).expect("export CancelTurnCommand");
-    RespondPermissionCommand::export_all(&cfg).expect("export RespondPermissionCommand");
-    RuntimeStatusCommand::export_all(&cfg).expect("export RuntimeStatusCommand");
-    DiagnosticsCommand::export_all(&cfg).expect("export DiagnosticsCommand");
-    CommandEnvelope::export_all(&cfg).expect("export CommandEnvelope");
-    ThreadDto::export_all(&cfg).expect("export ThreadDto");
-    TurnDto::export_all(&cfg).expect("export TurnDto");
-    PermissionDto::export_all(&cfg).expect("export PermissionDto");
-    AgentProfileDto::export_all(&cfg).expect("export AgentProfileDto");
-    HarnessBindingConfigDto::export_all(&cfg).expect("export HarnessBindingConfigDto");
-    HarnessBindingDto::export_all(&cfg).expect("export HarnessBindingDto");
-    TestHarnessResponseDto::export_all(&cfg).expect("export TestHarnessResponseDto");
-    ThreadCursorDto::export_all(&cfg).expect("export ThreadCursorDto");
-    TurnCursorDto::export_all(&cfg).expect("export TurnCursorDto");
-    ThreadSummaryDto::export_all(&cfg).expect("export ThreadSummaryDto");
-    ThreadSnapshotDto::export_all(&cfg).expect("export ThreadSnapshotDto");
-    ThreadListResponseDto::export_all(&cfg).expect("export ThreadListResponseDto");
-    ThreadHistoryResponseDto::export_all(&cfg).expect("export ThreadHistoryResponseDto");
-    HistoryEntryDto::export_all(&cfg).expect("export HistoryEntryDto");
-    HistoryCursorDto::export_all(&cfg).expect("export HistoryCursorDto");
-    RuntimeDiagnosticsDto::export_all(&cfg).expect("export RuntimeDiagnosticsDto");
-    KnownEvent::export_all(&cfg).expect("export KnownEvent");
-    EventBody::export_all(&cfg).expect("export EventBody");
-    Sequence::export_all(&cfg).expect("export Sequence");
-    EventEnvelope::export_all(&cfg).expect("export EventEnvelope");
-    RetainedWindow::export_all(&cfg).expect("export RetainedWindow");
-    CoreGreeting::export_all(&cfg).expect("export CoreGreeting");
-    DesktopHello::export_all(&cfg).expect("export DesktopHello");
-    CoreHello::export_all(&cfg).expect("export CoreHello");
-    NegotiatedHandshake::export_all(&cfg).expect("export NegotiatedHandshake");
-    SnapshotEnvelope::export_all(&cfg).expect("export SnapshotEnvelope");
-    ProtocolVersion::export_all(&cfg).expect("export ProtocolVersion");
-    ProtocolVersionRange::export_all(&cfg).expect("export ProtocolVersionRange");
-    ProductVersion::export_all(&cfg).expect("export ProductVersion");
+    export_retrying::<ListMemoriesCommand>(&cfg);
+    export_retrying::<ProposeMemoryCommand>(&cfg);
+    export_retrying::<ConfirmMemoryCommand>(&cfg);
+    export_retrying::<RejectMemoryCommand>(&cfg);
+    export_retrying::<CorrectMemoryCommand>(&cfg);
+    export_retrying::<ForgetMemoryCommand>(&cfg);
+    export_retrying::<MemoryCursorDto>(&cfg);
+    export_retrying::<MemoryRecordDto>(&cfg);
+    export_retrying::<MemoryListResponseDto>(&cfg);
+    export_retrying::<LaunchToken>(&cfg);
+    export_retrying::<BoundedPayload>(&cfg);
+    export_retrying::<CapabilityId>(&cfg);
+    export_retrying::<CapabilitySupport>(&cfg);
+    export_retrying::<CapabilitySet>(&cfg);
+    export_retrying::<CommandKind>(&cfg);
+    export_retrying::<CreateThreadCommand>(&cfg);
+    export_retrying::<ListThreadsCommand>(&cfg);
+    export_retrying::<SearchThreadsCommand>(&cfg);
+    export_retrying::<OpenThreadCommand>(&cfg);
+    export_retrying::<GetHistoryCommand>(&cfg);
+    export_retrying::<ConfigureAgentCommand>(&cfg);
+    export_retrying::<TestHarnessBindingCommand>(&cfg);
+    export_retrying::<StartTurnCommand>(&cfg);
+    export_retrying::<CancelTurnCommand>(&cfg);
+    export_retrying::<RespondPermissionCommand>(&cfg);
+    export_retrying::<RuntimeStatusCommand>(&cfg);
+    export_retrying::<DiagnosticsCommand>(&cfg);
+    export_retrying::<CommandEnvelope>(&cfg);
+    export_retrying::<ThreadDto>(&cfg);
+    export_retrying::<TurnDto>(&cfg);
+    export_retrying::<PermissionDto>(&cfg);
+    export_retrying::<AgentProfileDto>(&cfg);
+    export_retrying::<HarnessBindingConfigDto>(&cfg);
+    export_retrying::<HarnessBindingDto>(&cfg);
+    export_retrying::<TestHarnessResponseDto>(&cfg);
+    export_retrying::<ThreadCursorDto>(&cfg);
+    export_retrying::<TurnCursorDto>(&cfg);
+    export_retrying::<ThreadSummaryDto>(&cfg);
+    export_retrying::<ThreadSnapshotDto>(&cfg);
+    export_retrying::<ThreadListResponseDto>(&cfg);
+    export_retrying::<ThreadHistoryResponseDto>(&cfg);
+    export_retrying::<HistoryEntryDto>(&cfg);
+    export_retrying::<HistoryCursorDto>(&cfg);
+    export_retrying::<RuntimeDiagnosticsDto>(&cfg);
+    export_retrying::<KnownEvent>(&cfg);
+    export_retrying::<EventBody>(&cfg);
+    export_retrying::<Sequence>(&cfg);
+    export_retrying::<EventEnvelope>(&cfg);
+    export_retrying::<RetainedWindow>(&cfg);
+    export_retrying::<CoreGreeting>(&cfg);
+    export_retrying::<DesktopHello>(&cfg);
+    export_retrying::<CoreHello>(&cfg);
+    export_retrying::<NegotiatedHandshake>(&cfg);
+    export_retrying::<SnapshotEnvelope>(&cfg);
+    export_retrying::<ProtocolVersion>(&cfg);
+    export_retrying::<ProtocolVersionRange>(&cfg);
+    export_retrying::<ProductVersion>(&cfg);
 }
 
 fn post_process_dto_dir(dir: &Path) -> BTreeMap<PathBuf, Vec<u8>> {

@@ -124,14 +124,17 @@ fn core_depends_on_composed_contract_and_adapter_crates() {
         dependency_names(CORE_MANIFEST),
         [
             "altior-acp",
+            "altior-crypto",
             "altior-domain",
             "altior-ipc",
             "altior-protocol",
+            "altior-relay",
             "altior-storage",
             "serde",
             "serde_json",
+            "sha2",
         ],
-        "altior-core composes the contract layers and runtime adapters (ADR 0002, ADR 0007, ADR 0013)"
+        "altior-core composes the contract layers, runtime adapters, and - since ADR 0027 - the sync session and relay layers it exclusively owns (ADR 0025 threat 11: sync keys live only in core); sha2 is the blob-plane chunk digest (ADR 0028)"
     );
     for forbidden in ["tauri", "tokio"] {
         assert!(
@@ -146,10 +149,18 @@ fn storage_depends_only_on_domain_protocol_rusqlite_and_json() {
     // ADR 0009, ADR 0013: the persistence layer lives outside the
     // contract crates; SQLite is vendored via rusqlite's bundled
     // feature. serde_json is needed for domain event payload extraction.
+    // ADR 0027 adds altior-crypto: the durable CounterLease port
+    // implementation lives beside the v9 sync tables it writes.
     assert_eq!(
         dependency_names(STORAGE_MANIFEST),
-        ["altior-domain", "altior-protocol", "rusqlite", "serde_json"],
-        "altior-storage adds only the storage engine and JSON (ADR 0009, ADR 0013)"
+        [
+            "altior-crypto",
+            "altior-domain",
+            "altior-protocol",
+            "rusqlite",
+            "serde_json",
+        ],
+        "altior-storage adds only the storage engine, JSON, and the crypto lease port (ADR 0009, ADR 0013, ADR 0027)"
     );
 }
 

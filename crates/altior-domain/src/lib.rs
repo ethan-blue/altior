@@ -5,6 +5,7 @@ pub mod id;
 pub mod identity;
 pub mod secret_shape;
 pub mod time;
+pub mod vault;
 
 pub use entity::{
     AGENT_PROFILE_LIST_LIMIT_MAX, AcpHarnessBinding, AgentProfile, AgentProfileCursor,
@@ -39,6 +40,10 @@ pub use id::{
 };
 pub use secret_shape::is_secret_shaped;
 pub use time::{LogicalTick, TimeError, UnixMillis};
+pub use vault::{
+    AckFrontier, DeviceLabel, EpochSeq, MemoryTombstone, RecoverySignature, RevocationCertificate,
+    TombstoneDigest, VaultDeviceRecord, VaultDeviceStatus, VaultError,
+};
 
 /// Synchronization policy for a durable data family.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

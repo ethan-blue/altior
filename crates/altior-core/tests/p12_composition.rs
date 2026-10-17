@@ -398,7 +398,7 @@ fn test_e2e_composition_crash_mode_indeterminate_and_no_resend() {
     let reopened_active = reopened
         .active_checkpoints(Some(&thr))
         .expect("reopened active checkpoints");
-    assert!(reopened_active.is_empty());
+    assert_eq!(reopened_active, []);
 
     let reopened_indet = reopened
         .indeterminate_checkpoints(Some(&thr), None, limit)

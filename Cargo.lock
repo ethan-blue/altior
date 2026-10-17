@@ -49,12 +49,15 @@ name = "altior-core"
 version = "0.0.1"
 dependencies = [
  "altior-acp",
+ "altior-crypto",
  "altior-domain",
  "altior-ipc",
  "altior-protocol",
+ "altior-relay",
  "altior-storage",
  "serde",
  "serde_json",
+ "sha2 0.10.9",
  "tempfile",
  "windows-sys",
 ]
@@ -121,6 +124,7 @@ dependencies = [
 name = "altior-storage"
 version = "0.0.1"
 dependencies = [
+ "altior-crypto",
  "altior-domain",
  "altior-protocol",
  "rusqlite",

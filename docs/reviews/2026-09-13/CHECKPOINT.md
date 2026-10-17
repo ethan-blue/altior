@@ -419,3 +419,195 @@ Next task and first concrete action:
 - Status: DONE-VERIFIED。
 - Next: 待用户审阅工作树并决定提交切分；「七、待做」中剩余项均为外部阻塞
   （真实第三方 ACP 凭证）或依赖分支合并决策（UI 重设计后续阶段）。
+
+---
+
+## 2026-10-16 第五轮切片（授权提交 + P3 启动，分支 feat/p3-sync-foundation）
+
+### 切片 17 — v0.1 工作树落账：7 个 Conventional Commits（DONE-VERIFIED）
+- 用户明确授权提交切分。切片 16 及之前 4 个会话的全部未提交变更（约 150 文件）
+  按层切分提交至 `ui/toolcall-timeline`（未 push）：
+  `d3cab2e` feat(protocol) session_error 契约 → `63c34fe` fix(core) A18 三修复
+  → `724fbc8` feat(acp) 回环桩 → `52e11e5` chore(gate) 门禁脚本 →
+  `b9e349b` feat(desktop) UI 重设计大块 → `9606d62` docs → `69e58aa`
+  chore(task-pack) 用户当日工具。CRLF 噪声文件在提交时自动坍缩为空 diff，
+  只有真实内容入库。提交前秘密扫描（tight 模式）干净。工作树清零，stash 未动。
+- Status: DONE-VERIFIED。
+
+### 切片 18 — 工具链漂移修复：clippy 1.99 + 门禁脚本 UTF-8（DONE-VERIFIED）
+- **clippy 1.99**（`fd66247`）: rustc 1.99.0 将 `clippy::assert_is_empty` 收入
+  pedantic（三个 crate 的 Cargo.toml 自选 pedantic=warn，被门禁 `-D warnings`
+  升为错误）。此前门禁"绿"依赖 clippy 缓存（切片 16 零 Rust 改动），本次
+  commit 触碰文件使缓存失效而暴露——登记为工具链漂移教训：跨会话的"绿"
+  必须在缓存失效路径下复验。修复 29 处（21 正形式 `assert_eq!(x, [])`、
+  8 负形式 `assert_ne!`），机械变换，断言语义不变。
+- **门禁脚本 UTF-8**（`be87bac`）: `Get-DtoContentMap` 未指定编码，Windows
+  PowerShell 5.1 按 ANSI(GBK) 解码无 BOM 文件，多字节字符吞掉相邻 CR 使
+  CRLF 归一化失效，干净 checkout 上全量 dto 误报漂移。补 `-Encoding UTF8`。
+- 分支: `feat/p3-sync-foundation`（自 ui/toolcall-timeline 栈上切出，避免
+  storage 冲突；两分支按序合并）。落账后统一门禁复跑 exit 0。
+- Status: DONE-VERIFIED。
+
+### 切片 19 — ADR 0027：P3 同步协议设计（DONE-VERIFIED，`aff68a5`）
+- 逐条映射 ADR 0025 的 11 项威胁 → 机制 → crate → 验收测试；三大层：
+  会话加固（epoch + 计数器租约 + turn ratchet + 零共享密钥检查）、设备生命周期
+  （登记/撤销证书/密钥轮换）、同步引擎（pull-before-push + ack 前沿 + 墓碑
+  不可回收）。信封 v2 新版本不重写 v1；sync_gate 屏障保持关闭。
+- Status: DONE-VERIFIED。
+
+### 切片 20 — P3.2 加密会话加固 + ADR 0025 套件 2（DONE-VERIFIED，`f2e36d7`）
+- `SessionV2`（session_v2.rs，信封 v2）: 128-bit `SessionEpoch`（HKDF info +
+  AAD 绑定）；`CounterLease` 租约端口（计数器块 [start,end) 耗尽即停，安装
+  回退块/零起点块 typed 拒绝——F31 修复）；turn ratchet（每轮换批新 X25519
+  ephemeral 链入 HKDF-Extract，静态密钥泄露不回溯历史轮）；epoch_seq 单调
+  回滚拒绝；全零共享密钥拒绝（威胁 2）。
+- **两阶段提交**（测试驱出的真修复）: 接收端 turn 推进原实现在 AEAD 之前用
+  未认证的 turn 头改链状态；改为"候选链 → AEAD → 认证通过才提交"，伪造/损坏
+  turn 头不再毒化接收端（ADR 0011 "never act on unauthenticated counters"）。
+- 计数器从 1 起（租约零起点拒绝），与 ReplayWindow 的 0-不接受规则对齐。
+- **套件 2** `test_session_reconstruction_nonce_uniqueness`: 1000 次进程杀死
+  模拟重建 × 100 信封 = 100,000 信封，计数器与线上 nonce 双集合零重复
+  （9.02s）。测试文件另有 6 个行为测试（roundtrip/双 turn ratchet/单比特
+  翻转全表/epoch 不匹配/turn 跳过/租约耗尽与回退/低序点/turn 卫生）。
+- 门禁: `cargo test -p altior-crypto` 全绿（12 lib + 6 v2 + 1 套件 2），
+  clippy -D warnings 干净。
+- Status: DONE-VERIFIED。
+
+### 切片 21 — P3.3 中继加固 + ADR 0025 套件 3（DONE-VERIFIED，`0687b08`）
+- `RelayPolicy` 增 `max_push_id_bytes`（4 KiB 元数据帽）与 `max_bucket_bytes`
+  （50 MiB 桶配额，背压不驱逐）+ `production()` 预设（14 天 tick 映射注记）。
+  拒绝整体生效、桶不动。dedupe 有界性按 ADR 0012 既有结构（仅 retained 条目）
+  维持并登记。`retained_frames()` 审计钩子（生产不调用）。
+- **套件 3** `test_relay_zero_knowledge_audit`: 三轮 v2 会话（含中英记忆、
+  secret 引用、恢复短语 6 个 canary）过中继，逐帧 + 全量字节两层面断言零
+  明文。`policy_bounds` 测试覆盖四大限额与拒绝后桶不变性。
+- 门禁: altior-relay 16 测试全绿，clippy 干净。
+- Status: DONE-VERIFIED。
+
+### 切片 22 — P3.4 Vault 领域契约（DONE-VERIFIED，`1c69a9e` + fmt `383686e`）
+- `altior-domain/src/vault.rs`: `VaultDeviceRecord`（配对自配对拒绝、单向
+  Active→Revoked、证书绑定记录设备与时间序、EpochSeq checked 递增）、
+  `RevocationCertificate`/`RecoverySignature`（不透明有界字节，验证归 crypto）、
+  `MemoryTombstone`+`TombstoneDigest`（全零保留值拒绝）、`AckFrontier`
+  （compaction_floor = 已记录设备游标最小值；无记录 → None 钉死压缩；回滚
+  声明不降前沿）。纯规则无依赖，入库 7 个内联测试。
+- 计数器租约的 SQLite 实现与存储迁移**顺延至切片 23**（P3.5 一起做）。
+- **统一门禁**（2026-10-16，`powershell -ExecutionPolicy Bypass -File
+  scripts/quality-gate.ps1`）: exit 0，ALL ALTIOR QUALITY GATES PASSED
+  CLEANLY——Rust+Tauri 690 测试、Vitest 298、对比度 24/24、视觉 6/6 全
+  0 diff、DTO 漂移 in sync、loopback 2 用例。所有 P3 提交保持不 push。
+- Status: DONE-VERIFIED。
+
+### 切片 23 — P3.5 同步引擎落地 + ADR 0025 套件 1/4 全绿（DONE-VERIFIED）
+- **crypto 事件签名**（并入 f9d1a12）: `DeviceKeys::sign` +
+  `DeviceKeys::verify_signature`（verify_strict，配对签名的一般化）。
+- **storage v9**（`f9d1a12`）: 迁移 v9 四表（sync_counter_lease /
+  vault_device / sync_ack_cursor / memory_tombstone，全部在 sync gate 后）+
+  `SqliteCounterLease`（事务化租约，F31 持久半场）+ 3 测试（重开后不回绕、
+  500 信封跨重建零重复、设备表往返）。版本钉定测试 8→9（journal/domain/
+  memory/p14 四文件）。
+- **同步引擎**（`93d264f`）: `altior-core::sync`——Ed25519 签名事件
+  （event_id 去重）、文档 grow-only 条目集、记忆 propose/forget + 永久墓碑、
+  pull-before-push flush。测试驱出两个真修复: ① poll 在 has_more=false 时
+  先 break 后处理，丢掉最后一页还推进游标（已修：处理完再断）；② 空 outbox
+  的 flush 也推进 ratchet turn，接收端正确地按跳号拒绝（已修：turn=批次，
+  空批不换轮）。引擎内简化（grow-only vs Automerge、outbox 不修剪、内存态）
+  均在模块文档具名登记。
+- **套件 1** `test_three_device_offline_convergence`（p36）: 三设备配对，
+  C 离线期间 A/B 并发编辑 + 遗忘 M1 + 新增 M2，C 回归 pull-before-push 后
+  贡献 M3——三方 digest 全等，墓碑/双编辑/M2/M3 全员一致，零抑制。
+- **套件 4** `test_stale_device_tombstone_non_resurrection`（p37）: C 带旧
+  状态重连并重提议 M1——pull 先应用墓碑，peer 各抑制 1 次，新鲜 M4 正常
+  通过；三方 digest 全等。
+- **边界与门禁**: 依赖边界钉定测试按 ADR 0027 更新（core +crypto+relay，
+  storage +crypto，dc89004）。dto-export 写入遇 Windows ERROR 1224（索引器
+  映射瞬态）加有界重试（8b64d52，~500ms 上限，其余错误照旧诚实失败）。
+  统一门禁 **exit 0，ALL ALTIOR QUALITY GATES PASSED CLEANLY**——Rust+Tauri
+  **695** 测试、Vitest 298、对比度 24/24、视觉 6/6 全 0 diff、DTO in sync、
+  loopback 2 用例。ADR 0025 四套件状态: **1 ✅ 2 ✅ 3 ✅ 4 ✅**（独立密码学
+  审查与 SYNC_ENABLED 翻转仍按 ADR 0025 保留给用户）。
+- Status: DONE-VERIFIED。
+- Next: P3 剩余为产品接线（设备配对 UI、同步诊断面板、Desktop 会话）与
+  blob 平面；均等用户决策后另起切片。
+
+
+### 切片 24 — 威胁 10 闭环：ack 回流 + 墓碑压缩门控（DONE-VERIFIED，2026-10-17）
+- **引擎 half**（同提交）: `EventBody::Ack`——每个 flush 广播本节点的
+  per-origin 已应用前沿（普通签名日志事件，去重/加密/换轮一路复用）；节点
+  折叠为 per-peer 台账，`gc_frontiers()` = 对每个 origin 取**全体直连 peer**
+  的最小值，无 ack 台账的 peer 按 0 计（成员变化自动重钉门控，与领域
+  `AckFrontier` 语义一致）。墓碑标记升级为 `TombstoneMark`
+  （digest + forget 事件的 origin/origin_seq）。
+- **storage half**: `vault_device` CRUD（domain 新增 `restore()` 构造器，
+  撤销状态可跨持久化重建）；墓碑行携带 origin/origin_seq（v9 未发布，
+  同分支原地扩展）；`observe_ack_cursor` 只进不退（回滚声明不是 ack）；
+  `compact_tombstones(floors)` 只删严格低于该 origin ack 地板的行——
+  测试证明：地板之下保留、覆盖地板回收、无地板钉死。
+- **p38** `ack_frontiers_gate_tombstone_compaction`: 遗忘分发前 A 的门控
+  低于 forget seq（关）；两轮 settle 后三节点门控全部 ≥ forget seq（开）；
+  新配对未 ack 的 peer 把门控钉回 0。三方无复活、digest 一致。
+- 门禁: exit 0，ALL ALTIOR QUALITY GATES PASSED CLEANLY——Rust+Tauri **699**
+  测试（+4）、Vitest 298、对比度 24/24、视觉 6/6 全 0 diff。存储 121 测试。
+- Status: DONE-VERIFIED。
+- Next: 引擎态持久化接线（applied 日志/outbox 走 v9 表）与 blob 平面为
+  下两个工程切片；产品层（配对 UI/诊断面板）等用户决策。
+
+
+### 切片 25 — 引擎态持久化接线：重启安全的 SyncNode（DONE-VERIFIED，2026-10-17）
+- **SyncStatePort 端口**（sync/persist.rs）: applied 日志/fetch 游标/墓碑三类
+  持久化 + `MemorySyncStatePort`（进程内默认，行为与原引擎等价）+
+  `StoreSyncStatePort`（走 storage 类型化 API，引擎零 SQL）。`SyncNode::durable`
+  构造时载入日志并经正常 apply 路径重放，重建 memories/documents/tombstones/
+  peer_acks 全部投影；origin 序列从重放日志推导（永不回绕——重启后 event id
+  与中继历史撞车由结构上排除）。
+- **v9 扩表**（未发布同分支原地扩展）: sync_journal（applied_order 单调）+
+  sync_fetch_cursor；storage 增类型无关 API（append/list journal、fetch 游标
+  只进不退）。
+- **测试驱出的三个真修复**:
+  ① poll 最后一页先 break 后处理（丢页+游标虚进）——切片 23 已修，本切片
+  回归覆盖；
+  ② flush 的 ack 事件走 apply 不走 admit——从未进日志，重启后 origin seq
+  回退与中继撞车（p39 捕获，已修：ack 入日志）；
+  ③ 重配对后新旧配对信封同桶、turn 号重叠但密钥链不同——AEAD 必败。修复
+  落在 ADR 0027 §4.4 本来的设计上：pair() 携带 epoch_seq（重配对递增），
+  poll 对**更旧 epoch** 的桶内残留信封跳过（内容在重配对前已应用），更新
+  epoch 或认证失败一律 fail closed。三套件同步改造（pair 携带 1）。
+- **p39** `durable_node_survives_restart_without_loss`: 重启后重放恢复记忆/
+  文档/去重基；跨重启继续收敛，digest 一致，无复活无重复。
+- 门禁: exit 0，ALL ALTIOR QUALITY GATES PASSED CLEANLY——Rust+Tauri **700**
+  测试、Vitest 298、对比度 24/24、视觉 6/6 全 0 diff。core 127 测试、
+  storage 121 测试。
+- 已登记未做: 会话密钥材料（chain_ikm）的持久化属 OS Secret Store 职责
+  （SQLite 存密钥违反 AGENTS.md 不变量），当前重启后经 pair() 重建会话；
+  turn 链状态的 SecretStore 持久化留待配对流程切片。
+- Status: DONE-VERIFIED。
+- Next: blob 平面（内容寻址加密块，需先补 ADR 0027 附录或新 ADR）；产品层
+  等用户决策。
+
+
+### 切片 26 — blob 平面：内容寻址加密块（DONE-VERIFIED，2026-10-17，ADR 0028）
+- **ADR 0028**（docs/decisions/0028）: docs/SYNC.md 第 3 平面的格式与同步
+  契约——固定 64 KiB 明文分块；**收敛加密**（chunk key = HKDF(vault data
+  key, salt = SHA-256(明文))，同内容同金钥同密文同 CAS 身份，跨设备去重免
+  协调）；nonce 按 (chunk key, chunk index) 确定性推导，(key, nonce) 永不
+  重复；AAD 绑定内容哈希/序号/块数/总长；blob id = 密文字节序列的 SHA-256
+  （存着什么验什么）。备选（随机 per-chunk key、滚动哈希分块、blob 走日志）
+  与失败模式均记录。
+- **crypto**（blob.rs + 4 测试）: split_and_encrypt / decrypt_and_reassemble
+  （缺块/篡改/清单不匹配全部 fail closed，逐块 AEAD + 内容摘要双验）、
+  收敛性与其他金钥隔离性断言。
+- **storage**: v9 增 blob_chunks CAS 表（幂等 insert-or-ignore）+ put/get/has。
+- **引擎**: EventBody::BlobAdded（签名清单事件）；块走专用 blob envelope
+  （非日志事件，传输层摘要校验 + 清单归属校验，最终真实性在重组时 AEAD）；
+  flush 逐 peer 去重扇出；put_blob/get_blob。信封载荷升级为 SyncPayload
+  枚举（Event | Chunk）。
+- **p40** `blob_plane_syncs_and_verifies_between_devices`: ~2.5 块的确定性
+  明文 A→B，双方重组字节一致；重存同内容返回同 blob id（去重）。
+- **门禁**: exit 0，ALL ALTIOR QUALITY GATES PASSED CLEANLY——Rust+Tauri
+  **705** 测试（+5）、Vitest 298、对比度 24/24、视觉 6/6 全 0 diff。边界
+  钉定按 ADR 0028 增 sha2（core，块摘要）。
+- 已登记未做: 删除/清单收回为产品层切片；chunk GC 沿 ack 前沿纪律（同
+  墓碑）；vault key 轮换的 blob 重加密为显式产品切片。
+- Status: DONE-VERIFIED。
+- Next: P3 工程面剩余仅引擎态→v9 表的落库接线深化与产品层（配对 UI/
+  诊断面板/Desktop 接线，等用户决策）；SYNC_ENABLED 翻转等独立密码学审查。

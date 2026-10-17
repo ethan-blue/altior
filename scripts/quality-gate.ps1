@@ -34,7 +34,11 @@ function Get-DtoContentMap {
     param([string]$Dir)
     $map = @{}
     Get-ChildItem $Dir -Filter *.ts | ForEach-Object {
-        $map[$_.Name] = (Get-Content $_.FullName -Raw) -replace "`r`n", "`n"
+        # -Encoding UTF8: Windows PowerShell 5.1 otherwise decodes BOM-less
+        # files in the system ANSI codepage, where a multi-byte char can
+        # swallow an adjacent CR and break the CRLF normalization below,
+        # flagging every file as drifted.
+        $map[$_.Name] = (Get-Content $_.FullName -Raw -Encoding UTF8) -replace "`r`n", "`n"
     }
     return $map
 }

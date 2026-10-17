@@ -51,6 +51,10 @@ pub(crate) const MIGRATIONS: &[Migration] = &[
         version: 8,
         sql: SCHEMA_V8,
     },
+    Migration {
+        version: 9,
+        sql: SCHEMA_V9,
+    },
 ];
 
 /// The highest schema version this build understands.
@@ -493,4 +497,83 @@ END;
 INSERT INTO memory_fts (memory_id, content)
 SELECT memory_id, content FROM memory
 WHERE state = 'confirmed' AND superseded_by IS NULL;
+";
+
+/// The version-9 schema: Personal Vault sync state (ADR 0027 §5–6).
+/// Created behind the ADR 0025 sync gate — the tables are written only
+/// by sync code, so a v9 file behaves identically to a v8 file until
+/// synchronization is enabled.
+///
+/// - `sync_counter_lease`: durable send-counter reservations, the F31
+///   fix — a restarted process continues from the committed ledger
+///   instead of rewinding into used counters.
+/// - `vault_device`: paired-device records and their epoch sequences.
+/// - `sync_ack_cursor`: per-(device, peer) applied frontiers; the
+///   minimum across peers gates compaction of tombstones.
+/// - `memory_tombstone`: permanent forget records; never garbage-
+///   collected below the ack frontier, never resurrected by stale
+///   devices.
+const SCHEMA_V9: &str = r"
+CREATE TABLE sync_counter_lease (
+    lease_key TEXT NOT NULL,
+    next_counter INTEGER NOT NULL,
+    PRIMARY KEY (lease_key)
+);
+
+CREATE TABLE vault_device (
+    device_id TEXT PRIMARY KEY,
+    added_at INTEGER NOT NULL,
+    added_by TEXT NOT NULL,
+    epoch_seq INTEGER NOT NULL,
+    status TEXT NOT NULL,
+    revoked_at INTEGER,
+    cert_signature BLOB
+);
+
+CREATE TABLE sync_ack_cursor (
+    device_id TEXT NOT NULL,
+    peer_id TEXT NOT NULL,
+    cursor INTEGER NOT NULL,
+    PRIMARY KEY (device_id, peer_id)
+);
+
+CREATE TABLE memory_tombstone (
+    memory_id TEXT PRIMARY KEY,
+    origin TEXT NOT NULL,
+    origin_seq INTEGER NOT NULL,
+    forgotten_at INTEGER NOT NULL,
+    digest BLOB NOT NULL
+);
+
+-- The engine's applied journal, the durable dedup and replay basis: a
+-- restarted node reloads these (in sequence order) and replays them
+-- through the apply path, rebuilding every projection, instead of
+-- depending on relay retention.
+CREATE TABLE sync_journal (
+    event_id TEXT PRIMARY KEY,
+    origin TEXT NOT NULL,
+    origin_seq INTEGER NOT NULL,
+    applied_order INTEGER NOT NULL UNIQUE,
+    signature BLOB NOT NULL,
+    body_json TEXT NOT NULL
+);
+
+CREATE INDEX sync_journal_origin ON sync_journal(origin, origin_seq);
+
+-- The receiver's relay fetch position per peer bucket, so a restart
+-- resumes catch-up instead of re-reading retained history.
+CREATE TABLE sync_fetch_cursor (
+    peer_id TEXT PRIMARY KEY,
+    cursor INTEGER NOT NULL
+);
+
+-- The blob plane's content-addressed store (ADR 0028): chunk ciphertext
+-- keyed by its own SHA-256, hex-encoded. Idempotent insert-or-ignore:
+-- identical chunks from any peer collapse to one row.
+CREATE TABLE blob_chunks (
+    blob_id TEXT PRIMARY KEY,
+    content_hash TEXT NOT NULL,
+    size INTEGER NOT NULL,
+    data BLOB NOT NULL
+);
 ";

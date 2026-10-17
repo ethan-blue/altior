@@ -360,18 +360,18 @@ fn test_p14_acceptance_journey_complete_eight_steps() {
     // ── Step 1: Clean Store Validation & Core Daemon Launch ────────────
     {
         let store = Store::open(&db_path).expect("open sqlite store for clean schema check");
-        assert_eq!(store.schema_version().expect("schema version"), 8);
-        assert!(
+        assert_eq!(store.schema_version().expect("schema version"), 9);
+        assert_eq!(
             store
                 .agent_profiles(None, AgentProfileListLimit::try_new(50).unwrap())
-                .unwrap()
-                .is_empty()
+                .unwrap(),
+            []
         );
-        assert!(
+        assert_eq!(
             store
                 .thread_list(None, None, ThreadListLimit::try_new(50).unwrap())
-                .unwrap()
-                .is_empty()
+                .unwrap(),
+            []
         );
         assert_eq!(store.journal_len().unwrap(), 0);
     }
@@ -1111,7 +1111,7 @@ fn test_p14_acceptance_journey_complete_eight_steps() {
         let search_snap: SnapshotEnvelope =
             recv_json_timeout(&mut client_3, Duration::from_secs(5)).unwrap();
         let search_data: ThreadListResponseDto = search_snap.parse_data().unwrap();
-        assert!(!search_data.threads.is_empty());
+        assert_ne!(search_data.threads, Vec::new());
 
         // Get turn history for Thread A (contains turns across restarts)
         let op_hist = OperationId::from_str("op_p14history0000000000000001").unwrap();
@@ -1131,7 +1131,7 @@ fn test_p14_acceptance_journey_complete_eight_steps() {
             recv_json_timeout(&mut client_3, Duration::from_secs(5)).unwrap();
         let hist_data: ThreadHistoryResponseDto = hist_snap.parse_data().unwrap();
         assert_eq!(hist_data.thread_id, thread_a_id);
-        assert!(!hist_data.turns.is_empty());
+        assert_ne!(hist_data.turns, Vec::new());
 
         // List all threads
         let op_list = OperationId::from_str("op_p14listthr0000000000000001").unwrap();
