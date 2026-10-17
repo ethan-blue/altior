@@ -611,3 +611,24 @@ Next task and first concrete action:
 - Status: DONE-VERIFIED。
 - Next: P3 工程面剩余仅引擎态→v9 表的落库接线深化与产品层（配对 UI/
   诊断面板/Desktop 接线，等用户决策）；SYNC_ENABLED 翻转等独立密码学审查。
+
+### 切片 27 — 会话链恢复：ChainSnapshot + restore 构造器（DONE-VERIFIED，crypto 层，a5601bb，2026-10-17）
+- **缺口**: 重启后 SessionV2 的 turn 链状态（chain_ikm/turn_no）是易失的，
+  恢复节点必须重配对（epoch_seq 递增）才能继续——配对流程切片的前置。
+- **落地（crypto 层）**: \`ChainSnapshot { chain_ikm, turn_no }\`；
+  \`outbound_chain()/inbound_chain()\` 访问器；
+  \`restore_outbound()/restore_inbound()\` 构造器（计数器从持久租约继续）。
+  **安全语义**: 恢复后的发送会话在 turn_no > 0 时拒绝 seal（\`needs_fresh_turn\`
+  标志，TurnNotOpen）——被打断 turn 的 ephemeral 已按设计销毁，强行封套会
+  产生对端无法归位 turn 的信封；必须先 open_turn 换新轮。接收方向恢复后
+  当前 turn 继续可开，已过 turn 的迟到的信封照旧 TurnMismatch。
+- **测试**: \`sessions_resume_from_chain_snapshots_across_a_restart\`——快照、
+  重启、拒绝过早 seal、open_turn 后跨重启继续、旧 turn 信封仍拒。
+- **登记（下一切片 28 的具体动作）**: \`SessionChainPort\`（OS SecretStore
+  后端实现 + 内存测试双实现，密钥材料永不进 SQLite——AGENTS.md 不变量）+
+  SyncNode 接线（open_turn/poll 推进时保存、durable() 载入、pair() 优先
+  恢复）+ p41（免重配对跨重启继续收敛）。
+- **教训（Windows 工作流）**: 提交后 git 会把工作文件重写为 CRLF，补丁脚本
+  锚点必须先做 CRLF 归一化——本轮多次锚点失败均源于此（已计入既有
+  Windows 注意事项）。
+- Status: DONE-VERIFIED（crypto 层；端口与引擎接线为切片 28）。
