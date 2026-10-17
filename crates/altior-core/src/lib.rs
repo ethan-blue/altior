@@ -23,7 +23,9 @@ pub mod ownership;
 pub mod runtime;
 pub mod secrets;
 pub mod supervision;
+pub mod sync;
 pub mod sync_gate;
+pub use sync::{EventBody, JournalEvent, SyncError, SyncNode};
 
 pub use application::{
     CommandDispatcher, CoreAppError, CoreApplication, CoreCommand, CoreCommandEnvelope,

@@ -59,10 +59,7 @@ impl<'a> SqliteCounterLease<'a> {
             )
             .map(|value| u64::try_from(value).unwrap_or(1))
             .or_else(|error| {
-                if matches!(
-                    error,
-                    rusqlite::Error::QueryReturnedNoRows
-                ) {
+                if matches!(error, rusqlite::Error::QueryReturnedNoRows) {
                     Ok(1)
                 } else {
                     Err(StorageError::from_sqlite("read counter lease", error))
@@ -72,10 +69,7 @@ impl<'a> SqliteCounterLease<'a> {
 }
 
 impl altior_crypto::CounterLease for SqliteCounterLease<'_> {
-    fn reserve(
-        &mut self,
-        block_size: u64,
-    ) -> std::io::Result<altior_crypto::CounterBlock> {
+    fn reserve(&mut self, block_size: u64) -> std::io::Result<altior_crypto::CounterBlock> {
         let tx = self
             .conn
             .transaction()
@@ -100,9 +94,10 @@ impl altior_crypto::CounterLease for SqliteCounterLease<'_> {
         tx.execute(
             "INSERT INTO sync_counter_lease (lease_key, next_counter) VALUES (?1, ?2)
              ON CONFLICT(lease_key) DO UPDATE SET next_counter = ?2",
-            rusqlite::params![self.lease_key, i64::try_from(end).map_err(|error| {
-                std::io::Error::other(error.to_string())
-            })?],
+            rusqlite::params![
+                self.lease_key,
+                i64::try_from(end).map_err(|error| { std::io::Error::other(error.to_string()) })?
+            ],
         )
         .map_err(|error| std::io::Error::other(error.to_string()))?;
         tx.commit()
@@ -121,11 +116,7 @@ mod tests {
     fn device_keys(seed: u8, label: &str) -> altior_crypto::DeviceKeys {
         let mut key_seed = [seed; 64];
         key_seed[0] = seed;
-        altior_crypto::DeviceKeys::from_seed(
-            key_seed,
-            DeviceId::new(label).unwrap(),
-        )
-        .unwrap()
+        altior_crypto::DeviceKeys::from_seed(key_seed, DeviceId::new(label).unwrap()).unwrap()
     }
 
     #[test]
@@ -169,21 +160,18 @@ mod tests {
         for _ in 0..50 {
             let conn = store.conn_mut();
             let mut lease = SqliteCounterLease::new(conn, "alice→bob");
-            let mut session = SessionV2::outbound(
-                &alice,
-                &bob.public_identity(),
-                epoch.clone(),
-                1,
-                &mut lease,
-            )
-            .unwrap();
+            let mut session =
+                SessionV2::outbound(&alice, &bob.public_identity(), epoch.clone(), 1, &mut lease)
+                    .unwrap();
             for n in 0..10 {
                 let envelope = session
                     .seal(format!("kill-and-restart {n}").as_bytes())
                     .unwrap();
-                let counter =
-                    u64::from_be_bytes(envelope[29..37].try_into().unwrap());
-                assert!(seen.insert(counter), "counter {counter} reused after restart");
+                let counter = u64::from_be_bytes(envelope[29..37].try_into().unwrap());
+                assert!(
+                    seen.insert(counter),
+                    "counter {counter} reused after restart"
+                );
             }
         }
         assert_eq!(seen.len(), 500);

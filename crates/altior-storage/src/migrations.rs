@@ -499,7 +499,6 @@ SELECT memory_id, content FROM memory
 WHERE state = 'confirmed' AND superseded_by IS NULL;
 ";
 
-
 /// The version-9 schema: Personal Vault sync state (ADR 0027 §5–6).
 /// Created behind the ADR 0025 sync gate — the tables are written only
 /// by sync code, so a v9 file behaves identically to a v8 file until
