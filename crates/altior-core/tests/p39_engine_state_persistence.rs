@@ -4,7 +4,7 @@
 //! becomes irrelevant to correctness: even a relay that forgot every
 //! envelope cannot strand a restarted node's state.
 
-use altior_core::{StoreSyncStatePort, SyncNode, SyncStatePort};
+use altior_core::{StoreSyncStatePort, SyncNode};
 use altior_crypto::{CounterBlock, CounterLease, DeviceId, DeviceKeys, SessionEpoch};
 use tempfile::tempdir;
 
@@ -48,7 +48,7 @@ fn durable_node_survives_restart_without_loss() {
     // Session 1: the durable node B exchanges traffic with A.
     let mut a = SyncNode::new(keys(1, "persist-a"), "persist-a");
     {
-        let mut store = altior_storage::Store::open(&db_path).unwrap();
+        let store = altior_storage::Store::open(&db_path).unwrap();
         let port = StoreSyncStatePort::new(store);
         let mut b = SyncNode::durable(keys(2, "persist-b"), "persist-b", Box::new(port)).unwrap();
         SyncNode::pair(&mut a, &mut b, &epoch, 1, &mut lease_ab, &mut lease_ba).unwrap();
@@ -69,7 +69,7 @@ fn durable_node_survives_restart_without_loss() {
     // Session 2: a brand-new node over the same store reloads everything.
     let digest_b2;
     {
-        let mut store = altior_storage::Store::open(&db_path).unwrap();
+        let store = altior_storage::Store::open(&db_path).unwrap();
         let port = StoreSyncStatePort::new(store);
         let b2 = SyncNode::durable(keys(2, "persist-b"), "persist-b", Box::new(port)).unwrap();
 
@@ -96,7 +96,7 @@ fn durable_node_survives_restart_without_loss() {
     // continues (a recreated label would collide its event ids, and the
     // relay correctly refuses the push).
     {
-        let mut store = altior_storage::Store::open(&db_path).unwrap();
+        let store = altior_storage::Store::open(&db_path).unwrap();
         let port = StoreSyncStatePort::new(store);
         let mut b2 = SyncNode::durable(keys(2, "persist-b"), "persist-b", Box::new(port)).unwrap();
         SyncNode::pair(&mut a, &mut b2, &epoch, 2, &mut lease_ab, &mut lease_ba).unwrap();

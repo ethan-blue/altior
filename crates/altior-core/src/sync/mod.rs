@@ -35,7 +35,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use altior_crypto::{CounterLease, DeviceIdentity, DeviceKeys, SessionEpoch, SessionV2};
 
 use altior_relay::{BucketId, Relay, RelayPolicy};
-use persist::{MemorySyncStatePort, SyncStatePort};
+use persist::SyncStatePort;
 use serde::{Deserialize, Serialize};
 
 /// One replicated journal event: routing identity plus a signed body.
@@ -351,6 +351,10 @@ impl SyncNode {
 
     /// Appends an entry to a document's grow-only set. Returns the
     /// event id.
+    ///
+    /// # Errors
+    ///
+    /// [`SyncError::State`] in durable mode when the port cannot record.
     pub fn append_document(&mut self, doc_id: &str, entry: &str) -> Result<String, SyncError> {
         let event = self.create(EventBody::DocumentAppend {
             doc_id: doc_id.to_owned(),
@@ -364,6 +368,10 @@ impl SyncNode {
     /// Proposes a memory. A proposal for a locally-tombstoned memory is
     /// refused at creation (the resurrection defense applies to the
     /// origin too).
+    ///
+    /// # Errors
+    ///
+    /// [`SyncError::State`] in durable mode when the port cannot record.
     pub fn propose_memory(
         &mut self,
         memory_id: &str,
@@ -383,6 +391,10 @@ impl SyncNode {
     }
 
     /// Forgets a memory permanently and locally. Returns the event id.
+    ///
+    /// # Errors
+    ///
+    /// [`SyncError::State`] in durable mode when the port cannot record.
     pub fn forget_memory(
         &mut self,
         memory_id: &str,

@@ -99,7 +99,8 @@ fn test_three_device_offline_convergence() {
     // Memory 2. The edits are concurrent — neither device has seen the
     // other when it writes.
     a.append_document("doc-1", "alpha edit by a").unwrap();
-    a.forget_memory("mem_000000000001a", 1_700_000_050_000, [5; 32]);
+    a.forget_memory("mem_000000000001a", 1_700_000_050_000, [5; 32])
+        .unwrap();
     b.append_document("doc-1", "beta edit by b").unwrap();
     b.propose_memory("mem_000000000002b", "memory two, added during dormancy")
         .expect("propose failed")

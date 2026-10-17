@@ -84,7 +84,8 @@ fn test_stale_device_tombstone_non_resurrection() {
     }
 
     // ── C goes dormant; A forgets Memory 1; B learns the tombstone ──
-    a.forget_memory("mem_000000000001d", 1_700_100_000_000, [9; 32]);
+    a.forget_memory("mem_000000000001d", 1_700_100_000_000, [9; 32])
+        .unwrap();
     a.flush(&mut relay, TURN_SEED_A).unwrap();
     b.poll(&mut relay).unwrap();
     assert!(b.tombstones().contains_key("mem_000000000001d"));
@@ -92,7 +93,7 @@ fn test_stale_device_tombstone_non_resurrection() {
     // ── C, still holding its old state, re-proposes Memory 1 ─────────
     // C has not seen the tombstone, so the proposal is accepted locally
     // (this is the stale-database state ADR 0025 describes).
-    let stale = c
+    let _stale = c
         .propose_memory(
             "mem_000000000001d",
             "STALE: resurrecting from my 30-day-old copy",
