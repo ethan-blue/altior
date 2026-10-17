@@ -132,8 +132,9 @@ fn core_depends_on_composed_contract_and_adapter_crates() {
             "altior-storage",
             "serde",
             "serde_json",
+            "sha2",
         ],
-        "altior-core composes the contract layers, runtime adapters, and - since ADR 0027 - the sync session and relay layers it exclusively owns (ADR 0025 threat 11: sync keys live only in core)"
+        "altior-core composes the contract layers, runtime adapters, and - since ADR 0027 - the sync session and relay layers it exclusively owns (ADR 0025 threat 11: sync keys live only in core); sha2 is the blob-plane chunk digest (ADR 0028)"
     );
     for forbidden in ["tauri", "tokio"] {
         assert!(

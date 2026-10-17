@@ -33,6 +33,7 @@ pub mod persist;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use altior_crypto::{CounterLease, DeviceIdentity, DeviceKeys, SessionEpoch, SessionV2};
+use sha2::{Digest, Sha256};
 
 use altior_relay::{BucketId, Relay, RelayPolicy};
 use persist::SyncStatePort;
@@ -87,6 +88,48 @@ pub enum EventBody {
         /// Per event origin: the highest applied `origin_seq`.
         frontiers: BTreeMap<String, u64>,
     },
+    /// The blob plane's manifest (ADR 0028): a signed pointer to a
+    /// content-addressed encrypted blob. Chunks travel as blob
+    /// envelopes, never as journal events.
+    BlobAdded {
+        /// The whole-blob identity: SHA-256 over the ordered chunk
+        /// ciphertexts, hex-encoded.
+        blob_id: String,
+        /// Total plaintext size in bytes.
+        total_size: u64,
+        /// One entry per chunk, in order.
+        entries: Vec<BlobEntry>,
+    },
+}
+
+/// One chunk entry of a blob manifest.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BlobEntry {
+    /// SHA-256 of the chunk plaintext, hex.
+    pub content_hash: String,
+    /// SHA-256 of the chunk ciphertext, hex (the CAS id).
+    pub blob_id: String,
+    /// The chunk ciphertext length in bytes.
+    pub ciphertext_len: u64,
+}
+
+/// The wire payload of one v2 sync envelope: a signed journal event or
+/// a blob-plane chunk (ADR 0028). Chunks are bulk data — they carry no
+/// signature themselves; their authenticity is the signed manifest
+/// plus the final AEAD verification at reassembly.
+#[derive(Serialize, Deserialize)]
+enum SyncPayload {
+    Event(WireEvent),
+    Chunk(BlobChunkWire),
+}
+
+/// A transported blob chunk (ADR 0028).
+#[derive(Serialize, Deserialize)]
+struct BlobChunkWire {
+    blob_id: String,
+    content_hash: String,
+    chunk_id: String,
+    ciphertext: Vec<u8>,
 }
 
 /// What went wrong in an engine operation.
@@ -124,6 +167,29 @@ impl std::fmt::Display for SyncError {
 
 impl std::error::Error for SyncError {}
 
+/// Lowercase hex encoding (blob plane ids).
+fn hex_encode(bytes: &[u8]) -> String {
+    bytes
+        .iter()
+        .fold(String::with_capacity(bytes.len() * 2), |mut out, byte| {
+            use std::fmt::Write as _;
+            let _ = write!(out, "{byte:02x}");
+            out
+        })
+}
+
+/// Decodes 64 hex chars into a 32-byte id; `None` otherwise.
+fn hex_decode(hex: &str) -> Option<[u8; 32]> {
+    if hex.len() != 64 {
+        return None;
+    }
+    let mut out = [0u8; 32];
+    for (index, pair) in hex.as_bytes().chunks(2).enumerate() {
+        out[index] = u8::from_str_radix(std::str::from_utf8(pair).ok()?, 16).ok()?;
+    }
+    Some(out)
+}
+
 /// The canonical signed bytes: exactly these fields, in this order.
 #[derive(Serialize)]
 struct Signable<'a> {
@@ -141,6 +207,15 @@ struct WireEvent {
     origin_seq: u64,
     signature: Vec<u8>,
     body: EventBody,
+}
+
+/// A known blob: its manifest plus whatever chunks are held locally.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+struct StoredBlob {
+    total_size: u64,
+    entries: Vec<BlobEntry>,
+    /// Chunk ciphertext by chunk blob id (hex).
+    chunks: BTreeMap<String, Vec<u8>>,
 }
 
 /// The tombstone mark recorded when a forget is applied.
@@ -198,6 +273,10 @@ pub struct SyncNode {
     /// Fetch cursors loaded from the port at construction, applied
     /// when the peer's channel appears at `pair`.
     loaded_cursors: BTreeMap<String, u64>,
+    /// The blob plane: known manifests and locally held chunks, keyed
+    /// by whole-blob id (hex). In-memory for tests; durable CAS is
+    /// storage's `blob_chunks` table.
+    blobs: BTreeMap<String, StoredBlob>,
     next_seq: u64,
     suppressed_resurrections: u64,
 }
@@ -239,6 +318,7 @@ impl SyncNode {
             suppressed_resurrections: 0,
             state: SyncNodeState::Volatile,
             loaded_cursors: BTreeMap::new(),
+            blobs: BTreeMap::new(),
         }
     }
 
@@ -274,6 +354,82 @@ impl SyncNode {
         node.loaded_cursors = port.load_fetch_cursors()?;
         node.state = SyncNodeState::Durable(port);
         Ok(node)
+    }
+
+    /// Stores a blob locally: chunk, encrypt, and queue its manifest
+    /// event for fan-out. Returns the whole-blob id (hex).
+    ///
+    /// # Errors
+    ///
+    /// [`SyncError::Session`] on encryption failure;
+    /// [`SyncError::State`] in durable mode when the port cannot record.
+    pub fn put_blob(&mut self, vault_key: &[u8; 32], bytes: &[u8]) -> Result<String, SyncError> {
+        let (chunks, manifest) = altior_crypto::split_and_encrypt(vault_key, bytes);
+        let manifest_event: Vec<BlobEntry> = manifest
+            .entries
+            .iter()
+            .map(|entry| BlobEntry {
+                content_hash: hex_encode(&entry.content_hash),
+                blob_id: hex_encode(&entry.blob_id),
+                ciphertext_len: entry.ciphertext_len as u64,
+            })
+            .collect();
+        let blob_id = altior_crypto::blob_id_of(&manifest);
+        let blob_id_hex = hex_encode(&blob_id);
+        let stored = StoredBlob {
+            total_size: manifest.total_size,
+            entries: manifest_event.clone(),
+            chunks: chunks
+                .iter()
+                .map(|chunk| (hex_encode(&chunk.blob_id), chunk.ciphertext.clone()))
+                .collect(),
+        };
+        self.blobs.insert(blob_id_hex.clone(), stored);
+        let event = self.create(EventBody::BlobAdded {
+            blob_id: blob_id_hex.clone(),
+            total_size: manifest.total_size,
+            entries: manifest_event,
+        });
+        self.admit(event)?;
+        Ok(blob_id_hex)
+    }
+
+    /// Reassembles a stored blob, verifying every chunk against the
+    /// manifest before producing plaintext.
+    ///
+    /// # Errors
+    ///
+    /// [`SyncError::Session`] with [`altior_crypto::CryptoError::BlobChunkMissing`]
+    /// while chunks are still inbound, or on any verification failure.
+    pub fn get_blob(&self, vault_key: &[u8; 32], blob_id: &str) -> Result<Vec<u8>, SyncError> {
+        let stored = self
+            .blobs
+            .get(blob_id)
+            .ok_or_else(|| SyncError::Invariant(format!("unknown blob {blob_id}")))?;
+        let manifest = altior_crypto::BlobManifest {
+            total_size: stored.total_size,
+            entries: stored
+                .entries
+                .iter()
+                .filter_map(|entry| {
+                    Some(altior_crypto::ChunkManifestEntry {
+                        content_hash: hex_decode(&entry.content_hash)?,
+                        blob_id: hex_decode(&entry.blob_id)?,
+                        ciphertext_len: usize::try_from(entry.ciphertext_len).unwrap_or(0),
+                    })
+                })
+                .collect(),
+        };
+        if manifest.entries.len() != stored.entries.len() {
+            return Err(SyncError::Invariant("blob manifest hex decode".to_owned()));
+        }
+        let chunk_map: BTreeMap<[u8; 32], Vec<u8>> = stored
+            .chunks
+            .iter()
+            .filter_map(|(id, data)| hex_decode(id).map(|key| (key, data.clone())))
+            .collect();
+        altior_crypto::decrypt_and_reassemble(vault_key, &manifest, &chunk_map)
+            .map_err(SyncError::Session)
     }
 
     /// Records an event durably (durable mode) and applies it. The
@@ -476,8 +632,18 @@ impl SyncNode {
                             Err(other) => return Err(SyncError::Session(other)),
                         }
                     };
-                    let wire: WireEvent =
-                        serde_json::from_slice(&plaintext).map_err(SyncError::Serialization)?;
+                    // A payload is either a journal event or a blob chunk
+                    // (ADR 0028). Chunks verify by digest, store into the
+                    // CAS, and never touch the journal.
+                    let wire: WireEvent = match serde_json::from_slice::<SyncPayload>(&plaintext)
+                        .map_err(SyncError::Serialization)?
+                    {
+                        SyncPayload::Chunk(chunk) => {
+                            self.ingest_chunk(peer.as_str(), chunk)?;
+                            continue;
+                        }
+                        SyncPayload::Event(wire) => wire,
+                    };
                     let origin = wire.origin.clone();
                     let identity = self
                         .peers
@@ -513,6 +679,95 @@ impl SyncNode {
             }
         }
         Ok(applied_count)
+    }
+
+    /// Verifies and stores one inbound blob chunk (ADR 0028): the
+    /// transport digest must match the claimed chunk id, and the chunk
+    /// must belong to a known manifest. Final authenticity is the AEAD
+    /// check at reassembly.
+    fn ingest_chunk(&mut self, peer: &str, chunk: BlobChunkWire) -> Result<(), SyncError> {
+        let digest: [u8; 32] = Sha256::digest(&chunk.ciphertext).into();
+        if hex_encode(&digest) != chunk.chunk_id {
+            return Err(SyncError::Invariant(format!(
+                "chunk digest mismatch from {peer}"
+            )));
+        }
+        if let Some(stored) = self.blobs.get_mut(&chunk.blob_id) {
+            if !stored
+                .entries
+                .iter()
+                .any(|entry| entry.blob_id == chunk.chunk_id)
+            {
+                return Err(SyncError::Invariant(format!(
+                    "unsolicited chunk from {peer}"
+                )));
+            }
+            stored
+                .chunks
+                .insert(chunk.chunk_id.clone(), chunk.ciphertext);
+        }
+        Ok(())
+    }
+
+    /// Blob chunk fan-out: every locally held chunk of every known
+    /// blob, once per peer (ADR 0028 - chunks ride blob envelopes,
+    /// not the journal).
+    fn fan_out_blob_chunks(
+        &mut self,
+        relay: &mut Relay,
+        peer_labels: &[String],
+    ) -> Result<usize, SyncError> {
+        let mut pushed = 0;
+        let blob_ids: Vec<String> = self.blobs.keys().cloned().collect();
+        for blob_id in blob_ids {
+            let chunk_ids: Vec<String> = self.blobs[&blob_id].chunks.keys().cloned().collect();
+            for chunk_id in chunk_ids {
+                let dedup_key = format!("blob:{chunk_id}");
+                for peer in peer_labels {
+                    if self
+                        .sent_to
+                        .entry(dedup_key.clone())
+                        .or_default()
+                        .contains(peer)
+                    {
+                        continue;
+                    }
+                    let envelope = {
+                        let stored = &self.blobs[&blob_id];
+                        let entry = stored
+                            .entries
+                            .iter()
+                            .find(|entry| entry.blob_id == chunk_id)
+                            .expect("held chunk is in its manifest");
+                        let payload = SyncPayload::Chunk(BlobChunkWire {
+                            blob_id: blob_id.clone(),
+                            content_hash: entry.content_hash.clone(),
+                            chunk_id: chunk_id.clone(),
+                            ciphertext: stored.chunks[&chunk_id].clone(),
+                        });
+                        let channels = self.peers.get_mut(peer).expect("peer listed");
+                        channels
+                            .outbound
+                            .seal(&serde_json::to_vec(&payload).map_err(SyncError::Serialization)?)
+                            .map_err(SyncError::Session)?
+                    };
+                    let bucket = BucketId::new(format!("vault/{peer}-from-{}", self.label));
+                    relay
+                        .push(
+                            &bucket,
+                            &format!("{}:blob:{}", self.label, chunk_id),
+                            &envelope,
+                        )
+                        .map_err(SyncError::Relay)?;
+                    self.sent_to
+                        .entry(dedup_key.clone())
+                        .or_default()
+                        .insert(peer.clone());
+                    pushed += 1;
+                }
+            }
+        }
+        Ok(pushed)
     }
 
     /// Pull-before-push: polls first, then fans every not-yet-sent
@@ -594,6 +849,7 @@ impl SyncNode {
                 pushed += 1;
             }
         }
+        pushed += self.fan_out_blob_chunks(relay, &peer_labels)?;
         Ok(pushed)
     }
 
@@ -772,6 +1028,17 @@ impl SyncNode {
                 self.tombstones.insert(memory_id.clone(), mark);
                 self.memories.remove(memory_id);
             }
+            EventBody::BlobAdded {
+                blob_id,
+                total_size,
+                entries,
+            } => {
+                let stored = self.blobs.entry(blob_id.clone()).or_default();
+                stored.total_size = *total_size;
+                stored.entries.clone_from(entries);
+                self.applied.insert(event.event_id.clone(), event);
+                return Ok(());
+            }
             EventBody::Ack { frontiers } => {
                 let ledger = self.peer_acks.entry(event.origin.clone()).or_default();
                 for (origin, seq) in frontiers {
@@ -801,13 +1068,13 @@ fn canonical_bytes(event_id: &str, origin: &str, origin_seq: u64, body: &EventBo
 }
 
 fn serialize_event(event: &JournalEvent) -> Result<Vec<u8>, SyncError> {
-    serde_json::to_vec(&WireEvent {
+    serde_json::to_vec(&SyncPayload::Event(WireEvent {
         event_id: event.event_id.clone(),
         origin: event.origin.clone(),
         origin_seq: event.origin_seq,
         signature: event.signature.to_vec(),
         body: event.body.clone(),
-    })
+    }))
     .map_err(SyncError::Serialization)
 }
 

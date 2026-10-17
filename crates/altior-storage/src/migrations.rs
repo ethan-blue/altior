@@ -566,4 +566,14 @@ CREATE TABLE sync_fetch_cursor (
     peer_id TEXT PRIMARY KEY,
     cursor INTEGER NOT NULL
 );
+
+-- The blob plane's content-addressed store (ADR 0028): chunk ciphertext
+-- keyed by its own SHA-256, hex-encoded. Idempotent insert-or-ignore:
+-- identical chunks from any peer collapse to one row.
+CREATE TABLE blob_chunks (
+    blob_id TEXT PRIMARY KEY,
+    content_hash TEXT NOT NULL,
+    size INTEGER NOT NULL,
+    data BLOB NOT NULL
+);
 ";

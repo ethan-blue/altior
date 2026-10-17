@@ -375,6 +375,60 @@ impl Store {
         Ok(out)
     }
 
+    /// Stores a blob chunk by its ciphertext identity (hex-encoded
+    /// SHA-256). Idempotent: an existing id is left untouched.
+    ///
+    /// # Errors
+    ///
+    /// [`StorageError::Sqlite`] on write failure.
+    pub fn put_blob_chunk(
+        &self,
+        blob_id_hex: &str,
+        content_hash_hex: &str,
+        data: &[u8],
+    ) -> Result<bool, StorageError> {
+        let inserted = self
+            .conn()
+            .execute(
+                "INSERT OR IGNORE INTO blob_chunks (blob_id, content_hash, size, data)
+                 VALUES (?1, ?2, ?3, ?4)",
+                rusqlite::params![blob_id_hex, content_hash_hex, data.len(), data],
+            )
+            .map_err(|error| StorageError::from_sqlite("put blob chunk", error))?;
+        Ok(inserted == 1)
+    }
+
+    /// Fetches a blob chunk's ciphertext by id, if present.
+    ///
+    /// # Errors
+    ///
+    /// [`StorageError::Sqlite`] on read failure.
+    pub fn get_blob_chunk(&self, blob_id_hex: &str) -> Result<Option<Vec<u8>>, StorageError> {
+        self.conn()
+            .query_row(
+                "SELECT data FROM blob_chunks WHERE blob_id = ?1",
+                [blob_id_hex],
+                |row| row.get(0),
+            )
+            .map(Some)
+            .or_else(|error| {
+                if matches!(error, rusqlite::Error::QueryReturnedNoRows) {
+                    Ok(None)
+                } else {
+                    Err(StorageError::from_sqlite("get blob chunk", error))
+                }
+            })
+    }
+
+    /// Whether a chunk is present locally.
+    ///
+    /// # Errors
+    ///
+    /// [`StorageError::Sqlite`] on read failure.
+    pub fn has_blob_chunk(&self, blob_id_hex: &str) -> Result<bool, StorageError> {
+        Ok(self.get_blob_chunk(blob_id_hex)?.is_some())
+    }
+
     /// Every persisted tombstone.
     ///
     /// # Errors

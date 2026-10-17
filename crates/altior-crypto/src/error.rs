@@ -104,6 +104,19 @@ pub enum CryptoError {
     },
     /// `open_turn` was called on a receiving session (v2).
     TurnNotOpen,
+    /// A manifest chunk was not supplied to reassembly (v3, ADR 0028).
+    BlobChunkMissing {
+        /// The chunk's zero-based index.
+        index: usize,
+        /// The expected chunk blob id.
+        blob_id: [u8; 32],
+    },
+    /// A chunk failed its manifest contract: wrong length, wrong
+    /// content digest, or AEAD tag (ADR 0028). One opaque failure.
+    BlobChunkMismatch {
+        /// The chunk's zero-based index.
+        index: usize,
+    },
 }
 
 impl fmt::Display for CryptoError {
@@ -171,6 +184,15 @@ impl fmt::Display for CryptoError {
                 write!(f, "envelope turn {found} is not the current turn {current}")
             }
             Self::TurnNotOpen => write!(f, "open_turn is an outbound operation"),
+            Self::BlobChunkMissing { index, blob_id } => {
+                write!(
+                    f,
+                    "blob chunk {index} ({blob_id:?}) missing from reassembly"
+                )
+            }
+            Self::BlobChunkMismatch { index } => {
+                write!(f, "blob chunk {index} did not match its manifest entry")
+            }
         }
     }
 }
