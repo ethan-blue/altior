@@ -583,3 +583,31 @@ Next task and first concrete action:
 - Status: DONE-VERIFIED。
 - Next: blob 平面（内容寻址加密块，需先补 ADR 0027 附录或新 ADR）；产品层
   等用户决策。
+
+
+### 切片 26 — blob 平面：内容寻址加密块（DONE-VERIFIED，2026-10-17，ADR 0028）
+- **ADR 0028**（docs/decisions/0028）: docs/SYNC.md 第 3 平面的格式与同步
+  契约——固定 64 KiB 明文分块；**收敛加密**（chunk key = HKDF(vault data
+  key, salt = SHA-256(明文))，同内容同金钥同密文同 CAS 身份，跨设备去重免
+  协调）；nonce 按 (chunk key, chunk index) 确定性推导，(key, nonce) 永不
+  重复；AAD 绑定内容哈希/序号/块数/总长；blob id = 密文字节序列的 SHA-256
+  （存着什么验什么）。备选（随机 per-chunk key、滚动哈希分块、blob 走日志）
+  与失败模式均记录。
+- **crypto**（blob.rs + 4 测试）: split_and_encrypt / decrypt_and_reassemble
+  （缺块/篡改/清单不匹配全部 fail closed，逐块 AEAD + 内容摘要双验）、
+  收敛性与其他金钥隔离性断言。
+- **storage**: v9 增 blob_chunks CAS 表（幂等 insert-or-ignore）+ put/get/has。
+- **引擎**: EventBody::BlobAdded（签名清单事件）；块走专用 blob envelope
+  （非日志事件，传输层摘要校验 + 清单归属校验，最终真实性在重组时 AEAD）；
+  flush 逐 peer 去重扇出；put_blob/get_blob。信封载荷升级为 SyncPayload
+  枚举（Event | Chunk）。
+- **p40** `blob_plane_syncs_and_verifies_between_devices`: ~2.5 块的确定性
+  明文 A→B，双方重组字节一致；重存同内容返回同 blob id（去重）。
+- **门禁**: exit 0，ALL ALTIOR QUALITY GATES PASSED CLEANLY——Rust+Tauri
+  **705** 测试（+5）、Vitest 298、对比度 24/24、视觉 6/6 全 0 diff。边界
+  钉定按 ADR 0028 增 sha2（core，块摘要）。
+- 已登记未做: 删除/清单收回为产品层切片；chunk GC 沿 ack 前沿纪律（同
+  墓碑）；vault key 轮换的 blob 重加密为显式产品切片。
+- Status: DONE-VERIFIED。
+- Next: P3 工程面剩余仅引擎态→v9 表的落库接线深化与产品层（配对 UI/
+  诊断面板/Desktop 接线，等用户决策）；SYNC_ENABLED 翻转等独立密码学审查。
