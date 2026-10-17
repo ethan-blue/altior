@@ -288,6 +288,12 @@ impl Store {
         &mut self.conn
     }
 
+    /// Read-only access to the underlying connection, for the sync-state
+    /// modules that own their SQL.
+    pub(crate) fn conn(&self) -> &Connection {
+        &self.conn
+    }
+
     /// Opens a private in-memory database (deterministic tests, no fs).
     ///
     /// # Errors

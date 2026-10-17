@@ -539,6 +539,8 @@ CREATE TABLE sync_ack_cursor (
 
 CREATE TABLE memory_tombstone (
     memory_id TEXT PRIMARY KEY,
+    origin TEXT NOT NULL,
+    origin_seq INTEGER NOT NULL,
     forgotten_at INTEGER NOT NULL,
     digest BLOB NOT NULL
 );

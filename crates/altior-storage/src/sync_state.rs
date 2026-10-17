@@ -10,10 +10,16 @@
 //! `memory_tombstone`) are written by the sync engine as it applies
 //! events; their accessor helpers live with the engine integration.
 
+use std::collections::BTreeMap;
+
 use rusqlite::Connection;
 
+use crate::Store;
 use crate::error::StorageError;
-
+use altior_domain::{
+    DeviceLabel, EpochSeq, RecoverySignature, RevocationCertificate, UnixMillis, VaultDeviceRecord,
+    VaultDeviceStatus,
+};
 /// A durable [`altior_crypto::CounterLease`] over one direction of one
 /// device pair, keyed by the caller-chosen lease key (convention:
 /// `"{sender}→{receiver}"`).
@@ -106,6 +112,298 @@ impl altior_crypto::CounterLease for SqliteCounterLease<'_> {
     }
 }
 
+/// A persisted tombstone row: the forget event's identity plus the
+/// per-origin sequence the compaction gate compares against ack floors.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PersistedTombstone {
+    /// The forgotten memory's id.
+    pub memory_id: String,
+    /// The origin (device label) of the forget event.
+    pub origin: String,
+    /// The forget event's per-origin sequence.
+    pub origin_seq: u64,
+    /// When the forget was issued (Unix millis).
+    pub forgotten_at: i64,
+    /// The tombstone digest bytes.
+    pub digest: Vec<u8>,
+}
+
+impl Store {
+    /// Inserts or updates a paired-device record from the domain model.
+    ///
+    /// # Errors
+    ///
+    /// [`StorageError::InvalidDomainEvent`] when the record violates the
+    /// typed contract; [`StorageError::Sqlite`] on write failure.
+    pub fn upsert_vault_device(&self, record: &VaultDeviceRecord) -> Result<(), StorageError> {
+        let (status, revoked_at, cert_signature) = match record.status() {
+            VaultDeviceStatus::Active => ("active", None, None),
+            VaultDeviceStatus::Revoked {
+                revoked_at,
+                certificate,
+            } => (
+                "revoked",
+                Some(i64::try_from(revoked_at.as_millis()).map_err(|error| {
+                    StorageError::InvalidDomainEvent {
+                        detail: format!("revoked_at: {error}"),
+                    }
+                })?),
+                Some(certificate.signature().as_bytes().to_vec()),
+            ),
+        };
+        self.conn()
+            .execute(
+                "INSERT INTO vault_device (device_id, added_at, added_by, epoch_seq, status, revoked_at, cert_signature)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+                 ON CONFLICT(device_id) DO UPDATE SET
+                    added_at = ?2, added_by = ?3, epoch_seq = ?4, status = ?5,
+                    revoked_at = ?6, cert_signature = ?7",
+                rusqlite::params![
+                    record.device().as_str(),
+                    i64::try_from(record.added_at().as_millis()).map_err(|error| {
+                        StorageError::InvalidDomainEvent { detail: format!("added_at: {error}") }
+                    })?,
+                    record.added_by().as_str(),
+                    record.epoch_seq().get(),
+                    status,
+                    revoked_at,
+                    cert_signature,
+                ],
+            )
+            .map_err(|error| StorageError::from_sqlite("upsert vault device", error))?;
+        Ok(())
+    }
+
+    /// Every paired-device record, ordered by device id.
+    ///
+    /// # Errors
+    ///
+    /// [`StorageError::Sqlite`] on read failure.
+    pub fn list_vault_devices(&self) -> Result<Vec<VaultDeviceRecord>, StorageError> {
+        let mut statement = self
+            .conn()
+            .prepare(
+                "SELECT device_id, added_at, added_by, epoch_seq, status, revoked_at, cert_signature
+                 FROM vault_device ORDER BY device_id",
+            )
+            .map_err(|error| StorageError::from_sqlite("list vault devices", error))?;
+        let rows = statement
+            .query_map([], |row| {
+                let device_id: String = row.get(0)?;
+                let added_at: i64 = row.get(1)?;
+                let added_by: String = row.get(2)?;
+                let epoch_seq: u32 = row.get(3)?;
+                let status: String = row.get(4)?;
+                let revoked_at: Option<i64> = row.get(5)?;
+                let cert_signature: Option<Vec<u8>> = row.get(6)?;
+                Ok((
+                    device_id,
+                    added_at,
+                    added_by,
+                    epoch_seq,
+                    status,
+                    revoked_at,
+                    cert_signature,
+                ))
+            })
+            .map_err(|error| StorageError::from_sqlite("query vault devices", error))?;
+        let mut records = Vec::new();
+        for row in rows {
+            let (device_id, added_at, added_by, epoch_seq, status, revoked_at, cert_signature) =
+                row.map_err(|error| StorageError::from_sqlite("vault device row", error))?;
+            let device =
+                DeviceLabel::new(device_id).map_err(|error| StorageError::InvalidDomainEvent {
+                    detail: error.to_string(),
+                })?;
+            let added_by_label =
+                DeviceLabel::new(added_by).map_err(|error| StorageError::InvalidDomainEvent {
+                    detail: error.to_string(),
+                })?;
+            let status = match (status.as_str(), revoked_at, cert_signature) {
+                ("active", _, _) => VaultDeviceStatus::Active,
+                ("revoked", Some(revoked_at), Some(signature)) => {
+                    let revoked_at =
+                        UnixMillis::from_millis(u64::try_from(revoked_at).map_err(|error| {
+                            StorageError::InvalidDomainEvent {
+                                detail: format!("revoked_at: {error}"),
+                            }
+                        })?);
+                    let certificate = RevocationCertificate::new(
+                        device.clone(),
+                        revoked_at,
+                        RecoverySignature::new(signature).map_err(|error| {
+                            StorageError::InvalidDomainEvent {
+                                detail: error.to_string(),
+                            }
+                        })?,
+                    )
+                    .map_err(|error| StorageError::InvalidDomainEvent {
+                        detail: error.to_string(),
+                    })?;
+                    VaultDeviceStatus::Revoked {
+                        revoked_at,
+                        certificate,
+                    }
+                }
+                _ => {
+                    return Err(StorageError::InvalidDomainEvent {
+                        detail: format!("corrupt vault_device status row: {status}"),
+                    });
+                }
+            };
+            records.push(
+                VaultDeviceRecord::restore(
+                    device,
+                    added_by_label,
+                    UnixMillis::from_millis(u64::try_from(added_at).map_err(|error| {
+                        StorageError::InvalidDomainEvent {
+                            detail: format!("added_at: {error}"),
+                        }
+                    })?),
+                    EpochSeq::from_raw(epoch_seq),
+                    status,
+                )
+                .map_err(|error| StorageError::InvalidDomainEvent {
+                    detail: error.to_string(),
+                })?,
+            );
+        }
+        Ok(records)
+    }
+
+    /// Records a forget permanently. Re-inserting the same memory id is
+    /// an idempotent overwrite (a re-forget must win).
+    ///
+    /// # Errors
+    ///
+    /// [`StorageError::Sqlite`] on write failure.
+    pub fn insert_memory_tombstone(
+        &self,
+        memory_id: &str,
+        origin: &str,
+        origin_seq: u64,
+        forgotten_at: i64,
+        digest: &[u8],
+    ) -> Result<(), StorageError> {
+        self.conn()
+            .execute(
+                "INSERT INTO memory_tombstone (memory_id, origin, origin_seq, forgotten_at, digest)
+                 VALUES (?1, ?2, ?3, ?4, ?5)
+                 ON CONFLICT(memory_id) DO UPDATE SET
+                    origin = ?2, origin_seq = ?3, forgotten_at = ?4, digest = ?5",
+                rusqlite::params![memory_id, origin, origin_seq, forgotten_at, digest],
+            )
+            .map_err(|error| StorageError::from_sqlite("insert tombstone", error))?;
+        Ok(())
+    }
+
+    /// Every persisted tombstone.
+    ///
+    /// # Errors
+    ///
+    /// [`StorageError::Sqlite`] on read failure.
+    pub fn list_memory_tombstones(&self) -> Result<Vec<PersistedTombstone>, StorageError> {
+        let mut statement = self
+            .conn()
+            .prepare(
+                "SELECT memory_id, origin, origin_seq, forgotten_at, digest
+                 FROM memory_tombstone ORDER BY origin, origin_seq",
+            )
+            .map_err(|error| StorageError::from_sqlite("list tombstones", error))?;
+        let rows = statement
+            .query_map([], |row| {
+                Ok(PersistedTombstone {
+                    memory_id: row.get(0)?,
+                    origin: row.get(1)?,
+                    origin_seq: row.get::<_, i64>(2).unwrap_or(0).cast_unsigned(),
+                    forgotten_at: row.get(3)?,
+                    digest: row.get(4)?,
+                })
+            })
+            .map_err(|error| StorageError::from_sqlite("query tombstones", error))?;
+        let mut out = Vec::new();
+        for row in rows {
+            out.push(row.map_err(|error| StorageError::from_sqlite("tombstone row", error))?);
+        }
+        Ok(out)
+    }
+
+    /// The threat-10 compaction gate: deletes tombstones whose forget
+    /// event every device has acknowledged — `origin_seq` strictly below
+    /// that origin's ack floor — and keeps everything at or above it,
+    /// and everything whose origin has no floor yet. Returns the number
+    /// reclaimed.
+    ///
+    /// # Errors
+    ///
+    /// [`StorageError::Sqlite`] on write failure.
+    pub fn compact_tombstones(
+        &self,
+        ack_floors: &BTreeMap<String, u64>,
+    ) -> Result<u64, StorageError> {
+        let mut reclaimed = 0u64;
+        for (origin, floor) in ack_floors {
+            let floor =
+                i64::try_from(*floor).map_err(|error| StorageError::InvalidDomainEvent {
+                    detail: format!("ack floor: {error}"),
+                })?;
+            let deleted = self
+                .conn()
+                .execute(
+                    "DELETE FROM memory_tombstone WHERE origin = ?1 AND origin_seq < ?2",
+                    rusqlite::params![origin, floor],
+                )
+                .map_err(|error| StorageError::from_sqlite("compact tombstones", error))?;
+            reclaimed += u64::try_from(deleted).unwrap_or(0);
+        }
+        Ok(reclaimed)
+    }
+
+    /// Records this device's durable ack: everything of `peer`'s
+    /// journal through `cursor` is applied. Forward-only; a lower value
+    /// is ignored (a rollback claim is not an acknowledgement).
+    ///
+    /// # Errors
+    ///
+    /// [`StorageError::Sqlite`] on write failure.
+    pub fn observe_ack_cursor(
+        &self,
+        device: &str,
+        peer: &str,
+        cursor: u64,
+    ) -> Result<(), StorageError> {
+        let cursor = i64::try_from(cursor).map_err(|error| StorageError::InvalidDomainEvent {
+            detail: format!("ack cursor: {error}"),
+        })?;
+        self.conn()
+            .execute(
+                "INSERT INTO sync_ack_cursor (device_id, peer_id, cursor) VALUES (?1, ?2, ?3)
+                 ON CONFLICT(device_id, peer_id) DO UPDATE SET
+                    cursor = MAX(cursor, ?3)",
+                rusqlite::params![device, peer, cursor],
+            )
+            .map_err(|error| StorageError::from_sqlite("observe ack cursor", error))?;
+        Ok(())
+    }
+
+    /// The acknowledged floor across all of this device's peers — the
+    /// conservative minimum; `None` pins compaction entirely.
+    ///
+    /// # Errors
+    ///
+    /// [`StorageError::Sqlite`] on read failure.
+    pub fn ack_floor(&self, device: &str) -> Result<Option<u64>, StorageError> {
+        self.conn()
+            .query_row(
+                "SELECT MIN(cursor) FROM sync_ack_cursor WHERE device_id = ?1",
+                [device],
+                |row| row.get::<_, Option<i64>>(0),
+            )
+            .map(|floor| floor.and_then(|value| u64::try_from(value).ok()))
+            .map_err(|error| StorageError::from_sqlite("read ack floor", error))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -175,6 +473,146 @@ mod tests {
             }
         }
         assert_eq!(seen.len(), 500);
+    }
+
+    #[test]
+    fn vault_device_records_roundtrip_with_revocation() {
+        let store = Store::open_in_memory().unwrap();
+        let device = DeviceLabel::new("phone-lifecycle").unwrap();
+        let mut record = VaultDeviceRecord::pair(
+            device.clone(),
+            DeviceLabel::new("laptop-lifecycle").unwrap(),
+            UnixMillis::from_millis(1_700_000_000_000),
+            EpochSeq::INITIAL,
+        )
+        .unwrap();
+        store.upsert_vault_device(&record).unwrap();
+
+        let loaded = store.list_vault_devices().unwrap();
+        assert_eq!(loaded.len(), 1);
+        assert!(loaded[0].is_active());
+        assert_eq!(loaded[0].device().as_str(), "phone-lifecycle");
+        assert_eq!(loaded[0].epoch_seq(), EpochSeq::INITIAL);
+
+        record
+            .revoke(
+                RevocationCertificate::new(
+                    device,
+                    UnixMillis::from_millis(1_700_000_050_000),
+                    RecoverySignature::new(vec![0xAB; 64]).unwrap(),
+                )
+                .unwrap(),
+                UnixMillis::from_millis(1_700_000_060_000),
+            )
+            .unwrap();
+        store.upsert_vault_device(&record).unwrap();
+
+        let reloaded = store.list_vault_devices().unwrap();
+        assert_eq!(reloaded.len(), 1);
+        assert!(!reloaded[0].is_active());
+        match reloaded[0].status() {
+            VaultDeviceStatus::Revoked { certificate, .. } => {
+                assert_eq!(certificate.signature().as_bytes(), &[0xAB; 64]);
+            }
+            other @ VaultDeviceStatus::Active => {
+                panic!("expected revoked after reload, got {other:?}")
+            }
+        }
+    }
+
+    #[test]
+    fn tombstones_persist_and_compact_only_below_the_ack_floor() {
+        let store = Store::open_in_memory().unwrap();
+        store
+            .insert_memory_tombstone(
+                "mem_compact0000001",
+                "device-a",
+                4,
+                1_700_000_000_000,
+                &[1; 32],
+            )
+            .unwrap();
+        store
+            .insert_memory_tombstone(
+                "mem_compact0000002",
+                "device-a",
+                9,
+                1_700_000_000_001,
+                &[2; 32],
+            )
+            .unwrap();
+        store
+            .insert_memory_tombstone(
+                "mem_compact0000003",
+                "device-b",
+                2,
+                1_700_000_000_002,
+                &[3; 32],
+            )
+            .unwrap();
+
+        // Re-forgetting the same memory is an idempotent overwrite that
+        // wins with the newer tuple.
+        store
+            .insert_memory_tombstone(
+                "mem_compact0000001",
+                "device-a",
+                4,
+                1_700_000_000_003,
+                &[9; 32],
+            )
+            .unwrap();
+        let all = store.list_memory_tombstones().unwrap();
+        assert_eq!(all.len(), 3);
+        assert_eq!(all[0].digest, vec![9; 32]);
+
+        // No floors recorded: compaction must not touch anything.
+        let empty = std::collections::BTreeMap::new();
+        assert_eq!(store.compact_tombstones(&empty).unwrap(), 0);
+        assert_eq!(store.list_memory_tombstones().unwrap().len(), 3);
+
+        // A floor below a forget's sequence keeps the tombstone.
+        let floors = std::collections::BTreeMap::from([
+            ("device-a".to_owned(), 4),
+            ("device-b".to_owned(), 1),
+        ]);
+        assert_eq!(store.compact_tombstones(&floors).unwrap(), 0);
+
+        // Covering floors: device-a's seq-4 tombstone is acknowledged by
+        // everyone (floor >= 4 keeps nothing strictly below 4 from a...
+        // seq 4 is kept: strictly below only), seq 9 stays.
+        let floors = std::collections::BTreeMap::from([
+            ("device-a".to_owned(), 5),
+            ("device-b".to_owned(), 3),
+        ]);
+        assert_eq!(store.compact_tombstones(&floors).unwrap(), 2);
+        let remaining = store.list_memory_tombstones().unwrap();
+        assert_eq!(remaining.len(), 1);
+        assert_eq!(remaining[0].memory_id, "mem_compact0000002");
+    }
+
+    #[test]
+    fn ack_cursors_are_forward_only_and_floor_is_the_minimum() {
+        let store = Store::open_in_memory().unwrap();
+        assert_eq!(store.ack_floor("device-a").unwrap(), None);
+
+        store
+            .observe_ack_cursor("device-a", "device-b", 10)
+            .unwrap();
+        store.observe_ack_cursor("device-a", "device-c", 4).unwrap();
+        assert_eq!(store.ack_floor("device-a").unwrap(), Some(4));
+
+        // A rollback claim from device-c does not lower the floor.
+        store.observe_ack_cursor("device-a", "device-c", 2).unwrap();
+        assert_eq!(store.ack_floor("device-a").unwrap(), Some(4));
+
+        // Progress raises the floor only when the slowest catches up.
+        store.observe_ack_cursor("device-c", "device-a", 1).unwrap();
+        assert_eq!(store.ack_floor("device-c").unwrap(), Some(1));
+        store
+            .observe_ack_cursor("device-a", "device-c", 12)
+            .unwrap();
+        assert_eq!(store.ack_floor("device-a").unwrap(), Some(10));
     }
 
     #[test]

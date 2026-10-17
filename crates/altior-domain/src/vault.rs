@@ -81,6 +81,12 @@ impl EpochSeq {
     pub const fn get(self) -> u32 {
         self.0
     }
+
+    /// A sequence from a raw wire value.
+    #[must_use]
+    pub const fn from_raw(value: u32) -> Self {
+        Self(value)
+    }
 }
 
 /// The Ed25519 signature of the vault's offline recovery key over the
@@ -265,6 +271,34 @@ impl VaultDeviceRecord {
         Ok(())
     }
 
+    /// Reconstructs a record from durable storage, status included.
+    /// Same validation as [`VaultDeviceRecord::pair`] plus the time
+    /// ordering of an existing revocation.
+    ///
+    /// # Errors
+    ///
+    /// [`VaultError::SelfPairing`] and
+    /// [`VaultError::RevokedAtBeforeAddedAt`] as in `pair`/`revoke`.
+    pub fn restore(
+        device: DeviceLabel,
+        added_by: DeviceLabel,
+        added_at: UnixMillis,
+        epoch_seq: EpochSeq,
+        status: VaultDeviceStatus,
+    ) -> Result<Self, VaultError> {
+        let record = Self::pair(device, added_by, added_at, epoch_seq)?;
+        match status {
+            VaultDeviceStatus::Active => Ok(record),
+            VaultDeviceStatus::Revoked {
+                revoked_at,
+                certificate,
+            } => {
+                let mut restored = record;
+                restored.revoke(certificate, revoked_at)?;
+                Ok(restored)
+            }
+        }
+    }
     /// The device label.
     #[must_use]
     pub const fn device(&self) -> &DeviceLabel {

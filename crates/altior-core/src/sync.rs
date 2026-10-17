@@ -75,6 +75,14 @@ pub enum EventBody {
         /// The tombstone digest binding this forget event.
         digest: [u8; 32],
     },
+    /// This device's durable acknowledgement frontier: per event origin,
+    /// the highest `origin_seq` it has applied. Acks flow as ordinary
+    /// signed journal events, and the per-origin minimum across a node's
+    /// peers gates tombstone compaction (ADR 0025 threat 10).
+    Ack {
+        /// Per event origin: the highest applied `origin_seq`.
+        frontiers: BTreeMap<String, u64>,
+    },
 }
 
 /// What went wrong in an engine operation.
@@ -127,6 +135,17 @@ struct WireEvent {
     body: EventBody,
 }
 
+/// The tombstone mark recorded when a forget is applied.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TombstoneMark {
+    /// The tombstone digest.
+    pub digest: [u8; 32],
+    /// The forget event's origin (device label).
+    pub origin: String,
+    /// The forget event's per-origin sequence.
+    pub origin_seq: u64,
+}
+
 /// One peer's channels: the two directional sessions and the receiver's
 /// relay cursor into this peer's bucket.
 struct PeerChannels {
@@ -146,12 +165,17 @@ pub struct SyncNode {
     applied: BTreeMap<String, JournalEvent>,
     /// Memory id -> content. Contradicted proposals never land here.
     memories: BTreeMap<String, String>,
-    /// Memory id -> tombstone digest. Permanent.
-    tombstones: BTreeMap<String, [u8; 32]>,
+    /// Memory id -> the mark binding the forget: digest plus the forget
+    /// event's (origin, `origin_seq`) for the compaction gate.
+    tombstones: BTreeMap<String, TombstoneMark>,
     /// Document id -> grow-only entry set.
     documents: BTreeMap<String, BTreeSet<String>>,
     /// Events created here, awaiting fan-out to peers.
     outbox: Vec<JournalEvent>,
+    /// Per peer: that peer's reported applied frontier per event origin
+    /// (from its Ack events). The per-origin minimum across peers is
+    /// this node's tombstone compaction gate.
+    peer_acks: BTreeMap<String, BTreeMap<String, u64>>,
     /// Fan-out bookkeeping: event ids already delivered to a peer.
     sent_to: HashMap<String, BTreeSet<String>>,
     next_seq: u64,
@@ -188,6 +212,7 @@ impl SyncNode {
             memories: BTreeMap::new(),
             tombstones: BTreeMap::new(),
             documents: BTreeMap::new(),
+            peer_acks: BTreeMap::new(),
             outbox: Vec::new(),
             sent_to: HashMap::new(),
             next_seq: 1,
@@ -276,14 +301,21 @@ impl SyncNode {
         Some(id)
     }
 
-    /// Forgets a memory permanently and locally.
-    pub fn forget_memory(&mut self, memory_id: &str, forgotten_at_millis: u64, digest: [u8; 32]) {
+    /// Forgets a memory permanently and locally. Returns the event id.
+    pub fn forget_memory(
+        &mut self,
+        memory_id: &str,
+        forgotten_at_millis: u64,
+        digest: [u8; 32],
+    ) -> String {
         let event = self.create(EventBody::MemoryForgotten {
             memory_id: memory_id.to_owned(),
             forgotten_at_millis,
             digest,
         });
+        let id = event.event_id.clone();
         self.apply(event);
+        id
     }
 
     /// Pulls every pending envelope from all peer buckets, verifies and
@@ -391,6 +423,12 @@ impl SyncNode {
     /// marks a programming error.
     pub fn flush(&mut self, relay: &mut Relay, turn_seed: [u8; 32]) -> Result<usize, SyncError> {
         self.poll(relay)?;
+        // Broadcast the durable acknowledgement frontier with every
+        // batch, so peers can raise their compaction gates.
+        let ack = self.create(EventBody::Ack {
+            frontiers: self.applied_frontier(),
+        });
+        self.apply(ack);
         let peer_labels: Vec<String> = self.peers.keys().cloned().collect();
         let mut pushed = 0;
         for peer in &peer_labels {
@@ -474,9 +512,11 @@ impl SyncNode {
             step(&mut hash, content.as_bytes());
             step(&mut hash, b"\x1d");
         }
-        for (memory_id, digest) in &self.tombstones {
+        for (memory_id, mark) in &self.tombstones {
             step(&mut hash, memory_id.as_bytes());
-            step(&mut hash, digest);
+            step(&mut hash, &mark.digest);
+            step(&mut hash, mark.origin.as_bytes());
+            step(&mut hash, &mark.origin_seq.to_be_bytes());
             step(&mut hash, b"\x1d");
         }
         hash
@@ -490,8 +530,57 @@ impl SyncNode {
 
     /// The tombstone set.
     #[must_use]
-    pub fn tombstones(&self) -> &BTreeMap<String, [u8; 32]> {
+    pub fn tombstones(&self) -> &BTreeMap<String, TombstoneMark> {
         &self.tombstones
+    }
+
+    /// This node's applied frontier: per event origin, the highest
+    /// `origin_seq` present in the applied journal.
+    #[must_use]
+    pub fn applied_frontier(&self) -> BTreeMap<String, u64> {
+        let mut frontier: BTreeMap<String, u64> = BTreeMap::new();
+        for event in self.applied.values() {
+            let entry = frontier.entry(event.origin.clone()).or_insert(0);
+            if event.origin_seq > *entry {
+                *entry = event.origin_seq;
+            }
+        }
+        frontier
+    }
+
+    /// The threat-10 compaction gate: per event origin, the minimum
+    /// frontier acknowledged by every direct peer. A tombstone from
+    /// origin X at seq S may be reclaimed only when this map's entry
+    /// for X is greater than S (every peer has applied the forget).
+    /// Origins missing from the map are pinned (a peer never acked
+    /// them — conservative).
+    #[must_use]
+    pub fn gc_frontiers(&self) -> BTreeMap<String, u64> {
+        // Every known origin, then the minimum across ALL peers — a
+        // peer with no ack ledger (never sent an Ack) contributes zero
+        // for every origin and pins the gate, the same conservative
+        // floor the domain AckFrontier models.
+        let mut origins: BTreeSet<String> = BTreeSet::new();
+        for acks in self.peer_acks.values() {
+            origins.extend(acks.keys().cloned());
+        }
+        let empty = BTreeMap::new();
+        let mut gate: BTreeMap<String, u64> = BTreeMap::new();
+        for origin in origins {
+            let mut floor = u64::MAX;
+            for peer in self.peers.keys() {
+                let acked = self
+                    .peer_acks
+                    .get(peer)
+                    .unwrap_or(&empty)
+                    .get(&origin)
+                    .copied()
+                    .unwrap_or(0);
+                floor = floor.min(acked);
+            }
+            gate.insert(origin, floor);
+        }
+        gate
     }
 
     /// How many resurrection attempts (local or replicated) this node
@@ -546,14 +635,27 @@ impl SyncNode {
                 }
                 self.memories.insert(memory_id.clone(), content.clone());
             }
-            EventBody::MemoryForgotten { memory_id, .. } => {
-                self.tombstones.insert(memory_id.clone(), {
-                    match &event.body {
-                        EventBody::MemoryForgotten { digest, .. } => *digest,
-                        _ => unreachable!("matched arm"),
-                    }
-                });
+            EventBody::MemoryForgotten {
+                memory_id, digest, ..
+            } => {
+                self.tombstones.insert(
+                    memory_id.clone(),
+                    TombstoneMark {
+                        digest: *digest,
+                        origin: event.origin.clone(),
+                        origin_seq: event.origin_seq,
+                    },
+                );
                 self.memories.remove(memory_id);
+            }
+            EventBody::Ack { frontiers } => {
+                let ledger = self.peer_acks.entry(event.origin.clone()).or_default();
+                for (origin, seq) in frontiers {
+                    let entry = ledger.entry(origin.clone()).or_insert(0);
+                    if *seq > *entry {
+                        *entry = *seq;
+                    }
+                }
             }
         }
         self.applied.insert(event.event_id.clone(), event);
