@@ -285,3 +285,72 @@ fn epoch_must_be_initialized() {
         Err(altior_crypto::CryptoError::EpochAllZero)
     ));
 }
+
+#[test]
+fn sessions_resume_from_chain_snapshots_across_a_restart() {
+    let mut out = SessionV2::outbound(
+        &alice_keys(),
+        &bob_identity(),
+        test_epoch(),
+        1,
+        &mut FixedLease::new(),
+    )
+    .unwrap();
+    let mut inb = SessionV2::inbound(
+        &bob_keys(),
+        &alice_keys().public_identity(),
+        test_epoch(),
+        1,
+    )
+    .unwrap();
+
+    out.open_turn(TURN_SEED_1).unwrap();
+    let m1 = out.seal(b"before the restart").unwrap();
+    assert_eq!(inb.open(&m1).unwrap(), b"before the restart");
+
+    // Snapshots taken at turn 1, then the process dies.
+    let out_snapshot = out.outbound_chain().expect("outbound chain");
+    let in_snapshot = inb.inbound_chain().expect("inbound chain");
+    assert_eq!(out_snapshot.turn_no, 1);
+    assert_eq!(in_snapshot.turn_no, 1);
+
+    // Restart: both directions restore from the snapshots (production:
+    // OS secret store). Counters continue from the durable lease.
+    let mut out2 = SessionV2::restore_outbound(
+        &alice_keys(),
+        &bob_identity(),
+        test_epoch(),
+        1,
+        &out_snapshot,
+        &mut FixedLease::new(),
+    )
+    .unwrap();
+    let mut in2 = SessionV2::restore_inbound(
+        &bob_keys(),
+        &alice_keys().public_identity(),
+        test_epoch(),
+        1,
+        &in_snapshot,
+    )
+    .unwrap();
+
+    // A restored sending session whose turn was interrupted refuses to
+    // seal before opening a fresh turn: the old ephemeral is gone, and
+    // guessing would produce envelopes the peer cannot place.
+    assert!(matches!(
+        out2.seal(b"premature"),
+        Err(altior_crypto::CryptoError::TurnNotOpen)
+    ));
+
+    // Fresh turn continues the chain; the restored peer follows.
+    out2.open_turn(TURN_SEED_2).unwrap();
+    assert_eq!(out2.turn_no(), 2);
+    let m2 = out2.seal(b"after the restart").unwrap();
+    assert_eq!(in2.open(&m2).unwrap(), b"after the restart");
+
+    // Envelopes of the already-passed turn stay rejected after restore.
+    assert!(matches!(
+        in2.open(&m1),
+        Err(altior_crypto::CryptoError::TurnMismatch { .. })
+    ));
+}

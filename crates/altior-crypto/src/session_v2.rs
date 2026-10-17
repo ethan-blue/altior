@@ -129,6 +129,18 @@ pub trait CounterLease {
 /// rarely, small enough that tests exercise block rotation cheaply.
 pub const COUNTER_BLOCK_SIZE: u64 = 10_000;
 
+/// The resumable state of one session direction (ADR 0027 §4.3): the
+/// chained intermediate and the turn it belongs to. Key material -
+/// production persists it only through the OS secret store (ADR 0026),
+/// never in SQLite or logs.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ChainSnapshot {
+    /// The chained intermediate at the current turn.
+    pub chain_ikm: [u8; 32],
+    /// The turn the intermediate belongs to.
+    pub turn_no: u64,
+}
+
 /// One direction of a v2 encrypted channel between two paired devices.
 ///
 /// As in v1, the key is directional: the HKDF info binds the wire sender
@@ -155,6 +167,11 @@ pub struct SessionV2 {
     // Both directions:
     chain_ikm: Option<Zeroizing<[u8; 32]>>,
     turn_no: u64,
+    // Set only on a restored sending session whose turn was
+    // interrupted: the ephemeral secret of that turn is gone, so a
+    // fresh open_turn is required before any seal (fail closed, never
+    // wrong-ciphertext).
+    needs_fresh_turn: bool,
     replay: crate::session::ReplayWindow,
 }
 
@@ -179,6 +196,7 @@ impl fmt::Debug for SessionV2 {
             .field("chain_ikm", &"<redacted>")
             .field("replay", &self.replay)
             .field("turn_no", &self.turn_no)
+            .field("needs_fresh_turn", &self.needs_fresh_turn)
             .field("next_counter", &self.next_counter)
             .field("key material", &"<redacted>")
             .finish()
@@ -234,6 +252,7 @@ impl SessionV2 {
             local_static: None,
             chain_ikm: Some(static_shared),
             turn_no: 0,
+            needs_fresh_turn: false,
             replay: crate::session::ReplayWindow::default(),
         })
     }
@@ -268,7 +287,74 @@ impl SessionV2 {
             local_static: Some(local.static_secret().clone()),
             chain_ikm: Some(static_shared),
             turn_no: 0,
+            needs_fresh_turn: false,
             replay: crate::session::ReplayWindow::default(),
+        })
+    }
+
+    /// Reconstructs the sending session from a durable chain snapshot
+    /// (OS secret store, ADR 0027 §4.3). The counter space continues
+    /// from `lease`; [`SessionV2::open_turn`] must run before the first
+    /// seal - the interrupted turn's ephemeral is gone by design, and
+    /// sealing a restored turn fails closed.
+    ///
+    /// # Errors
+    ///
+    /// Same derivation failures as [`SessionV2::outbound`].
+    pub fn restore_outbound(
+        local: &DeviceKeys,
+        peer: &DeviceIdentity,
+        epoch: SessionEpoch,
+        epoch_seq: u32,
+        snapshot: &ChainSnapshot,
+        lease: &mut dyn CounterLease,
+    ) -> Result<Self, CryptoError> {
+        let restored = Self::outbound(local, peer, epoch, epoch_seq, lease)?;
+        Ok(Self {
+            chain_ikm: Some(Zeroizing::new(snapshot.chain_ikm)),
+            turn_no: snapshot.turn_no,
+            needs_fresh_turn: snapshot.turn_no > 0,
+            ..restored
+        })
+    }
+
+    /// Reconstructs the receiving session from a durable chain snapshot.
+    /// Late envelopes of already-passed turns stay rejected; the current
+    /// turn continues to open with the restored intermediate.
+    ///
+    /// # Errors
+    ///
+    /// Same derivation failures as [`SessionV2::inbound`].
+    pub fn restore_inbound(
+        local: &DeviceKeys,
+        peer: &DeviceIdentity,
+        epoch: SessionEpoch,
+        epoch_seq: u32,
+        snapshot: &ChainSnapshot,
+    ) -> Result<Self, CryptoError> {
+        let restored = Self::inbound(local, peer, epoch, epoch_seq)?;
+        Ok(Self {
+            chain_ikm: Some(Zeroizing::new(snapshot.chain_ikm)),
+            turn_no: snapshot.turn_no,
+            ..restored
+        })
+    }
+
+    /// The resumable chain state of this (sending) session.
+    #[must_use]
+    pub fn outbound_chain(&self) -> Option<ChainSnapshot> {
+        self.chain_ikm.as_ref().map(|ikm| ChainSnapshot {
+            chain_ikm: **ikm,
+            turn_no: self.turn_no,
+        })
+    }
+
+    /// The resumable chain state of this (receiving) session.
+    #[must_use]
+    pub fn inbound_chain(&self) -> Option<ChainSnapshot> {
+        self.chain_ikm.as_ref().map(|ikm| ChainSnapshot {
+            chain_ikm: **ikm,
+            turn_no: self.turn_no,
         })
     }
 
@@ -323,6 +409,7 @@ impl SessionV2 {
         self.chain_ikm = Some(chain_turn(&previous, &shared));
         self.turn_eph_pub = eph_pub;
         self.turn_no += 1;
+        self.needs_fresh_turn = false;
         Ok(())
     }
 
@@ -338,6 +425,9 @@ impl SessionV2 {
     /// Panics if the internal chain is `None` — structurally impossible
     /// after the constructor, so the panic marks a programming error.
     pub fn seal(&mut self, plaintext: &[u8]) -> Result<Vec<u8>, CryptoError> {
+        if self.needs_fresh_turn {
+            return Err(CryptoError::TurnNotOpen);
+        }
         let block = self
             .counter_block
             .ok_or(CryptoError::CounterBlockExhausted)?;

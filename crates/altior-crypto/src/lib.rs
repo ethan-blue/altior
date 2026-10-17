@@ -29,4 +29,6 @@ pub use device::{DeviceId, DeviceIdentity, DeviceKeys};
 pub use error::CryptoError;
 pub use pairing::PairingTranscript;
 pub use session::{ReplayWindow, Session};
-pub use session_v2::{COUNTER_BLOCK_SIZE, CounterBlock, CounterLease, SessionEpoch, SessionV2};
+pub use session_v2::{
+    COUNTER_BLOCK_SIZE, ChainSnapshot, CounterBlock, CounterLease, SessionEpoch, SessionV2,
+};
