@@ -632,3 +632,22 @@ Next task and first concrete action:
   锚点必须先做 CRLF 归一化——本轮多次锚点失败均源于此（已计入既有
   Windows 注意事项）。
 - Status: DONE-VERIFIED（crypto 层；端口与引擎接线为切片 28）。
+
+### 切片 28 — SessionChainPort 接缝（部分完成：端口已落，引擎接线待续，2026-10-18）
+- **已落地**（a249287，编译+clippy 干净）: \`ChainDirection\`、
+  \`SessionChainPort\`（save/load per (node, peer, direction, epoch_seq)）、
+  \`MemorySessionChainPort\`（测试）、\`SecretStoreSessionChainPort\`
+  （生产：快照 JSON 入 OS 凭据库 \`secret://sync/chain/{node}/{peer}/{dir}.{epoch_seq}\`，
+  经既有 \`altior_core::secrets\`；密钥材料永不进 SQLite——AGENTS.md 不变量）。
+- **待续（切片 29，精确动作）**:
+  1. mod.rs 接线（工作树外的准备稿：Temp/slice28_engine.mjs，其中 poll-save
+     块作废需删，改为 poll 末尾统一持久化 inbound 链）:
+     a. SyncNode 增 \`chain: Option<Box<dyn SessionChainPort>>\` 字段，
+        \`durable()\` 增第四参数（p39 调用点传 None）；
+     b. pair() 每方向 resume-or-fresh：活会话（epoch_seq 相同）链 →
+        端口 load_chain → 全无则 fresh；
+     c. open_turn 后保存 outbound 快照；poll 末尾保存全部 inbound 快照；
+     d. p41：双方 durable+chain port，交换→杀 b→重建（不重配对）→
+        继续收敛 digest 一致、无 TurnMismatch。
+  2. 引擎态→v9 表落库深化与 blob GC 产品化顺延。
+- Status: IN-PROGRESS（接缝就绪；接线未动）。
