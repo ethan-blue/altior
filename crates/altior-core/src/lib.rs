@@ -27,7 +27,10 @@ pub mod sync;
 pub mod sync_gate;
 pub use sync::{
     EventBody, JournalEvent, SyncError, SyncNode,
-    persist::{MemorySyncStatePort, StoreSyncStatePort, SyncStatePort},
+    persist::{
+        ChainDirection, MemorySessionChainPort, MemorySyncStatePort, SecretStoreSessionChainPort,
+        SessionChainPort, StoreSyncStatePort, SyncStatePort,
+    },
 };
 
 pub use application::{

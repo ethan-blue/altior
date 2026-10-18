@@ -259,3 +259,187 @@ impl SyncStatePort for StoreSyncStatePort {
         Ok(out)
     }
 }
+
+/// Which direction a chain snapshot belongs to.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ChainDirection {
+    /// This node sends to the peer.
+    Outbound,
+    /// This node receives from the peer.
+    Inbound,
+}
+
+impl ChainDirection {
+    /// Stable key segment.
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Outbound => "out",
+            Self::Inbound => "in",
+        }
+    }
+}
+
+/// The session-chain persistence seam (ADR 0027 §4.3): turn-chain key
+/// material lives ONLY behind this port, whose production implementation
+/// is the OS secret store (ADR 0026) - never SQLite, never logs.
+pub trait SessionChainPort {
+    /// Persists the chain snapshot for one (peer, direction, pairing).
+    ///
+    /// # Errors
+    ///
+    /// [`SyncError::State`] on persistence failure.
+    fn save_chain(
+        &mut self,
+        node: &str,
+        peer: &str,
+        direction: ChainDirection,
+        epoch_seq: u32,
+        snapshot: &altior_crypto::ChainSnapshot,
+    ) -> Result<(), SyncError>;
+
+    /// Loads the chain snapshot for one (peer, direction, pairing), if
+    /// persisted.
+    ///
+    /// # Errors
+    ///
+    /// [`SyncError::State`] on load failure.
+    fn load_chain(
+        &mut self,
+        node: &str,
+        peer: &str,
+        direction: ChainDirection,
+        epoch_seq: u32,
+    ) -> Result<Option<altior_crypto::ChainSnapshot>, SyncError>;
+}
+
+/// In-process chain port (tests).
+#[derive(Debug, Default)]
+pub struct MemorySessionChainPort {
+    chains: BTreeMap<String, altior_crypto::ChainSnapshot>,
+}
+
+impl MemorySessionChainPort {
+    /// An empty port.
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+}
+
+impl SessionChainPort for MemorySessionChainPort {
+    fn save_chain(
+        &mut self,
+        node: &str,
+        peer: &str,
+        direction: ChainDirection,
+        epoch_seq: u32,
+        snapshot: &altior_crypto::ChainSnapshot,
+    ) -> Result<(), SyncError> {
+        self.chains.insert(
+            format!("{node}|{peer}|{}|{epoch_seq}", direction.as_str()),
+            snapshot.clone(),
+        );
+        Ok(())
+    }
+
+    fn load_chain(
+        &mut self,
+        node: &str,
+        peer: &str,
+        direction: ChainDirection,
+        epoch_seq: u32,
+    ) -> Result<Option<altior_crypto::ChainSnapshot>, SyncError> {
+        Ok(self
+            .chains
+            .get(&format!("{node}|{peer}|{}|{epoch_seq}", direction.as_str()))
+            .cloned())
+    }
+}
+
+/// The production chain port: snapshots serialized as JSON into the OS
+/// secret store under `secret://sync/chain/...` (Windows Credential
+/// Manager via `altior_core::secrets`).
+pub struct SecretStoreSessionChainPort {
+    store: crate::secrets::OsSecretStore,
+    node: String,
+}
+
+impl std::fmt::Debug for SecretStoreSessionChainPort {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SecretStoreSessionChainPort")
+            .field("node", &self.node)
+            .finish_non_exhaustive()
+    }
+}
+
+impl SecretStoreSessionChainPort {
+    /// A port for one node's chain snapshots.
+    #[must_use]
+    pub fn new(node: &str) -> Self {
+        Self {
+            store: crate::secrets::OsSecretStore::new(),
+            node: node.to_owned(),
+        }
+    }
+
+    fn reference(&self, peer: &str, direction: ChainDirection, epoch_seq: u32) -> String {
+        format!("secret://sync/chain/{}/{}/{}.{epoch_seq}", self.node, peer, direction.as_str())
+    }
+}
+
+impl SessionChainPort for SecretStoreSessionChainPort {
+    fn save_chain(
+        &mut self,
+        node: &str,
+        peer: &str,
+        direction: ChainDirection,
+        epoch_seq: u32,
+        snapshot: &altior_crypto::ChainSnapshot,
+    ) -> Result<(), SyncError> {
+        let _ = node;
+        let value = serde_json::to_string(&serde_json::json!({
+            "ikm": snapshot.chain_ikm,
+            "turn_no": snapshot.turn_no,
+        }))
+        .map_err(|error| SyncError::Invariant(error.to_string()))?;
+        self.store
+            .set_secret(
+                &self.reference(peer, direction, epoch_seq),
+                &value,
+            )
+            .map_err(|error| SyncError::State(std::io::Error::other(error.to_string())))
+    }
+
+    fn load_chain(
+        &mut self,
+        node: &str,
+        peer: &str,
+        direction: ChainDirection,
+        epoch_seq: u32,
+    ) -> Result<Option<altior_crypto::ChainSnapshot>, SyncError> {
+        let _ = node;
+        let reference = self.reference(peer, direction, epoch_seq);
+        if !self.store.has_secret(&reference) {
+            return Ok(None);
+        }
+        let value = self
+            .store
+            .get_secret(&reference)
+            .map_err(|error| SyncError::State(std::io::Error::other(error.to_string())))?;
+        let parsed: serde_json::Value = serde_json::from_str(&value)
+            .map_err(|error| SyncError::Invariant(error.to_string()))?;
+        let ikm: Vec<u8> = serde_json::from_value(
+            parsed.get("ikm").cloned().unwrap_or_default(),
+        )
+        .map_err(|error| SyncError::Invariant(error.to_string()))?;
+        let chain_ikm: [u8; 32] = ikm
+            .try_into()
+            .map_err(|_| SyncError::Invariant("stored chain ikm width".to_owned()))?;
+        let turn_no = parsed
+            .get("turn_no")
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or(0);
+        Ok(Some(altior_crypto::ChainSnapshot { chain_ikm, turn_no }))
+    }
+}
